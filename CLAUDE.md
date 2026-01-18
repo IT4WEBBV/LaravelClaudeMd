@@ -6,6 +6,17 @@ All projects run in Docker containers using Docker Compose. Never run applicatio
 it4web/* package tests can be run with their own make file (if not we should make it so).
 it4web/* packages can usually be worked on locally by starting a project with the ./restart.sh -p flag so they are locally mounted
 
+### Starting Projects
+
+Always start projects using the `restart.sh` script located in the `/scripts` folder. Do not manually run docker-compose commands.
+
+```bash
+# Start a project
+./scripts/restart.sh
+
+# Start with locally mounted it4web packages
+./scripts/restart.sh -p
+```
 
 ### Project Structure
 
@@ -278,6 +289,19 @@ These packages are commonly used across projects:
 ---
 
 ## Workflow
+
+### Git Workflow
+
+We use feature branches for development. Create a new branch for each feature or fix, then create a pull request when complete.
+
+```bash
+# Create a feature branch
+git checkout -b feature/my-new-feature
+
+# After completing work, push and create a PR
+git push -u origin feature/my-new-feature
+gh pr create
+```
 
 ### Research & Plan Phase
 
