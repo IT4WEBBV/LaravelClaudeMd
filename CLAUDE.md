@@ -1,5 +1,7 @@
 # Claude Code Instructions
 
+> **Note**: This file is located at `GitProjects/LaravelClaudeMd/LaravelClaudeMd/CLAUDE.md` and symlinked to `GitProjects/CLAUDE.md`. When reading this file, use the full path to the actual file, not the symlink.
+
 ## Docker Environment
 
 All projects run in Docker containers using Docker Compose. Never run application commands directly on the host machine.
@@ -196,6 +198,24 @@ BasicForm::make()
         )
     );
 ```
+
+**Important TallFormbuilder conventions:**
+
+- **SelectField options format**: Must be array of arrays with `id` and `name` keys:
+  ```php
+  // CORRECT
+  ->options(Customer::orderBy('name')->get()->map(fn($c) => ['id' => $c->id, 'name' => $c->name])->toArray())
+
+  // WRONG - will cause "Cannot access offset of type string on string" error
+  ->options(Customer::pluck('name', 'id')->toArray())
+  ```
+
+- **SwitchField** (for boolean toggles): Always add `->rules(['boolean'])` to avoid validation errors
+  ```php
+  SwitchField::for('enabled')->label('Enabled')->rules(['boolean'])
+  ```
+
+- **Use description() not hint()**: TextField has `->description()` method, not `->hint()`
 
 #### Blade
 - Use x-components over @includes
