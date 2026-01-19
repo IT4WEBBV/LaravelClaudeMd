@@ -279,6 +279,17 @@ tests/
 - Factories extensively for test data
 - Livewire testing with `Livewire::test()`
 - Database assertions: `assertDatabaseHas()`, `assertDatabaseCount()`
+- **Test with related data**: When testing components with dropdowns/selects that depend on other models, always create that related data first. Empty arrays won't catch formatting bugs:
+  ```php
+  // This catches SelectField options format bugs
+  public function the_component_can_render_with_customers()
+  {
+      Customer::factory()->count(3)->create();
+
+      Livewire::test(UserForm::class)
+          ->assertStatus(200);
+  }
+  ```
 
 ```php
 // Pest example
