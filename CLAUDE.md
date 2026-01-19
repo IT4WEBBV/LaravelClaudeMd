@@ -217,6 +217,13 @@ BasicForm::make()
 
 - **Use description() not hint()**: TextField has `->description()` method, not `->hint()`
 
+- **Conditional field visibility**: Use `->hidden(bool|callable)` to conditionally hide fields
+  ```php
+  SelectField::for('user.customer_id')
+      ->label('Customer')
+      ->hidden($this->user->role !== UserRoleEnum::CUSTOMER)
+  ```
+
 #### Blade
 - Use x-components over @includes
 - Named slots for flexibility
