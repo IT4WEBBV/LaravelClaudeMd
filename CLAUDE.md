@@ -228,6 +228,7 @@ BasicForm::make()
 - Use x-components over @includes
 - Named slots for flexibility
 - Alpinejs components where applicable
+- Don't use @php in blade. If you think it needed/better ask for permission.
 
 #### Tailwind CSS
 - Utility-first, no custom CSS unless absolutely necessary
