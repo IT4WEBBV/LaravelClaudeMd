@@ -244,6 +244,15 @@ BasicForm::make()
 - Minimal comments - code should be self-documenting
 - OOP or functional over procedural
 - Small classes, small methods (Sandi Metz rules as guidance)
+- Prefer Laravel collections over plain PHP `foreach` loops
+- Always use `->get()` before `->each()` on query builders to make it explicit when we transition from query builder to collection:
+  ```php
+  // CORRECT - clear boundary between query and collection
+  User::query()->where('active', true)->get()->each(fn ($user) => ...);
+
+  // WRONG - ambiguous, ->each() on query builder behaves differently
+  User::query()->where('active', true)->each(fn ($user) => ...);
+  ```
 
 #### Routes
 - Named routes always, never hardcoded URLs
