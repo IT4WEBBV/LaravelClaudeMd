@@ -42,7 +42,8 @@ project/
 - We like elegant code that looks like it was written by e.g. Taylor Otwell or Caleb Porzio.
 - Keep it DRY (don't repeat yourself) but do not over optimize, I generally repeat myself once and then when I find myself doing it again I see how I can abstract some concept.
 - We like the general ideas Sandi Metz has about programming.
-- When we implement a feature for a project that seems useful for more projects then lets ask ourselves whether is belongs in one of our it4web packages or even if it is something we should create a new package for. 
+- Avoid null-safety checks (`?->`, `?:`, `if (!$x)` guards) as a solution unless there is a good reason for it. Prefer fixing the root cause — e.g. if `auth()->user()` is null in a test, authenticate a user in the test rather than adding null-safe operators in production code.
+- When we implement a feature for a project that seems useful for more projects then lets ask ourselves whether is belongs in one of our it4web packages or even if it is something we should create a new package for.
 
 ### Container Naming Convention
 
@@ -339,6 +340,12 @@ These packages are commonly used across projects:
 ## Workflow
 
 ### Git Workflow
+
+- **No co-author**: Do not add `Co-Authored-By` lines to git commit messages.
+- **No AI attribution**: Do not include "Generated with Claude Code" or similar AI tool references in PRs, commits, or code.
+- **Never commit directly to main**. Always create a feature branch and open a pull request when the work is done.
+- **Update the changelog**: When creating a PR, update the project's changelog file with a summary of the changes.
+- **Check for vendor hacks**: Before creating a PR, check for modified files in `vendor/it4web/` by running `find vendor/it4web/ -newer vendor/autoload.php -name '*.php'` inside the web container. Since `vendor/` is gitignored, git won't track these changes. Any PHP files newer than `vendor/autoload.php` were likely manually edited. If modifications are found, flag them and remind to port those changes back to the actual package repositories before they get lost on the next `composer install`.
 
 We use feature branches for development. Create a new branch for each feature or fix, then create a pull request when complete.
 
