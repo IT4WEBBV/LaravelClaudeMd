@@ -128,6 +128,26 @@ class CreateOrderAction
 }
 ```
 
+#### Data Migrations (Deploy Operations)
+We use `dragon-code/laravel-deploy-operations` (or its predecessor `dragon-code/laravel-migration-actions` in older projects) for data migrations. **Never put data manipulation (inserts, updates, backfills) inside schema migrations.** Schema migrations should only contain schema changes (add/drop columns, create/drop tables, add indexes, etc.).
+
+- **These only run in production** via `php artisan operations` (or `php artisan actions` in older projects). They do NOT run in dev/test — seeders and factories handle data setup there.
+- **Schema migrations and data migrations must be independent.** If an operation needs to read an old column to backfill a new one, do NOT drop the old column in the same migration. Drop it in a follow-up migration after confirming the operation ran in production.
+- Generate with `php artisan make:operation BackfillSomething` (or `make:action` in older projects)
+- Check `composer.json` to determine which version of the package the project uses
+
+```php
+// actions/2025_01_01_000000_backfill_status_enum.php
+return new class extends Action {
+    public function __invoke(): void
+    {
+        DB::table('orders')->where('is_active', true)->update([
+            'status_enum' => OrderStatusEnum::ACTIVE->value,
+        ]);
+    }
+};
+```
+
 #### Enums
 Always use native PHP enums over string constants:
 - Use backed enums (`: int` or `: string`)
