@@ -365,7 +365,7 @@ These packages are commonly used across projects:
 - **No AI attribution**: Do not include "Generated with Claude Code" or similar AI tool references in PRs, commits, or code.
 - **Never commit directly to main**. Always create a feature branch and open a pull request when the work is done.
 - **Update the changelog**: When creating a PR, update the project's changelog file with a summary of the changes.
-- **Check for vendor hacks**: Before creating a PR, check for modified files in `vendor/it4web/` by running `find vendor/it4web/ -newer vendor/autoload.php -name '*.php'` inside the web container. Since `vendor/` is gitignored, git won't track these changes. Any PHP files newer than `vendor/autoload.php` were likely manually edited. If modifications are found, flag them and remind to port those changes back to the actual package repositories before they get lost on the next `composer install`.
+- **Check for vendor hacks**: Before creating a PR, check for modified files in `vendor/it4web/` by running `find vendor/it4web/ -newer vendor/composer/installed.json -name '*.php'` inside the web container. Since `vendor/` is gitignored, git won't track these changes. `installed.json` is written at the end of `composer install/update`, so any PHP file newer than it was manually edited after install. If modifications are found, flag them and remind to port those changes back to the actual package repositories before they get lost on the next `composer install`.
 
 We use feature branches for development. Create a new branch for each feature or fix, then create a pull request when complete.
 
