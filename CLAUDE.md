@@ -364,6 +364,7 @@ These packages are commonly used across projects:
 - **No co-author**: Do not add `Co-Authored-By` lines to git commit messages.
 - **No AI attribution**: Do not include "Generated with Claude Code" or similar AI tool references in PRs, commits, or code.
 - **Never commit directly to main**. Always create a feature branch and open a pull request when the work is done.
+- **Sync with remote when working on existing branches**: When checking out or reviewing an existing branch, always run `git fetch` and check if the local branch is up to date with the remote (`git status` or `git log --oneline HEAD..origin/<branch>`). Pull the latest changes before starting any work to avoid conflicts and working on stale code.
 - **Update the changelog**: When creating a PR, update the project's changelog file with a summary of the changes.
 - **Check for vendor hacks**: Before creating a PR, check for modified files in `vendor/it4web/` by running `find vendor/it4web/ -newer vendor/composer/installed.json -name '*.php'` inside the web container. Since `vendor/` is gitignored, git won't track these changes. `installed.json` is written at the end of `composer install/update`, so any PHP file newer than it was manually edited after install. If modifications are found, flag them and remind to port those changes back to the actual package repositories before they get lost on the next `composer install`.
 
