@@ -37,6 +37,7 @@ project/
 
 - Think first act later. So create a todolist or other plan that can be approved before we start building anything.
 - Feel free to ask questions to clear things up.
+- When I ask a question, I'm genuinely curious and want your feedback or explanation. A question does not mean "go change things" — do not start modifying code just because I asked about it. It also does not mean I disagree with the current approach.
 - Testing is important! If possible use TDD. Use the tests to check your own work.
   - Also check in the browser if things work. If available you can use the mcp playwright to do so. Feel free to create an admin account to login if necessary.
 - We like elegant code that looks like it was written by e.g. Taylor Otwell or Caleb Porzio.
@@ -44,6 +45,7 @@ project/
 - We like the general ideas Sandi Metz has about programming.
 - Avoid null-safety checks (`?->`, `?:`, `if (!$x)` guards) as a solution unless there is a good reason for it. Prefer fixing the root cause — e.g. if `auth()->user()` is null in a test, authenticate a user in the test rather than adding null-safe operators in production code.
 - When we implement a feature for a project that seems useful for more projects then lets ask ourselves whether is belongs in one of our it4web packages or even if it is something we should create a new package for.
+- Prefer polymorphism over conditionals. Use enums with behavior methods, strategy patterns, or other polymorphic approaches instead of scattered if/else or boolean flags.
 
 ### Container Naming Convention
 
@@ -354,6 +356,16 @@ These packages are commonly used across projects:
 - `laravel/jetstream` - Authentication scaffolding
 - `spatie/laravel-ray` - Debugging
 - `maatwebsite/excel` - Excel import/export
+
+### Playwright MCP Browser Fix
+
+If the Playwright MCP fails to launch Chrome with "Opening in existing browser session" errors, delete the stale user-data-dir:
+
+```bash
+rm -rf ~/Library/Caches/ms-playwright/mcp-chrome-*
+```
+
+This clears the Playwright Chrome profile that conflicts with an already-running Chrome instance.
 
 ---
 
