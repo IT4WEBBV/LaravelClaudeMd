@@ -1,6 +1,9 @@
 # Claude Code Instructions
 
-> **Note**: This file is located at `GitProjects/LaravelClaudeMd/LaravelClaudeMd/CLAUDE.md` and symlinked to `GitProjects/CLAUDE.md`. When reading this file, use the full path to the actual file, not the symlink.
+> **Note**: This file is located at `GitProjects/LaravelClaudeMd/LaravelClaudeMd/CLAUDE.md` and symlinked to `~/.claude/CLAUDE.md`. The `~/.claude/skills/` directory is also symlinked to this repo's `skills/` folder. When starting a conversation, pull the latest changes first:
+> ```bash
+> cd /Users/jroelofs/GitProjects/LaravelClaudeMd/LaravelClaudeMd && git pull
+> ```
 
 ## Docker Environment
 
