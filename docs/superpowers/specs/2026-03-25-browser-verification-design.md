@@ -8,6 +8,14 @@ A discipline-enforcing skill that prevents Claude from claiming visual work is c
 
 Claude routinely claims browser verification passed without providing evidence. The user cannot see what Claude saw, and has no way to quickly confirm the claim. This erodes trust and forces manual re-verification.
 
+## Dependencies
+
+This skill relies on two existing systems:
+
+- **`superpowers:verification-before-completion`** — An existing skill from the superpowers plugin (`~/.claude/plugins/cache/claude-plugins-official/superpowers/*/skills/verification-before-completion/`). It enforces evidence-before-claims for all work completion. This new skill extends that principle specifically for visual work by requiring screenshot proof.
+- **Visual companion server** — An existing browser-based presentation system from the superpowers plugin (`~/.claude/plugins/cache/claude-plugins-official/superpowers/*/skills/brainstorming/scripts/`). It serves HTML files to a local browser via a file-watching HTTP server. Started with `start-server.sh --project-dir <path>`, it watches a directory for HTML files and serves the newest one. This skill uses it to display annotated screenshots and legends.
+- **Playwright MCP** — Browser automation via `@playwright/mcp`, already configured in `~/.claude/plugins/`. Provides `browser_navigate`, `browser_evaluate`, `browser_take_screenshot`, and other browser interaction tools.
+
 ## Approach
 
 **Standalone custom skill + CLAUDE.md instruction.** The skill lives in `~/.claude/skills/browser-verification/SKILL.md` and is triggered by a single line in CLAUDE.md's validation section. This avoids forking the superpowers `verification-before-completion` skill while integrating naturally into the verification flow.
@@ -56,6 +64,8 @@ The annotation script should:
 - Not break the page layout (use `outline` instead of `border` to avoid reflow)
 - Use high z-index overlays so they appear on top of everything
 - Be removable (for the "show me" flow)
+
+**How Claude determines selectors:** Claude knows what code it just wrote/modified — it uses that knowledge to identify the relevant DOM elements. It may also use `browser_snapshot` to inspect the accessibility tree and find suitable selectors. The selectors are determined per-verification, not pre-configured.
 
 ### 5. Take Screenshot
 
