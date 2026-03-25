@@ -442,5 +442,6 @@ After a plan is approved:
 Before considering work complete:
 - [ ] Tests pass
 - [ ] Works in browser
+  - When verifying visual work (Livewire, Blade, CSS, frontend JS), invoke the `browser-verification` skill for annotated screenshot proof before claiming it works.
 - [ ] Code follows project conventions
 - [ ] Review the completed work.
