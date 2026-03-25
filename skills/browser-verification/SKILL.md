@@ -55,23 +55,37 @@ Resize the browser to fullscreen first: `browser_resize` to 1920x1080. Then use 
 Use `browser_evaluate` to inject overlays before screenshotting:
 
 ```javascript
-// Example: annotate([{selector: '.status-badge', label: 'Status badge — shows "Processing"'}, ...])
+// Example: annotate([{selector: '.status-badge', num: 1}, {selector: '.grid', num: 2}])
 (annotations) => {
-  annotations.forEach(({selector, label}) => {
+  annotations.forEach(({selector, num}) => {
     const el = document.querySelector(selector);
     if (!el) return;
     el.style.outline = '3px solid red';
     el.style.outlineOffset = '2px';
     el.style.position = el.style.position || 'relative';
-    const tag = document.createElement('div');
-    tag.textContent = label;
-    tag.style.cssText = 'position:absolute;top:-28px;left:0;background:red;color:white;font-size:12px;font-weight:bold;padding:2px 8px;border-radius:4px;white-space:nowrap;z-index:99999;pointer-events:none;';
-    el.appendChild(tag);
+    const badge = document.createElement('div');
+    badge.textContent = num;
+    badge.style.cssText = 'position:absolute;top:-12px;right:-12px;background:red;color:white;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:bold;z-index:99999;pointer-events:none;';
+    el.appendChild(badge);
   });
 }
 ```
 
-Labels are injected directly into the screenshot as tags above each annotated element — no separate legend below. Each label should be a short description (e.g., "Status badge — Processing", "Product summary grid").
+Numbered badges (①②③) are injected on annotated elements. Keep them clean — no text labels on the screenshot.
+
+In the visual companion, include a **hover legend** below the screenshot. Each numbered item shows a short title, and on hover expands to show what changed (before → after). Example HTML for the legend:
+
+```html
+<div style="cursor:pointer;padding:8px 12px;border-radius:8px;transition:all 0.2s"
+     onmouseover="this.querySelector('.detail').style.display='block'"
+     onmouseout="this.querySelector('.detail').style.display='none'">
+  <strong style="color:red">①</strong> Product summary grid
+  <div class="detail" style="display:none;margin-top:4px;color:#666;font-size:13px">
+    Before: No product details shown in order rows<br>
+    After: Grid showing Technology, Bandwidth, NRC, MRC per product
+  </div>
+</div>
+```
 
 Determine selectors from the code you wrote + `browser_snapshot` if needed.
 
@@ -81,7 +95,7 @@ Take screenshot with `browser_take_screenshot`. Present in the visual companion:
 
 - Start the visual companion if not running: `scripts/start-server.sh --project-dir <project-path>`
 - If already running (check for `.server-info` file in screen_dir), reuse it
-- Write an HTML page with the annotated screenshot (base64 data URI) + verdict. Labels are already in the screenshot — no separate legend needed.
+- Write an HTML page with the annotated screenshot (base64 data URI) + legend + verdict. The legend describes what changed (before → after) for each labeled element.
 - Terminal: one-liner with the URL. Nothing else.
 
 ### 5. Multiple states
