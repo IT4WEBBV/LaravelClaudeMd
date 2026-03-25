@@ -48,7 +48,7 @@ List what changed visually and where. Use the code you just wrote to determine t
 
 ### 2. Navigate and interact
 
-Use `browser_navigate` to open the page. Log in if needed (check seeders or create an account). Interact to reach the state that exercises the change.
+Resize the browser to fullscreen first: `browser_resize` to 1920x1080. Then use `browser_navigate` to open the page. Log in if needed (check seeders or create an account). Interact to reach the state that exercises the change.
 
 ### 3. Annotate the DOM
 
