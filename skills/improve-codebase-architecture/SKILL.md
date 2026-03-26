@@ -131,6 +131,7 @@ Acknowledge good patterns before listing problems. Be specific.
 - **Where**: File paths and line ranges
 - **What's happening**: Concrete description referencing specific code
 - **Why it matters**: What breaks, degrades, or becomes painful if left alone
+- **Test coverage**: Sufficient / Insufficient — list existing tests that cover this area, and what's missing. If insufficient, tests must be written before refactoring.
 - **Suggested direction**: One-liner on what a fix might look like (not a full design)
 
 ### 2. ...
