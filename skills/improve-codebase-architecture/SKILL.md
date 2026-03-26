@@ -76,6 +76,8 @@ These are the things to look for. Every finding must reference specific code —
 - Scattered business logic — related rules spread across multiple classes instead of cohesive in one place
 - Procedural code — sequential scripts that should be composed from objects/methods
 - Null-safety band-aids (`?->`, `?:`, `if (!$x)` guards) masking root causes instead of fixing them
+- Feature envy — methods that use another class's data more than their own (e.g. a Service reaching deep into a Model's relationships to compute something the Model should own)
+- Long parameter lists / data clumps — methods with 5+ parameters, or the same group of fields traveling together across multiple methods, indicating a missing Value Object or Parameter Object
 
 **Layer discipline (Laravel-specific):**
 - **Livewire components** should be UI orchestration, not business logic. Check for query building, complex calculations, or domain rules inside components.
