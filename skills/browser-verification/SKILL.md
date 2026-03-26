@@ -1,6 +1,6 @@
 ---
 name: browser-verification
-description: Use when about to claim visual work is complete or works in the browser, before any completion claim involving Livewire, Blade, CSS, Alpine.js, or frontend changes — requires annotated screenshot proof via Playwright MCP presented in visual companion
+description: Use when about to claim visual work is complete or works in the browser, before any completion claim involving Livewire, Blade, CSS, Alpine.js, or frontend changes
 ---
 
 # Browser Verification
@@ -13,6 +13,8 @@ If the work changed anything the user would see in a browser, you must prove it 
 
 **Violating the letter of this rule is violating the spirit of this rule.**
 
+**REQUIRED SUB-SKILL:** This skill uses the visual companion from superpowers:brainstorming (see `visual-companion.md`) to serve proof pages. You MUST start the visual companion server and write proof HTML to `screen_dir` — pasting screenshots inline in the terminal is NOT a substitute.
+
 ## The Proof Flow
 
 ```dot
@@ -21,8 +23,8 @@ digraph proof_flow {
     "Identify verification targets" [shape=box];
     "Navigate to page (Playwright)" [shape=box];
     "Interact to reach target state" [shape=box];
-    "Annotate DOM (inject CSS overlays)" [shape=box];
-    "Take screenshot" [shape=box];
+    "Collect element positions (browser_evaluate)" [shape=box];
+    "Take clean screenshot" [shape=box];
     "Present proof in visual companion" [shape=box];
     "One-liner in terminal with URL" [shape=box];
     "User says 'show me'?" [shape=diamond];
@@ -32,9 +34,9 @@ digraph proof_flow {
     "Visual work done?" -> "Identify verification targets" [label="yes"];
     "Identify verification targets" -> "Navigate to page (Playwright)";
     "Navigate to page (Playwright)" -> "Interact to reach target state";
-    "Interact to reach target state" -> "Annotate DOM (inject CSS overlays)";
-    "Annotate DOM (inject CSS overlays)" -> "Take screenshot";
-    "Take screenshot" -> "Present proof in visual companion";
+    "Interact to reach target state" -> "Collect element positions (browser_evaluate)";
+    "Collect element positions (browser_evaluate)" -> "Take clean screenshot";
+    "Take clean screenshot" -> "Present proof in visual companion";
     "Present proof in visual companion" -> "One-liner in terminal with URL";
     "One-liner in terminal with URL" -> "User says 'show me'?";
     "User says 'show me'?" -> "Navigate to same state WITHOUT annotations" [label="yes"];
