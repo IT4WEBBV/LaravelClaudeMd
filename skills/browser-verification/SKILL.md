@@ -78,7 +78,9 @@ Take a full-page screenshot with `browser_take_screenshot` — NO annotations on
 
 ### 5. Present in visual companion with interactive overlays
 
-Start the visual companion if not running. Build an HTML proof page that layers **hoverable badges** on top of the screenshot image using the collected positions:
+Start the visual companion if not running. Build an HTML proof page that layers **hoverable badges** on top of the screenshot image using the collected positions.
+
+**IMPORTANT: Images MUST be base64 data URIs.** The visual companion server only serves the HTML file — it does not serve sibling image files from the screen directory. Use `<img src="data:image/png;base64,...">`, never relative paths like `<img src="screenshot.png">`. Encode screenshots with Python (`base64.b64encode`) or shell (`base64 -i file.png`) and embed them inline in the HTML.
 
 - The screenshot is the background (`<img>` inside a `position:relative` container)
 - Numbered red circle badges are `position:absolute` elements placed using the bounding rect data
