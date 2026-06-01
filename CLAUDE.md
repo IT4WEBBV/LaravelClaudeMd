@@ -302,6 +302,10 @@ $data = request()->validate([
 
 ### Testing
 
+#### Running Tests
+- Always run tests with `php artisan test` (inside the web container), e.g. `docker exec {project}_web php artisan test`.
+- Always run tests in the foreground — never run the test suite as a background process. Wait for the run to finish and read its full output before continuing.
+
 #### Framework
 - Pest PHP preferred for new projects (fluent syntax)
 - PHPUnit acceptable for existing projects
