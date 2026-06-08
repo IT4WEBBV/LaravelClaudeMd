@@ -1,8 +1,9 @@
 # Claude Code Instructions
 
-> **Note**: This file is located at `GitProjects/LaravelClaudeMd/LaravelClaudeMd/CLAUDE.md` and symlinked to `~/.claude/CLAUDE.md`. The `~/.claude/skills/` directory is also symlinked to this repo's `skills/` folder. When starting a conversation, pull the latest changes first:
+> **Note**: This file lives in the `LaravelClaudeMd` repo and is symlinked to `~/.claude/CLAUDE.md`. Personal skills come from **two** repos — `LaravelClaudeMd/skills/` and `DevOps-Claude-Config/skills/` — each skill symlinked individually into a real `~/.claude/skills/` directory (so both repos' skills coexist; see [Skills (multi-machine setup)](#skills-multi-machine-setup) at the bottom). When starting a conversation, pull **both** config repos first so skills and instructions stay current:
 > ```bash
-> cd /Users/jroelofs/GitProjects/LaravelClaudeMd/LaravelClaudeMd && git pull
+> git -C ~/GitProjects/LaravelClaudeMd pull --ff-only -q
+> git -C ~/GitProjects/DevOps-Claude-Config pull --ff-only -q
 > ```
 
 ## Docker Environment
@@ -449,3 +450,45 @@ Before considering work complete:
   - When verifying visual work (Livewire, Blade, CSS, frontend JS), invoke the `browser-verification` skill for annotated screenshot proof before claiming it works.
 - [ ] Code follows project conventions
 - [ ] Review the completed work.
+
+---
+
+## Skills (multi-machine setup)
+
+Personal skills are pooled from **two** git repos, so `~/.claude/skills/` is a **real directory** (not a symlink to either repo) holding one symlink per skill:
+
+| Repo | Clone location | Provides |
+|------|----------------|----------|
+| `IT4WEBBV/LaravelClaudeMd` | `~/GitProjects/LaravelClaudeMd` | `browser-verification`, `improve-codebase-architecture` |
+| `IT4WEBBV/DevOps-Claude-Config` | `~/GitProjects/DevOps-Claude-Config` | `handoff`, `memory-sync`, `release-changelog`, `retenium-prod` |
+
+A single symlink at `~/.claude/skills` can only ever point at one repo — that's why it's a real folder with per-skill symlinks instead, letting both repos' skills coexist.
+
+### Keeping skills up to date
+
+Pull **both** repos at the start of each session (see the note at the top of this file). The `/memory-sync` skill does the same on demand. Because each skill is symlinked back to its repo, a `git pull` updates the skills in place.
+
+### Bootstrapping a new machine
+
+```bash
+# 1. Clone both config repos to the canonical locations
+git clone git@github.com:IT4WEBBV/LaravelClaudeMd.git ~/GitProjects/LaravelClaudeMd
+git clone git@github.com:IT4WEBBV/DevOps-Claude-Config.git ~/GitProjects/DevOps-Claude-Config
+
+# 2. Symlink this file as the global CLAUDE.md
+ln -sfn ~/GitProjects/LaravelClaudeMd/CLAUDE.md ~/.claude/CLAUDE.md
+
+# 3. Make ~/.claude/skills a REAL directory and link every skill from BOTH repos
+mkdir -p ~/.claude/skills
+for repo in LaravelClaudeMd DevOps-Claude-Config; do
+  for skill in ~/GitProjects/$repo/skills/*/; do
+    ln -sfn "$skill" ~/.claude/skills/"$(basename "$skill")"
+  done
+done
+```
+
+Re-run step 3 whenever either repo adds a new skill (existing ones update via `git pull`; a brand-new skill folder needs its own symlink).
+
+**Caveats**
+- Only link the `skills/` folders. Do **not** symlink `DevOps-Claude-Config/settings.json` or its `CLAUDE.md` over yours — that repo is a colleague's personal config; its settings/instructions are not ours.
+- Skill names must be unique across the two repos. If both ever ship a folder with the same name, the second `ln` silently wins — rename one before linking.
