@@ -2,8 +2,8 @@
 
 > **Note**: This file lives in the `LaravelClaudeMd` repo and is symlinked to `~/.claude/CLAUDE.md`. Personal skills come from **two** repos — `LaravelClaudeMd/skills/` and `DevOps-Claude-Config/skills/` — each skill symlinked individually into a real `~/.claude/skills/` directory (so both repos' skills coexist; see [Skills (multi-machine setup)](#skills-multi-machine-setup) at the bottom). When starting a conversation, pull **both** config repos first so skills and instructions stay current:
 > ```bash
-> git -C ~/GitProjects/LaravelClaudeMd pull --ff-only -q
-> git -C ~/GitProjects/DevOps-Claude-Config pull --ff-only -q
+> git -C ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd pull --ff-only -q
+> git -C ~/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config pull --ff-only -q
 > ```
 
 ## Docker Environment
@@ -459,8 +459,10 @@ Personal skills are pooled from **two** git repos, so `~/.claude/skills/` is a *
 
 | Repo | Clone location | Provides |
 |------|----------------|----------|
-| `IT4WEBBV/LaravelClaudeMd` | `~/GitProjects/LaravelClaudeMd` | `browser-verification`, `improve-codebase-architecture` |
-| `IT4WEBBV/DevOps-Claude-Config` | `~/GitProjects/DevOps-Claude-Config` | `handoff`, `memory-sync`, `release-changelog`, `retenium-prod` |
+| `IT4WEBBV/LaravelClaudeMd` | `~/GitProjects/LaravelClaudeMd/LaravelClaudeMd` | `browser-verification`, `improve-codebase-architecture` |
+| `IT4WEBBV/DevOps-Claude-Config` | `~/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config` | `handoff`, `memory-sync`, `release-changelog`, `retenium-prod` |
+
+> **Nested clone layout**: both repos are cloned one level deep — `~/GitProjects/<Repo>/<Repo>/` — to match `DevOps-Claude-Config`'s own README and its `memory-sync` skill, which expects that path. Keep this layout so Mark's skills work unmodified.
 
 A single symlink at `~/.claude/skills` can only ever point at one repo — that's why it's a real folder with per-skill symlinks instead, letting both repos' skills coexist.
 
@@ -471,17 +473,18 @@ Pull **both** repos at the start of each session (see the note at the top of thi
 ### Bootstrapping a new machine
 
 ```bash
-# 1. Clone both config repos to the canonical locations
-git clone git@github.com:IT4WEBBV/LaravelClaudeMd.git ~/GitProjects/LaravelClaudeMd
-git clone git@github.com:IT4WEBBV/DevOps-Claude-Config.git ~/GitProjects/DevOps-Claude-Config
+# 1. Clone both config repos into nested wrapper dirs (~/GitProjects/<Repo>/<Repo>/)
+mkdir -p ~/GitProjects/LaravelClaudeMd ~/GitProjects/DevOps-Claude-Config
+git clone git@github.com:IT4WEBBV/LaravelClaudeMd.git ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd
+git clone git@github.com:IT4WEBBV/DevOps-Claude-Config.git ~/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config
 
 # 2. Symlink this file as the global CLAUDE.md
-ln -sfn ~/GitProjects/LaravelClaudeMd/CLAUDE.md ~/.claude/CLAUDE.md
+ln -sfn ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/CLAUDE.md ~/.claude/CLAUDE.md
 
 # 3. Make ~/.claude/skills a REAL directory and link every skill from BOTH repos
 mkdir -p ~/.claude/skills
 for repo in LaravelClaudeMd DevOps-Claude-Config; do
-  for skill in ~/GitProjects/$repo/skills/*/; do
+  for skill in ~/GitProjects/$repo/$repo/skills/*/; do
     ln -sfn "$skill" ~/.claude/skills/"$(basename "$skill")"
   done
 done
