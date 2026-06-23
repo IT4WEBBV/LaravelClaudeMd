@@ -49,3 +49,44 @@ export function clusterMask(mask, width, height, { minPixels = 12 } = {}) {
   }
   return regions;
 }
+
+const COLOR_KEYS = ['backgroundColor', 'color', 'backgroundImage', 'backgroundSize', 'backgroundPosition', 'borderRadius', 'boxShadow'];
+const FONT_KEYS = ['fontFamily', 'fontSize', 'fontWeight'];
+
+function firstStyleDiff(a, b, keys) {
+  for (const k of keys) {
+    if (a[k] !== b[k]) return `${k} ${a[k]} → ${b[k]}`;
+  }
+  return null;
+}
+
+function describeBox(hit) {
+  const b = hit.box;
+  return `${hit.tag ?? 'el'} ${b.w}×${b.h} @ (${b.x},${b.y})`;
+}
+
+export function classifyKind(legacy, rebuild, { posTol = 2, sizeTol = 2 } = {}) {
+  const lPresent = legacy && legacy.present;
+  const rPresent = rebuild && rebuild.present;
+  if (lPresent && !rPresent) return { kind: 'missing', detail: `legacy has ${describeBox(legacy)}; rebuild empty` };
+  if (!lPresent && rPresent) return { kind: 'extra', detail: `rebuild has ${describeBox(rebuild)}; legacy empty` };
+  if (!lPresent && !rPresent) return { kind: 'unclassified', detail: 'no element at point on either side' };
+
+  const lb = legacy.box, rb = rebuild.box;
+  const samePos = Math.abs(lb.x - rb.x) <= posTol && Math.abs(lb.y - rb.y) <= posTol;
+  const sameSize = Math.abs(lb.w - rb.w) <= sizeTol && Math.abs(lb.h - rb.h) <= sizeTol;
+
+  if (samePos && sameSize) {
+    if (legacy.styles.zIndex !== rebuild.styles.zIndex) {
+      return { kind: 'overlap', detail: `z-index ${legacy.styles.zIndex} → ${rebuild.styles.zIndex}` };
+    }
+    const colorDiff = firstStyleDiff(legacy.styles, rebuild.styles, COLOR_KEYS);
+    if (colorDiff) return { kind: 'recolor', detail: colorDiff };
+    const fontDiff = firstStyleDiff(legacy.styles, rebuild.styles, FONT_KEYS);
+    if (fontDiff) return { kind: 'typography', detail: fontDiff };
+    return { kind: 'unclassified', detail: 'box and tracked styles match — source unclear' };
+  }
+  if (sameSize) return { kind: 'shift', detail: `Δx ${rb.x - lb.x}px, Δy ${rb.y - lb.y}px` };
+  if (samePos) return { kind: 'resize', detail: `Δw ${rb.w - lb.w}px, Δh ${rb.h - lb.h}px` };
+  return { kind: 'unclassified', detail: `box ${describeBox(legacy)} → ${describeBox(rebuild)} (position and size both differ)` };
+}

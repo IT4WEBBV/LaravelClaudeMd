@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { maskFromDiff, clusterMask } from './parity-lib.mjs';
+import { maskFromDiff, clusterMask, classifyKind } from './parity-lib.mjs';
 
 // Helper: build an RGBA buffer, paint a filled red rect (pixelmatch diff color).
 function rgbaWithRedRect(width, height, rects) {
@@ -40,4 +40,58 @@ test('clusterMask drops sub-threshold speckle', () => {
   const data = rgbaWithRedRect(20, 20, [{ x: 5, y: 5, w: 1, h: 1 }]);
   const mask = maskFromDiff(data, 20, 20);
   assert.equal(clusterMask(mask, 20, 20, { minPixels: 4 }).length, 0);
+});
+
+const baseStyles = {
+  color: 'rgb(0, 0, 0)', backgroundColor: 'rgb(255, 106, 0)', backgroundImage: 'none',
+  backgroundSize: 'auto', backgroundPosition: '0% 0%', borderRadius: '0px', boxShadow: 'none',
+  fontFamily: 'Inter', fontSize: '16px', fontWeight: '400', zIndex: 'auto',
+};
+const hit = (box, styles = {}) => ({ present: true, tag: 'div', box, styles: { ...baseStyles, ...styles } });
+const box = (x, y, w, h) => ({ x, y, w, h });
+
+test('classifyKind: recolor when boxes match but background differs', () => {
+  const l = hit(box(10, 10, 100, 40));
+  const r = hit(box(10, 10, 100, 40), { backgroundColor: 'rgb(255, 140, 0)' });
+  const out = classifyKind(l, r);
+  assert.equal(out.kind, 'recolor');
+  assert.match(out.detail, /backgroundColor/);
+});
+
+test('classifyKind: shift when same size, moved origin', () => {
+  const out = classifyKind(hit(box(10, 10, 100, 40)), hit(box(10, 34, 100, 40)));
+  assert.equal(out.kind, 'shift');
+  assert.match(out.detail, /Δy 24px/);
+});
+
+test('classifyKind: resize when same origin, different size', () => {
+  const out = classifyKind(hit(box(10, 10, 100, 40)), hit(box(10, 10, 100, 20)));
+  assert.equal(out.kind, 'resize');
+  assert.match(out.detail, /Δh -20px/);
+});
+
+test('classifyKind: missing when legacy present and rebuild absent', () => {
+  assert.equal(classifyKind(hit(box(0, 0, 8, 8)), { present: false }).kind, 'missing');
+});
+
+test('classifyKind: extra when rebuild present and legacy absent', () => {
+  assert.equal(classifyKind({ present: false }, hit(box(0, 0, 8, 8))).kind, 'extra');
+});
+
+test('classifyKind: typography when boxes match and font differs', () => {
+  const out = classifyKind(hit(box(0, 0, 50, 20)), hit(box(0, 0, 50, 20), { fontWeight: '700' }));
+  assert.equal(out.kind, 'typography');
+});
+
+test('classifyKind: overlap when z-index differs at same box', () => {
+  const out = classifyKind(hit(box(0, 0, 50, 20), { zIndex: '1' }), hit(box(0, 0, 50, 20), { zIndex: '5' }));
+  assert.equal(out.kind, 'overlap');
+});
+
+test('classifyKind: unclassified when boxes and styles all match', () => {
+  assert.equal(classifyKind(hit(box(0, 0, 50, 20)), hit(box(0, 0, 50, 20))).kind, 'unclassified');
+});
+
+test('classifyKind: unclassified when both absent', () => {
+  assert.equal(classifyKind({ present: false }, { present: false }).kind, 'unclassified');
 });
