@@ -95,3 +95,44 @@ test('classifyKind: unclassified when boxes and styles all match', () => {
 test('classifyKind: unclassified when both absent', () => {
   assert.equal(classifyKind({ present: false }, { present: false }).kind, 'unclassified');
 });
+
+import { iou, mergeRegions, countMaskInBoxes, adjustedPct } from './parity-lib.mjs';
+
+const region = (id, box, over = {}) => ({ id, box, source: 'auto', kind: 'recolor', status: 'open', ...over });
+
+test('iou: identical boxes = 1, disjoint = 0', () => {
+  assert.equal(iou({ x: 0, y: 0, w: 10, h: 10 }, { x: 0, y: 0, w: 10, h: 10 }), 1);
+  assert.equal(iou({ x: 0, y: 0, w: 10, h: 10 }, { x: 100, y: 100, w: 10, h: 10 }), 0);
+});
+
+test('mergeRegions: human wontfix over an auto spot drops the fresh auto, keeps human', () => {
+  const fresh = [region('a1', [10, 10, 100, 40])];
+  const prior = [region('h1', [11, 11, 99, 39], { source: 'human', status: 'wontfix' })];
+  const merged = mergeRegions(fresh, prior);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].id, 'h1');
+  assert.equal(merged[0].status, 'wontfix');
+});
+
+test('mergeRegions: human region with no overlap is kept alongside fresh auto', () => {
+  const fresh = [region('a1', [10, 10, 50, 50])];
+  const prior = [region('h1', [400, 400, 20, 20], { source: 'human', status: 'open', kind: 'missing' })];
+  const merged = mergeRegions(fresh, prior);
+  assert.equal(merged.length, 2);
+  assert.ok(merged.some(r => r.id === 'a1' && r.source === 'auto'));
+  assert.ok(merged.some(r => r.id === 'h1' && r.source === 'human'));
+});
+
+test('mergeRegions: fresh auto with no prior is included as open', () => {
+  const merged = mergeRegions([region('a1', [0, 0, 10, 10])], []);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].status, 'open');
+});
+
+test('countMaskInBoxes / adjustedPct: wontfix pixels are excluded', () => {
+  // 10x10 mask, all set = 100 changed pixels.
+  const mask = new Uint8Array(100).fill(1);
+  const inWontfix = countMaskInBoxes(mask, 10, [[0, 0, 5, 10]]); // left half = 50
+  assert.equal(inWontfix, 50);
+  assert.equal(adjustedPct(100, 100, inWontfix), 50);
+});

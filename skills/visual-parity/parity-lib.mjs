@@ -90,3 +90,42 @@ export function classifyKind(legacy, rebuild, { posTol = 2, sizeTol = 2 } = {}) 
   if (samePos) return { kind: 'resize', detail: `Δw ${rb.w - lb.w}px, Δh ${rb.h - lb.h}px` };
   return { kind: 'unclassified', detail: `box ${describeBox(legacy)} → ${describeBox(rebuild)} (position and size both differ)` };
 }
+
+const boxObj = (a) => ({ x: a[0], y: a[1], w: a[2], h: a[3] });
+
+export function iou(a, b) {
+  const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+  const iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+  const inter = ix * iy;
+  const union = a.w * a.h + b.w * b.h - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+export function mergeRegions(freshAuto, priorRegions, { iouThreshold = 0.5 } = {}) {
+  const humans = priorRegions.filter(r => r.source === 'human');
+  const out = [];
+  for (const fa of freshAuto) {
+    const covered = humans.some(h => iou(boxObj(h.box), boxObj(fa.box)) >= iouThreshold);
+    if (!covered) out.push(fa);
+  }
+  for (const h of humans) out.push(h);
+  return out;
+}
+
+export function countMaskInBoxes(mask, width, boxes) {
+  let n = 0;
+  for (const [bx, by, bw, bh] of boxes) {
+    for (let y = by; y < by + bh; y++) {
+      for (let x = bx; x < bx + bw; x++) {
+        if (mask[y * width + x]) n++;
+      }
+    }
+  }
+  return n;
+}
+
+export function adjustedPct(totalChanged, totalPixels, changedInsideWontfix) {
+  if (totalPixels === 0) return 0;
+  const adj = Math.max(0, totalChanged - changedInsideWontfix);
+  return +(adj / totalPixels * 100).toFixed(2);
+}
