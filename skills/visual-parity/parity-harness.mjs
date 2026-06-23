@@ -25,6 +25,10 @@ import { PNG } from 'pngjs';
 import { promises as fs, existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import {
+  maskFromDiff, clusterMask, classifyKind, mergeRegions,
+  countMaskInBoxes, adjustedPct, worklistFilename, readWorklist, writeWorklist, priorSectionRegions,
+} from './parity-lib.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(__dirname, 'out');
@@ -60,6 +64,8 @@ const SURFACES = [
     },
 ];
 // ═════════════════════════════════════════════════════════════════════════════
+
+const NOISE_MIN_PIXELS = 12;   // diff blobs smaller than this (changed-pixel count) are ignored
 
 const PIXELMATCH_OPTS = {
     threshold: 0.1,      // per-pixel colour delta before it counts as different
@@ -162,6 +168,7 @@ async function run() {
 
                 const tag = `${surface.name}.${vp.name}`;
                 const sectionResults = [];
+                const priorWorklist = await readWorklist(path.join(OUT_DIR, worklistFilename(surface.name, vp.name)));
 
                 for (const s of surface.sections) {
                     if (s.legacyOnly) continue;
@@ -174,9 +181,31 @@ async function run() {
                     await fs.writeFile(path.join(OUT_DIR, `${base}.legacy.png`), PNG.sync.write(lBand));
                     await fs.writeFile(path.join(OUT_DIR, `${base}.rebuild.png`), PNG.sync.write(rBand));
                     await fs.writeFile(path.join(OUT_DIR, `${base}.diff.png`), PNG.sync.write(diff));
-                    sectionResults.push({ section: s.name, base, pct: (numDiff / total * 100).toFixed(2), legacyH: lBand.height, rebuildH: rBand.height });
+                    const fresh = await detectRegions(lp, rp, diff, lt, rt, { minPixels: NOISE_MIN_PIXELS });
+                    const merged = mergeRegions(fresh, priorSectionRegions(priorWorklist, s.name));
+                    const wontfixBoxes = merged.filter(r => r.status === 'wontfix').map(r => r.box);
+                    const changedInWontfix = countMaskInBoxes(maskFromDiff(diff.data, diff.width, diff.height), diff.width, wontfixBoxes);
+                    sectionResults.push({
+                        section: s.name, base,
+                        pct: (numDiff / total * 100).toFixed(2),
+                        legacyH: lBand.height, rebuildH: rBand.height,
+                        legacyTop: lt, rebuildTop: rt, diffW: diff.width, diffH: diff.height,
+                        adjustedPct: adjustedPct(numDiff, total, changedInWontfix),
+                        openCount: merged.filter(r => r.status === 'open').length,
+                        regions: merged,
+                    });
                     console.log(`   ${s.name.padEnd(13)} ${(numDiff / total * 100).toFixed(2).padStart(6)}%  (legacy ${lBand.height}px / rebuild ${rBand.height}px)`);
                 }
+                await writeWorklist(
+                    path.join(OUT_DIR, worklistFilename(surface.name, vp.name)),
+                    {
+                        surface: surface.name, viewport: vp.name,
+                        sections: sectionResults.filter(s => !s.missing).map(s => ({
+                            section: s.section, legacyTop: s.legacyTop, rebuildTop: s.rebuildTop,
+                            pixelPct: +s.pct, adjustedPct: s.adjustedPct, openCount: s.openCount, regions: s.regions,
+                        })),
+                    },
+                );
                 results.push({ surface: surface.name, viewport: vp.name, sections: sectionResults });
                 await ctx.close();
             }
@@ -223,6 +252,25 @@ function reportHtml(results) {
 ${results.map(block).join('\n')}
 <script>document.querySelectorAll('img').forEach(i=>i.onclick=()=>document.fullscreenElement?document.exitFullscreen():i.requestFullscreen());</script>
 </body></html>`;
+}
+
+// Detect + classify regions for ONE section, from its already-computed band diff PNG.
+// diff: the pngjs PNG returned by diffPngs() for this section (band-local pixels).
+// legacyTop / rebuildTop: document y of the band's top on each side.
+export async function detectRegions(lp, rp, diff, legacyTop, rebuildTop, { minPixels = 12 } = {}) {
+  const mask = maskFromDiff(diff.data, diff.width, diff.height);
+  const regions = clusterMask(mask, diff.width, diff.height, { minPixels });
+  const out = [];
+  let n = 0;
+  for (const reg of regions) {
+    const cx = reg.x + Math.floor(reg.w / 2);
+    const cy = reg.y + Math.floor(reg.h / 2);
+    const legacyHit = await captureHit(lp, cx, legacyTop + cy);
+    const rebuildHit = await captureHit(rp, cx, rebuildTop + cy);
+    const { kind, detail } = classifyKind(legacyHit, rebuildHit);
+    out.push({ id: `a${++n}`, box: [reg.x, reg.y, reg.w, reg.h], source: 'auto', kind, detail, status: 'open' });
+  }
+  return out;
 }
 
 // Hit-test a document point on one render; returns the Hit shape classifyKind expects.
