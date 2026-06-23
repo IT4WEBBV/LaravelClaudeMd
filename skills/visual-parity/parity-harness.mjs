@@ -24,7 +24,7 @@ import pixelmatch from 'pixelmatch';
 import { PNG } from 'pngjs';
 import { promises as fs, existsSync, mkdirSync } from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(__dirname, 'out');
@@ -225,4 +225,32 @@ ${results.map(block).join('\n')}
 </body></html>`;
 }
 
-run().catch(e => { console.error(e); process.exit(1); });
+// Hit-test a document point on one render; returns the Hit shape classifyKind expects.
+export async function captureHit(page, docX, docY) {
+  return page.evaluate(({ x, y }) => {
+    window.scrollTo(0, Math.max(0, y - window.innerHeight / 2));
+    const el = document.elementFromPoint(x, y - window.scrollY);
+    if (!el) return { present: false };
+    const b = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    return {
+      present: true,
+      tag: el.tagName.toLowerCase(),
+      box: {
+        x: Math.round(b.left + window.scrollX), y: Math.round(b.top + window.scrollY),
+        w: Math.round(b.width), h: Math.round(b.height),
+      },
+      styles: {
+        color: cs.color, backgroundColor: cs.backgroundColor, backgroundImage: cs.backgroundImage,
+        backgroundSize: cs.backgroundSize, backgroundPosition: cs.backgroundPosition,
+        borderRadius: cs.borderRadius, boxShadow: cs.boxShadow,
+        fontFamily: cs.fontFamily, fontSize: cs.fontSize, fontWeight: cs.fontWeight,
+        zIndex: cs.zIndex,
+      },
+    };
+  }, { x: docX, y: docY });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  run().catch(e => { console.error(e); process.exit(1); });
+}
