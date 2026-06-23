@@ -67,7 +67,9 @@ digraph parity {
 }
 ```
 
-**The worklist — not the % — is the gate.** The harness writes `out/worklist.<surface>.<viewport>.json` alongside `report.html`. Each region in the worklist has a bounding box, a kind (`shift`, `resize`, `recolor`, `missing`, `extra`, `typography`, `overlap`, `unclassified`), pixel count, and status (`open` / `wontfix` / `fixed`). Work the open regions top to bottom; when the worklist is empty, the surface is done.
+**The worklist — not the % — is the gate.** The harness writes `out/worklist.<surface>.<viewport>.json` alongside `report.html`. Each region in the worklist has a bounding box, a kind, pixel count, and status (`open` / `wontfix` / `fixed`). Work the open regions top to bottom; when the worklist is empty, the surface is done.
+
+**Kind vocabulary:** The auto-classifier emits `recolor`, `shift`, `resize`, `missing`, `extra`, `typography`, `overlap`, or `unclassified`. Human annotations (drawn via `--serve`) may additionally use `other` (free-form, the default for drag-added regions) or `ignore`. Marking a region's status `wontfix` — not its kind — is the mechanism for intentional diffs; they are excluded from the adjusted %.
 
 - **`unclassified` regions** are where the harness couldn't match a DOM element — fall back to manual measurement with `getBoundingClientRect`.
 - **`wontfix` regions** are intentional differences (a removed feature, a known divergence). Mark them via `--serve`; they are excluded from the **adjusted %** on re-run.

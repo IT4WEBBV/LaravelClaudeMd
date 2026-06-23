@@ -130,6 +130,14 @@ test('mergeRegions: fresh auto with no prior is included as open', () => {
   assert.equal(merged[0].status, 'open');
 });
 
+test('mergeRegions preserves a full human-shaped region verbatim and drops the overlapping auto', () => {
+  const fresh = [{ id: 'a1', box: [10, 10, 100, 40], source: 'auto', kind: 'recolor', detail: 'bg x → y', status: 'open' }];
+  const human = { id: 'h1', box: [11, 11, 99, 39], source: 'human', kind: 'missing', note: 'the dot', status: 'open' };
+  const merged = mergeRegions(fresh, [human]);
+  assert.equal(merged.length, 1);
+  assert.deepEqual(merged[0], human);
+});
+
 test('countMaskInBoxes / adjustedPct: wontfix pixels are excluded', () => {
   // 10x10 mask, all set = 100 changed pixels.
   const mask = new Uint8Array(100).fill(1);
