@@ -98,6 +98,7 @@ open out/report.html
 |------|---------|--------|
 | `NOISE_MIN_PIXELS` | `12` | Diff blobs smaller than this changed-pixel count are silently dropped. Raise to suppress anti-aliasing noise; lower to surface tiny regressions. |
 | `SERVE_PORT` | `8088` | HTTP port for `--serve` annotation mode. Override on the CLI by passing a bare number: `node parity-harness.mjs --serve 9000`. |
+| `threshold` (in `PIXELMATCH_OPTS`) | `0.1` | Per-pixel colour-delta cutoff. A **subtle recolor can fall *under* it** and never register as a changed pixel — so it won't reach the worklist. Lower toward `0.05` when near-pixel *colour* parity matters, at the cost of more anti-alias noise. |
 
 How it works (and why): the two sides are different DOM (a rewrite), so it diffs **pixels**, not elements — aligned by **content anchors** (heading text), section by section. It dismisses cookie banners, scrolls to trigger lazy images, masks dynamic regions (iframes/video), and ignores anti-aliasing (`includeAA:false`) so font-hinting differences across stacks don't show as diffs. Each band reports `%diff`, `adj %` (wontfix excluded), open-region count, **and** `legacy Xpx / rebuild Ypx` heights. The worklist JSON captures every located region with kind, box, and status so you work it top to bottom rather than chasing the `%` number.
 
@@ -131,6 +132,7 @@ Rules that catch what eyeballing misses:
 
 - **The % undercounts on background-dominated bands.** A section that's mostly white/peach with small content can read **4%** while looking completely wrong — the changed pixels are a tiny fraction. **Trust the diff IMAGE and the band-height convergence, not the % alone.** A low % is necessary, not sufficient.
 - **Anti-aliasing / font hinting** differs across stacks → keep `includeAA:false`, or text edges flood the diff.
+- **Subtle recolors can slip *under* `threshold`.** `PIXELMATCH_OPTS.threshold: 0.1` is lenient (it keeps AA noise down), so a small colour shift — a few levels per channel — may never register as a changed pixel and so never reaches the worklist at all (the `%` and the worklist both read clean). When *colour* parity matters, lower `threshold` (try `0.05`) and re-run; expect more AA noise in return. A near-zero `%` with an empty worklist is necessary, not sufficient — confirm against the diff image.
 - **Dynamic regions** (video thumbnails, carousels, ad slots, randomized content) must be masked/hidden or they diff run-to-run.
 - **Dismiss consent/cookie overlays** on both sides, and **scroll to trigger lazy images** before screenshotting.
 - A reference's **production overlays** (surveys, chat widgets) may appear — hide them in the page before measuring.

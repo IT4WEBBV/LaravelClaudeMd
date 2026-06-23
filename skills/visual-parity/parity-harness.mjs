@@ -78,6 +78,10 @@ const NOISE_MIN_PIXELS = 12;   // diff blobs smaller than this (changed-pixel co
 //   The port stored here is the hard-coded default; the CLI number takes precedence.
 
 const PIXELMATCH_OPTS = {
+    // threshold — per-pixel colour-delta cutoff. 0.1 is lenient (keeps AA noise low), but a
+    // SUBTLE recolor (a few levels per channel) can fall UNDER it and never register as a
+    // changed pixel — so it never reaches the worklist. Lower toward 0.05 when near-pixel
+    // COLOUR parity matters, at the cost of more anti-alias noise.
     threshold: 0.1,      // per-pixel colour delta before it counts as different
     includeAA: false,    // ignore anti-aliasing (font hinting differs across stacks)
     alpha: 0.4,
