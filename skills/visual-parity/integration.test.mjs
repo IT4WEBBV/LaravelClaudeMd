@@ -91,3 +91,39 @@ test('detectRegions classifies a recolored CTA as recolor', async () => {
   assert.ok(regions.length >= 1);
   assert.ok(regions.some(r => r.kind === 'recolor'));
 });
+
+// ── serve round-trip ─────────────────────────────────────────────────────────
+import { serve } from './parity-harness.mjs';
+import { promises as fsPromises } from 'node:fs';
+import { fileURLToPath as ftu } from 'node:url';
+import { dirname } from 'node:path';
+
+const __dir = dirname(ftu(import.meta.url));
+const outDir = join(__dir, 'out');
+
+test('serve: POST /worklist writes file and GET returns 200', async () => {
+  const server = await serve(0);
+  const port = server.address().port;
+  const payload = {
+    surface: 'tsurf',
+    viewport: 'tvp',
+    sections: [{
+      section: 'hero',
+      regions: [{ id: 'h1', box: [1, 2, 3, 4], source: 'human', kind: 'missing', note: 'x', status: 'open' }],
+    }],
+  };
+  const outFile = join(outDir, 'worklist.tsurf.tvp.json');
+  try {
+    const res = await fetch(`http://localhost:${port}/worklist`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(res.status, 200);
+    const written = JSON.parse(await fsPromises.readFile(outFile, 'utf8'));
+    assert.deepEqual(written, payload);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    try { await fsPromises.unlink(outFile); } catch (_) {}
+  }
+});

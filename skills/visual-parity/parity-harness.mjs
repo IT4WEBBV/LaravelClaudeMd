@@ -19,6 +19,7 @@
 //                  + report.html + analysis.json
 // ─────────────────────────────────────────────────────────────────────────────
 
+import http from 'node:http';
 import { chromium } from 'playwright';
 import pixelmatch from 'pixelmatch';
 import { PNG } from 'pngjs';
@@ -32,6 +33,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(__dirname, 'out');
+const SERVE_PORT = Number(process.argv.find(a => /^\d+$/.test(a))) || 8088;
 
 // ═══════════════════════ CONFIG — EDIT PER PROJECT ══════════════════════════
 const LEGACY = 'https://reference.example.com';   // the implementation to match
@@ -282,6 +284,19 @@ document.querySelectorAll('.diffwrap').forEach(wrap => {
 });
 
 document.querySelectorAll('img').forEach(i => i.onclick = () => document.fullscreenElement ? document.exitFullscreen() : i.requestFullscreen());
+
+document.getElementById('save').onclick = async () => {
+  const files = {};
+  for (const [k, regions] of Object.entries(WL)) {
+    const [surface, viewport, section] = k.split('.');
+    const id = surface + '.' + viewport;
+    (files[id] = files[id] || { surface, viewport, sections: [] }).sections.push({ section, regions });
+  }
+  for (const data of Object.values(files)) {
+    await fetch('/worklist', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+  }
+  alert('Saved.');
+};
 \x3c/script>`;
 }
 
@@ -350,7 +365,7 @@ export function reportHtml(results) {
   .overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   .overlay .rgn{pointer-events:all;cursor:pointer}
 </style></head><body>
-<header><h1>Visual parity — reference vs rebuild · green ≤0.5% · click image to zoom · % UNDERCOUNTS background-heavy bands → trust the diff image + heights</h1></header>
+<header><h1>Visual parity — reference vs rebuild · green ≤0.5% · click image to zoom · % UNDERCOUNTS background-heavy bands → trust the diff image + heights</h1><button id="save">Save worklist</button></header>
 ${results.map(block).join('\n')}
 ${reportScript(worklistByKey(results))}
 </body></html>`;
@@ -401,6 +416,35 @@ export async function captureHit(page, docX, docY) {
   }, { x: docX, y: docY });
 }
 
+export function serve(port = SERVE_PORT) {
+  const types = { '.html': 'text/html', '.png': 'image/png', '.json': 'application/json', '.js': 'text/javascript' };
+  const server = http.createServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/worklist') {
+      let body = '';
+      req.on('data', c => body += c);
+      req.on('end', async () => {
+        try {
+          const data = JSON.parse(body);
+          await writeWorklist(path.join(OUT_DIR, worklistFilename(data.surface, data.viewport)), data);
+          res.writeHead(200).end('ok');
+        } catch (e) { res.writeHead(400).end(String(e)); }
+      });
+      return;
+    }
+    const rel = req.url === '/' ? '/report.html' : decodeURIComponent(req.url.split('?')[0]);
+    const file = path.join(OUT_DIR, rel);
+    try {
+      const buf = await fs.readFile(file);
+      res.writeHead(200, { 'content-type': types[path.extname(file)] || 'application/octet-stream' }).end(buf);
+    } catch { res.writeHead(404).end('not found'); }
+  });
+  return new Promise((resolve) => server.listen(port, () => {
+    console.log(`Serving report: http://localhost:${server.address().port}/`);
+    resolve(server);
+  }));
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  run().catch(e => { console.error(e); process.exit(1); });
+  if (process.argv.includes('--serve')) { serve(); }
+  else { run().catch(e => { console.error(e); process.exit(1); }); }
 }
