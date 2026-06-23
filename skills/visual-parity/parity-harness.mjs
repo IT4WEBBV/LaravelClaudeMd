@@ -218,6 +218,71 @@ async function run() {
     }
 }
 
+export function reportScript(worklistByKey) {
+  const safeJson = JSON.stringify(worklistByKey).replace(/</g, '\\u003c');
+  return `<script>
+const WL = ${safeJson}; // key: surface.viewport.section -> regions[]
+const KINDS = ['recolor','shift','resize','missing','extra','typography','overlap','ignore','other','unclassified'];
+const key = (el) => el.dataset.surface + '.' + el.dataset.vp + '.' + el.dataset.section;
+
+function redraw(wrap) {
+  const k = key(wrap), svg = wrap.querySelector('.overlay');
+  svg.querySelectorAll('.rgn,text').forEach(n => n.remove());
+  for (const rg of WL[k] || []) {
+    const [x,y,w,h] = rg.box;
+    const stroke = rg.source === 'human' ? '#3b82f6' : '#f59e0b';
+    const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    rect.setAttribute('class','rgn'); rect.dataset.id = rg.id;
+    rect.setAttribute('x',x); rect.setAttribute('y',y); rect.setAttribute('width',w); rect.setAttribute('height',h);
+    rect.setAttribute('fill','transparent'); rect.setAttribute('stroke',stroke); rect.setAttribute('stroke-width','2');
+    if (rg.status === 'wontfix') { rect.setAttribute('stroke-dasharray','6 4'); rect.setAttribute('opacity','0.5'); }
+    rect.onclick = (e) => { e.stopPropagation(); editRegion(k, rg.id, wrap); };
+    svg.appendChild(rect);
+    const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('x',x+2); t.setAttribute('y',y+12); t.setAttribute('fill',stroke); t.setAttribute('font-size','11');
+    t.textContent = rg.kind; svg.appendChild(t);
+  }
+}
+
+function editRegion(k, id, wrap) {
+  const rg = (WL[k]||[]).find(r => r.id === id); if (!rg) return;
+  const kind = prompt('kind (' + KINDS.join('/') + ') — blank to DELETE:', rg.kind);
+  if (kind === null) return;
+  if (kind === '') { WL[k] = WL[k].filter(r => r.id !== id); redraw(wrap); return; }
+  rg.kind = kind;
+  rg.note = prompt('note:', rg.note || '') || '';
+  rg.status = prompt('status (open/wontfix/fixed):', rg.status) || rg.status;
+  rg.source = 'human';
+  redraw(wrap);
+}
+
+function svgPoint(svg, evt) {
+  const vb = svg.viewBox.baseVal, rect = svg.getBoundingClientRect();
+  return { x: Math.round((evt.clientX-rect.left)/rect.width*vb.width), y: Math.round((evt.clientY-rect.top)/rect.height*vb.height) };
+}
+
+document.querySelectorAll('.diffwrap').forEach(wrap => {
+  redraw(wrap);
+  const svg = wrap.querySelector('.overlay');
+  let start = null;
+  svg.style.pointerEvents = 'all';
+  svg.addEventListener('mousedown', e => { if (e.target.classList.contains('rgn')) return; start = svgPoint(svg,e); });
+  svg.addEventListener('mouseup', e => {
+    if (!start) return;
+    const end = svgPoint(svg,e), k = key(wrap);
+    const x = Math.min(start.x,end.x), y = Math.min(start.y,end.y);
+    const w = Math.abs(end.x-start.x), h = Math.abs(end.y-start.y);
+    start = null;
+    if (w < 4 || h < 4) return;
+    (WL[k] = WL[k] || []).push({ id: 'h'+Date.now(), box:[x,y,w,h], source:'human', kind:'other', note:'', status:'open' });
+    editRegion(k, WL[k][WL[k].length-1].id, wrap);
+  });
+});
+
+document.querySelectorAll('img').forEach(i => i.onclick = () => document.fullscreenElement ? document.exitFullscreen() : i.requestFullscreen());
+\x3c/script>`;
+}
+
 export function worklistByKey(results) {
   const map = {};
   for (const r of results) for (const s of r.sections) {
@@ -285,7 +350,7 @@ export function reportHtml(results) {
 </style></head><body>
 <header><h1>Visual parity — reference vs rebuild · green ≤0.5% · click image to zoom · % UNDERCOUNTS background-heavy bands → trust the diff image + heights</h1></header>
 ${results.map(block).join('\n')}
-<script>document.querySelectorAll('img').forEach(i=>i.onclick=()=>document.fullscreenElement?document.exitFullscreen():i.requestFullscreen());</script>
+${reportScript(worklistByKey(results))}
 </body></html>`;
 }
 

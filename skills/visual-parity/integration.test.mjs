@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
-import { captureHit, detectRegions } from './parity-harness.mjs';
+import { writeFileSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { captureHit, detectRegions, reportHtml } from './parity-harness.mjs';
 import { PNG } from 'pngjs';
 
 let browser, page;
@@ -27,6 +29,48 @@ test('captureHit reports absent where the dot was removed in the rebuild', async
   const hit = await captureHit(page, 46, 306); // where the dot used to be
   // body is still hit, but not a 12x12 dot — assert it is NOT the dot box.
   assert.notDeepEqual(hit.box, { x: 40, y: 300, w: 12, h: 12 });
+});
+
+test('reportScript loads WL global and renders .rgn boxes', async () => {
+  const sampleResults = [
+    {
+      surface: 'home',
+      viewport: 'desktop',
+      sections: [
+        {
+          section: 'hero',
+          base: 'home.desktop.hero',
+          pct: '4.20',
+          legacyH: 100,
+          rebuildH: 100,
+          legacyTop: 190,
+          rebuildTop: 190,
+          diffW: 1280,
+          diffH: 70,
+          adjustedPct: 4.2,
+          openCount: 1,
+          regions: [{ id: 'a1', box: [40, 10, 160, 48], source: 'auto', kind: 'recolor', detail: '', status: 'open' }],
+        },
+      ],
+    },
+  ];
+  const html = reportHtml(sampleResults);
+  const tmpFile = join(tmpdir(), `parity-smoke-${Date.now()}.html`);
+  writeFileSync(tmpFile, html);
+  const smokePage = await browser.newPage();
+  const errors = [];
+  smokePage.on('pageerror', e => errors.push(e));
+  try {
+    await smokePage.goto(pathToFileURL(tmpFile).href);
+    assert.equal(errors.length, 0, `Page had uncaught errors: ${errors.map(e => e.message).join(', ')}`);
+    const wlType = await smokePage.evaluate(() => typeof WL);
+    assert.equal(wlType, 'object', `WL should be an object, got ${wlType}`);
+    const rgnCount = await smokePage.locator('.rgn').count();
+    assert.ok(rgnCount >= 1, `Expected at least one .rgn element, got ${rgnCount}`);
+  } finally {
+    await smokePage.close();
+    try { unlinkSync(tmpFile); } catch (_) {}
+  }
 });
 
 test('detectRegions classifies a recolored CTA as recolor', async () => {
