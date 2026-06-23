@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { maskFromDiff, clusterMask, classifyKind, iou, mergeRegions, countMaskInBoxes, adjustedPct } from './parity-lib.mjs';
+import { maskFromDiff, clusterMask, classifyKind, iou, mergeRegions, countMaskInBoxes, adjustedPct, worklistFilename, readWorklist, writeWorklist, priorSectionRegions } from './parity-lib.mjs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
 
 // Helper: build an RGBA buffer, paint a filled red rect (pixelmatch diff color).
 function rgbaWithRedRect(width, height, rects) {
@@ -133,4 +136,33 @@ test('countMaskInBoxes / adjustedPct: wontfix pixels are excluded', () => {
   const inWontfix = countMaskInBoxes(mask, 10, [[0, 0, 5, 10]]); // left half = 50
   assert.equal(inWontfix, 50);
   assert.equal(adjustedPct(100, 100, inWontfix), 50);
+});
+
+test('worklistFilename composes surface and viewport', () => {
+  assert.equal(worklistFilename('home', 'desktop'), 'worklist.home.desktop.json');
+});
+
+test('readWorklist returns null for a missing file', async () => {
+  assert.equal(await readWorklist('/no/such/file.json'), null);
+});
+
+test('writeWorklist then readWorklist round-trips; priorSectionRegions filters by section', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vp-'));
+  try {
+    const file = join(dir, worklistFilename('home', 'desktop'));
+    const data = {
+      surface: 'home', viewport: 'desktop',
+      sections: [{
+        section: 'hero', legacyTop: 100, rebuildTop: 100, pixelPct: 4.2, adjustedPct: 4.2, openCount: 1,
+        regions: [{ id: 'a1', box: [1, 2, 3, 4], source: 'auto', kind: 'recolor', status: 'open' }],
+      }],
+    };
+    await writeWorklist(file, data);
+    const back = await readWorklist(file);
+    assert.deepEqual(back, data);
+    assert.equal(priorSectionRegions(back, 'hero').length, 1);
+    assert.equal(priorSectionRegions(back, 'nope').length, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

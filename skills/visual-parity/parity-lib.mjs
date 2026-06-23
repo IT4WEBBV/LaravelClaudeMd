@@ -1,6 +1,8 @@
 // Pure, dependency-free logic for the visual-parity worklist.
 // Imports NOTHING external so its tests run without npm install.
 
+import { promises as fs } from 'node:fs';
+
 // pixelmatch paints changed pixels in the diff color (default red, full alpha);
 // unchanged pixels are faded grayscale. A pixel is "changed" when it is strongly red.
 export function maskFromDiff(data, width, height) {
@@ -128,4 +130,25 @@ export function adjustedPct(totalChanged, totalPixels, changedInsideWontfix) {
   if (totalPixels === 0) return 0;
   const adj = Math.max(0, totalChanged - changedInsideWontfix);
   return +(adj / totalPixels * 100).toFixed(2);
+}
+
+export function worklistFilename(surface, viewport) {
+  return `worklist.${surface}.${viewport}.json`;
+}
+
+export async function readWorklist(filePath) {
+  try {
+    return JSON.parse(await fs.readFile(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+export async function writeWorklist(filePath, data) {
+  await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+}
+
+export function priorSectionRegions(prior, sectionName) {
+  const section = prior?.sections?.find(s => s.section === sectionName);
+  return section?.regions ?? [];
 }
