@@ -67,7 +67,15 @@ const SURFACES = [
 ];
 // ═════════════════════════════════════════════════════════════════════════════
 
+// NOISE_MIN_PIXELS — diff blobs (connected groups of red pixels) smaller than this pixel count
+//   are silently dropped from the worklist. Raise to suppress anti-aliasing noise;
+//   lower (minimum 1) to surface very small regressions. If the worklist is unexpectedly
+//   empty while the % is non-trivial, lower this value and re-run.
 const NOISE_MIN_PIXELS = 12;   // diff blobs smaller than this (changed-pixel count) are ignored
+
+// SERVE_PORT — HTTP port used by `node parity-harness.mjs --serve` annotation mode.
+//   Override on the command line by passing a bare number: `node parity-harness.mjs --serve 9000`.
+//   The port stored here is the hard-coded default; the CLI number takes precedence.
 
 const PIXELMATCH_OPTS = {
     threshold: 0.1,      // per-pixel colour delta before it counts as different

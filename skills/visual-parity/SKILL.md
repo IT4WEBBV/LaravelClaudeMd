@@ -32,45 +32,72 @@ If there is **no** reference to match, you don't need this — use browser-verif
 digraph parity {
   "Have a reference URL + rebuild URL?" [shape=diamond];
   "Stand up the pixel-diff harness" [shape=box];
-  "Run harness (all viewports, one report)" [shape=box];
-  "Pick the worst-diverging band" [shape=box];
+  "Run harness → report.html + worklist.*.json" [shape=box];
+  "Worklist empty and trivial %?" [shape=diamond];
+  "Optionally --serve and annotate" [shape=box];
+  "Work worklist top to bottom" [shape=box];
+  "Pick region: read kind + box + numbers" [shape=box];
+  "unclassified region?" [shape=diamond];
   "Open BOTH in Playwright @ same viewport" [shape=box];
   "Measure reference: geometry + computed styles + EVERY sub-element" [shape=box];
   "Element-screenshot BOTH; compare" [shape=box];
   "Reproduce exact offsets in the rebuild" [shape=box];
   "Reload, re-measure, re-screenshot" [shape=box];
   "Numbers + diff image match?" [shape=diamond];
-  "Re-run harness; pick next band" [shape=box];
+  "Re-run harness; worklist shrinks" [shape=box];
 
   "Have a reference URL + rebuild URL?" -> "Stand up the pixel-diff harness" [label="yes"];
-  "Stand up the pixel-diff harness" -> "Run harness (all viewports, one report)";
-  "Run harness (all viewports, one report)" -> "Pick the worst-diverging band";
-  "Pick the worst-diverging band" -> "Open BOTH in Playwright @ same viewport";
+  "Stand up the pixel-diff harness" -> "Run harness → report.html + worklist.*.json";
+  "Run harness → report.html + worklist.*.json" -> "Worklist empty and trivial %?" [label=""];
+  "Worklist empty and trivial %?" -> "done" [label="yes — parity reached"];
+  "Worklist empty and trivial %?" -> "Optionally --serve and annotate" [label="no — regions remain"];
+  "Optionally --serve and annotate" -> "Work worklist top to bottom";
+  "Work worklist top to bottom" -> "Pick region: read kind + box + numbers";
+  "Pick region: read kind + box + numbers" -> "unclassified region?" ;
+  "unclassified region?" -> "Open BOTH in Playwright @ same viewport" [label="yes — fall back to DOM measurement"];
+  "unclassified region?" -> "Reproduce exact offsets in the rebuild" [label="no — kind tells you what to fix"];
   "Open BOTH in Playwright @ same viewport" -> "Measure reference: geometry + computed styles + EVERY sub-element";
   "Measure reference: geometry + computed styles + EVERY sub-element" -> "Element-screenshot BOTH; compare";
   "Element-screenshot BOTH; compare" -> "Reproduce exact offsets in the rebuild";
   "Reproduce exact offsets in the rebuild" -> "Reload, re-measure, re-screenshot";
   "Reload, re-measure, re-screenshot" -> "Numbers + diff image match?";
   "Numbers + diff image match?" -> "Reproduce exact offsets in the rebuild" [label="no — iterate"];
-  "Numbers + diff image match?" -> "Re-run harness; pick next band" [label="yes"];
+  "Numbers + diff image match?" -> "Re-run harness; worklist shrinks" [label="yes"];
+  "Re-run harness; worklist shrinks" -> "Worklist empty and trivial %?";
 }
 ```
 
+**The worklist — not the % — is the gate.** The harness writes `out/worklist.<surface>.<viewport>.json` alongside `report.html`. Each region in the worklist has a bounding box, a kind (`shift`, `resize`, `recolor`, `missing`, `extra`, `typography`, `overlap`, `unclassified`), pixel count, and status (`open` / `wontfix` / `fixed`). Work the open regions top to bottom; when the worklist is empty, the surface is done.
+
+- **`unclassified` regions** are where the harness couldn't match a DOM element — fall back to manual measurement with `getBoundingClientRect`.
+- **`wontfix` regions** are intentional differences (a removed feature, a known divergence). Mark them via `--serve`; they are excluded from the **adjusted %** on re-run.
+- **Fixed regions** drop out automatically on the next harness run once the diff pixels disappear.
+
 ## 1. Stand up the harness
 
-Copy `parity-harness.mjs` (next to this skill) into the project (e.g. `tools/visual-parity/`) and edit the **CONFIG block** at the top: `LEGACY` / `REBUILD` URLs, the `VIEWPORTS`, and `SURFACES` (each page + its sections, cut by heading-text anchors top→bottom). Then:
+Copy **both** `parity-harness.mjs` **and** `parity-lib.mjs` (next to this skill) into the project (e.g. `tools/visual-parity/`). `parity-harness.mjs` imports `parity-lib.mjs` at runtime — both files must be in the same directory. Then edit the **CONFIG block** at the top of `parity-harness.mjs`: `LEGACY` / `REBUILD` URLs, the `VIEWPORTS`, and `SURFACES` (each page + its sections, cut by heading-text anchors top→bottom). Then:
 
 ```bash
 cd tools/visual-parity
 npm init -y && npm i -D playwright pixelmatch pngjs && npx playwright install chromium
-node parity.mjs                 # ALL surfaces, ALL viewports → out/report.html
-node parity.mjs home            # one surface, BOTH viewports (no viewport arg!)
+node parity-harness.mjs                # ALL surfaces, ALL viewports → out/report.html + out/worklist.*.json
+node parity-harness.mjs home           # one surface, BOTH viewports (no viewport arg!)
+node parity-harness.mjs --serve        # serve the report for annotation (default :8088)
 open out/report.html
 ```
 
-**Run without a viewport arg to keep desktop + mobile in one report.** Passing a single viewport (`node parity.mjs home desktop`) overwrites `report.html` with just that viewport — a common footgun. The report is regenerated each run.
+**Run without a viewport arg to keep desktop + mobile in one report.** Passing a single viewport (`node parity-harness.mjs home desktop`) overwrites `report.html` with just that viewport — a common footgun. The report is regenerated each run.
 
-How it works (and why): the two sides are different DOM (a rewrite), so it diffs **pixels**, not elements — aligned by **content anchors** (heading text), section by section. It dismisses cookie banners, scrolls to trigger lazy images, masks dynamic regions (iframes/video), and ignores anti-aliasing (`includeAA:false`) so font-hinting differences across stacks don't show as diffs. Each band reports `%diff` **and** `legacy Xpx / rebuild Ypx` heights.
+**Annotation via `--serve`:** `node parity-harness.mjs --serve` starts an HTTP server (default port 8088) serving `report.html` with interactive overlays. Click a region to edit its kind, note, or status; draw a new rectangle to add a human region. Hit **Save worklist** — your edits POST back to the server and merge into the same `worklist.*.json` files on disk. `wontfix` regions persist across re-runs and are excluded from the **adjusted %**. Use this to mark intentional differences so they don't pollute future worklists.
+
+**CONFIG knobs** (at the top of `parity-harness.mjs`, below the SURFACES block):
+
+| Knob | Default | Effect |
+|------|---------|--------|
+| `NOISE_MIN_PIXELS` | `12` | Diff blobs smaller than this changed-pixel count are silently dropped. Raise to suppress anti-aliasing noise; lower to surface tiny regressions. |
+| `SERVE_PORT` | `8088` | HTTP port for `--serve` annotation mode. Override on the CLI by passing a bare number: `node parity-harness.mjs --serve 9000`. |
+
+How it works (and why): the two sides are different DOM (a rewrite), so it diffs **pixels**, not elements — aligned by **content anchors** (heading text), section by section. It dismisses cookie banners, scrolls to trigger lazy images, masks dynamic regions (iframes/video), and ignores anti-aliasing (`includeAA:false`) so font-hinting differences across stacks don't show as diffs. Each band reports `%diff`, `adj %` (wontfix excluded), open-region count, **and** `legacy Xpx / rebuild Ypx` heights. The worklist JSON captures every located region with kind, box, and status so you work it top to bottom rather than chasing the `%` number.
 
 ## 2. Measure — don't eyeball
 
@@ -127,3 +154,4 @@ Rules that catch what eyeballing misses:
 | "Close enough, the dome shape is the same" | If a value is 76px off, it's not close — find the px and fix it. |
 | "It's just a decorative dot" | The user will notice the missing dot. Enumerate every sub-element of the reference. |
 | "I'll check all viewports at the end" | Run them together now; mobile usually diverges most and silently. |
+| "The worklist is empty so it's done" | Empty worklist with a non-trivial pixel% means the noise floor hid regions or the diff is background-only — open the diff image and lower `NOISE_MIN_PIXELS`. |
