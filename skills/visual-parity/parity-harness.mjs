@@ -431,8 +431,9 @@ export function serve(port = SERVE_PORT) {
       });
       return;
     }
-    const rel = req.url === '/' ? '/report.html' : decodeURIComponent(req.url.split('?')[0]);
+    const rel = req.url === '/' ? 'report.html' : decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '');
     const file = path.join(OUT_DIR, rel);
+    if (file !== OUT_DIR && !file.startsWith(OUT_DIR + path.sep)) { res.writeHead(403).end('forbidden'); return; }
     try {
       const buf = await fs.readFile(file);
       res.writeHead(200, { 'content-type': types[path.extname(file)] || 'application/octet-stream' }).end(buf);
@@ -445,6 +446,6 @@ export function serve(port = SERVE_PORT) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (process.argv.includes('--serve')) { serve(); }
+  if (process.argv.includes('--serve')) { serve().catch(e => { console.error(e); process.exit(1); }); }
   else { run().catch(e => { console.error(e); process.exit(1); }); }
 }

@@ -93,6 +93,7 @@ test('detectRegions classifies a recolored CTA as recolor', async () => {
 });
 
 // ── serve round-trip ─────────────────────────────────────────────────────────
+import http from 'node:http';
 import { serve } from './parity-harness.mjs';
 import { promises as fsPromises } from 'node:fs';
 import { fileURLToPath as ftu } from 'node:url';
@@ -125,5 +126,25 @@ test('serve: POST /worklist writes file and GET returns 200', async () => {
   } finally {
     await new Promise(resolve => server.close(resolve));
     try { await fsPromises.unlink(outFile); } catch (_) {}
+  }
+});
+
+test('serve: GET path traversal is clamped to 403', async () => {
+  const server = await serve(0);
+  const port = server.address().port;
+  try {
+    // fetch() (WHATWG URL) collapses ../ client-side, so use a raw request that
+    // delivers the literal `..` segments to the server — the real attack vector.
+    const status = await new Promise((resolve, reject) => {
+      const req = http.request({ host: 'localhost', port, path: '/../../../etc/passwd', method: 'GET' }, res => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode));
+      });
+      req.on('error', reject);
+      req.end();
+    });
+    assert.equal(status, 403);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
   }
 });
