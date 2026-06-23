@@ -261,9 +261,12 @@ function editRegion(k, id, wrap) {
   if (kind === null) return;
   if (kind === '') { WL[k] = WL[k].filter(r => r.id !== id); redraw(wrap); return; }
   rg.kind = kind;
-  rg.note = prompt('note:', rg.note || '') || '';
-  rg.status = prompt('status (open/wontfix/fixed):', rg.status) || rg.status;
+  const n = prompt('note:', rg.note || '');
+  if (n !== null) rg.note = n;
+  const st = prompt('status (open/wontfix/fixed):', rg.status);
+  if (st) rg.status = st;
   rg.source = 'human';
+  delete rg.detail;
   redraw(wrap);
 }
 
@@ -286,7 +289,7 @@ document.querySelectorAll('.diffwrap').forEach(wrap => {
     const w = Math.abs(end.x-start.x), h = Math.abs(end.y-start.y);
     start = null;
     if (w < 4 || h < 4) return;
-    (WL[k] = WL[k] || []).push({ id: 'h'+Date.now(), box:[x,y,w,h], source:'human', kind:'other', note:'', status:'open' });
+    (WL[k] = WL[k] || []).push({ id: 'h' + Date.now() + '-' + Math.floor(Math.random() * 1e6), box:[x,y,w,h], source:'human', kind:'other', note:'', status:'open' });
     editRegion(k, WL[k][WL[k].length-1].id, wrap);
   });
 });
@@ -433,7 +436,11 @@ export function serve(port = SERVE_PORT) {
       req.on('end', async () => {
         try {
           const data = JSON.parse(body);
-          await writeWorklist(path.join(OUT_DIR, worklistFilename(data.surface, data.viewport)), data);
+          const safeName = /^[\w-]+$/;
+          if (!safeName.test(data.surface) || !safeName.test(data.viewport)) { res.writeHead(400).end('bad surface/viewport'); return; }
+          const target = path.join(OUT_DIR, worklistFilename(data.surface, data.viewport));
+          if (target !== OUT_DIR && !target.startsWith(OUT_DIR + path.sep)) { res.writeHead(400).end('bad surface/viewport'); return; }
+          await writeWorklist(target, data);
           res.writeHead(200).end('ok');
         } catch (e) { res.writeHead(400).end(String(e)); }
       });
