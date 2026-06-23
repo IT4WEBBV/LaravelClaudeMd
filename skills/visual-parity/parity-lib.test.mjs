@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { maskFromDiff, clusterMask, classifyKind } from './parity-lib.mjs';
+import { maskFromDiff, clusterMask, classifyKind, iou, mergeRegions, countMaskInBoxes, adjustedPct } from './parity-lib.mjs';
 
 // Helper: build an RGBA buffer, paint a filled red rect (pixelmatch diff color).
 function rgbaWithRedRect(width, height, rects) {
@@ -95,8 +95,6 @@ test('classifyKind: unclassified when boxes and styles all match', () => {
 test('classifyKind: unclassified when both absent', () => {
   assert.equal(classifyKind({ present: false }, { present: false }).kind, 'unclassified');
 });
-
-import { iou, mergeRegions, countMaskInBoxes, adjustedPct } from './parity-lib.mjs';
 
 const region = (id, box, over = {}) => ({ id, box, source: 'auto', kind: 'recolor', status: 'open', ...over });
 
