@@ -129,6 +129,18 @@ test('serve: POST /worklist writes file and GET returns 200', async () => {
   }
 });
 
+test('serve: POST with a path-y surface is rejected (write clamp)', async () => {
+  const server = await serve(0);
+  const { port } = server.address();
+  try {
+    const res = await fetch(`http://localhost:${port}/worklist`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ surface: '../../evil', viewport: 'x', sections: [] }),
+    });
+    assert.equal(res.status, 400);
+  } finally { server.close(); }
+});
+
 test('serve: GET path traversal is clamped to 403', async () => {
   const server = await serve(0);
   const port = server.address().port;
