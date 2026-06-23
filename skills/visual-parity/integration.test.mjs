@@ -49,7 +49,7 @@ test('reportScript loads WL global and renders .rgn boxes', async () => {
           diffH: 70,
           adjustedPct: 4.2,
           openCount: 1,
-          regions: [{ id: 'a1', box: [40, 10, 160, 48], source: 'auto', kind: 'recolor', detail: '', status: 'open' }],
+          regions: [{ id: 'a1', box: [40, 10, 160, 48], source: 'auto', kind: 'recolor', note: '', status: 'open' }],
         },
       ],
     },

@@ -227,7 +227,7 @@ const key = (el) => el.dataset.surface + '.' + el.dataset.vp + '.' + el.dataset.
 
 function redraw(wrap) {
   const k = key(wrap), svg = wrap.querySelector('.overlay');
-  svg.querySelectorAll('.rgn,text').forEach(n => n.remove());
+  svg.querySelectorAll('.rgn,.rgn-label').forEach(n => n.remove());
   for (const rg of WL[k] || []) {
     const [x,y,w,h] = rg.box;
     const stroke = rg.source === 'human' ? '#3b82f6' : '#f59e0b';
@@ -239,6 +239,7 @@ function redraw(wrap) {
     rect.onclick = (e) => { e.stopPropagation(); editRegion(k, rg.id, wrap); };
     svg.appendChild(rect);
     const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('class','rgn-label');
     t.setAttribute('x',x+2); t.setAttribute('y',y+12); t.setAttribute('fill',stroke); t.setAttribute('font-size','11');
     t.textContent = rg.kind; svg.appendChild(t);
   }
@@ -267,6 +268,7 @@ document.querySelectorAll('.diffwrap').forEach(wrap => {
   let start = null;
   svg.style.pointerEvents = 'all';
   svg.addEventListener('mousedown', e => { if (e.target.classList.contains('rgn')) return; start = svgPoint(svg,e); });
+  svg.addEventListener('mouseleave', () => { start = null; });
   svg.addEventListener('mouseup', e => {
     if (!start) return;
     const end = svgPoint(svg,e), k = key(wrap);
@@ -300,7 +302,7 @@ export function reportHtml(results) {
       const dash = rg.status === 'wontfix' ? 'stroke-dasharray="6 4" opacity="0.5"' : '';
       return `<rect class="rgn" data-id="${esc(rg.id)}" x="${x}" y="${y}" width="${w}" height="${h}"
         fill="transparent" stroke="${stroke}" stroke-width="2" ${dash}></rect>
-        <text x="${x + 2}" y="${y + 12}" fill="${stroke}" font-size="11">${esc(rg.kind)}</text>`;
+        <text class="rgn-label" x="${x + 2}" y="${y + 12}" fill="${stroke}" font-size="11">${esc(rg.kind)}</text>`;
     };
 
     const diffFig = (s, r) => `
