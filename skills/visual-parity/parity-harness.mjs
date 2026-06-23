@@ -218,17 +218,47 @@ async function run() {
     }
 }
 
-function reportHtml(results) {
+export function worklistByKey(results) {
+  const map = {};
+  for (const r of results) for (const s of r.sections) {
+    if (s.missing) continue;
+    map[`${r.surface}.${r.viewport}.${s.section}`] = s.regions ?? [];
+  }
+  return map;
+}
+
+export function reportHtml(results) {
+    const boxSvg = (rg) => {
+      const [x, y, w, h] = rg.box;
+      const stroke = rg.source === 'human' ? '#3b82f6' : '#f59e0b';
+      const dash = rg.status === 'wontfix' ? 'stroke-dasharray="6 4" opacity="0.5"' : '';
+      return `<rect class="rgn" data-id="${rg.id}" x="${x}" y="${y}" width="${w}" height="${h}"
+        fill="transparent" stroke="${stroke}" stroke-width="2" ${dash}></rect>
+        <text x="${x + 2}" y="${y + 12}" fill="${stroke}" font-size="11">${rg.kind}</text>`;
+    };
+
+    const diffFig = (s, r) => `
+      <figure class="diffwrap" data-section="${s.section}" data-vp="${r.viewport}" data-surface="${r.surface}">
+        <figcaption>diff (red = differs) · ${s.openCount ?? 0} open</figcaption>
+        <div class="canvas">
+          <img src="${s.base}.diff.png">
+          <svg class="overlay" preserveAspectRatio="none" viewBox="0 0 ${s.diffW ?? 1} ${s.diffH ?? 1}">
+            ${(s.regions ?? []).map(rg => boxSvg(rg)).join('')}
+          </svg>
+        </div>
+      </figure>`;
+
     const block = (r) => {
         const rows = r.sections.map(s => {
             if (s.missing) return `<div class="sec miss"><h3>${s.section} — ANCHOR NOT FOUND (legacy:${s.missing.legacy} rebuild:${s.missing.rebuild})</h3></div>`;
             const heavy = parseFloat(s.pct) > 0.5;
             return `<div class="sec">
-              <h3>${s.section} — <span class="${heavy ? 'bad' : 'ok'}">${s.pct}% diff</span> <span class="dim">(legacy ${s.legacyH}px / rebuild ${s.rebuildH}px)</span></h3>
+              <h3>${s.section} — <span class="${heavy ? 'bad' : 'ok'}">${s.pct}% diff</span>
+                <span class="dim">· adj ${s.adjustedPct}% · ${s.openCount} open · (legacy ${s.legacyH}px / rebuild ${s.rebuildH}px)</span></h3>
               <div class="trio">
                 <figure><figcaption>legacy</figcaption><img src="${s.base}.legacy.png"></figure>
                 <figure><figcaption>rebuild</figcaption><img src="${s.base}.rebuild.png"></figure>
-                <figure><figcaption>diff (red = differs)</figcaption><img src="${s.base}.diff.png"></figure>
+                ${diffFig(s, r)}
               </div>
             </div>`;
         }).join('\n');
@@ -247,6 +277,10 @@ function reportHtml(results) {
   img{width:100%;display:block;border:1px solid #27272a;background:#fff;cursor:zoom-in}
   img:fullscreen{width:auto;height:100vh;background:#fff}
   .miss h3{color:#f59e0b}
+  .canvas{position:relative;display:inline-block;width:100%}
+  .canvas img{width:100%;display:block}
+  .overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .overlay .rgn{pointer-events:all;cursor:pointer}
 </style></head><body>
 <header><h1>Visual parity — reference vs rebuild · green ≤0.5% · click image to zoom · % UNDERCOUNTS background-heavy bands → trust the diff image + heights</h1></header>
 ${results.map(block).join('\n')}
