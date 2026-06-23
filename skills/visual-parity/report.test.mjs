@@ -48,7 +48,20 @@ test('reportHtml includes region rect with data-id', () => {
 
 test('reportHtml includes region kind text', () => {
   const html = reportHtml(sampleResults);
-  assert.ok(html.includes('recolor'), 'should show the region kind');
+  assert.ok(html.includes('>recolor<'), 'should show the region kind as text content');
+});
+
+test('reportHtml escapes user-controlled region kind', () => {
+  const results = [
+    {
+      surface: 'home',
+      viewport: 'desktop',
+      sections: [{ ...sampleSection, regions: [{ ...sampleRegion, kind: 'a<b' }] }],
+    },
+  ];
+  const html = reportHtml(results);
+  assert.ok(html.includes('a&lt;b'), 'should escape < in kind');
+  assert.ok(!html.includes('a<b'), 'should not contain raw unescaped a<b');
 });
 
 test('reportHtml includes adjusted metric line', () => {

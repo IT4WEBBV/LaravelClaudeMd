@@ -228,13 +228,14 @@ export function worklistByKey(results) {
 }
 
 export function reportHtml(results) {
+    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const boxSvg = (rg) => {
       const [x, y, w, h] = rg.box;
       const stroke = rg.source === 'human' ? '#3b82f6' : '#f59e0b';
       const dash = rg.status === 'wontfix' ? 'stroke-dasharray="6 4" opacity="0.5"' : '';
-      return `<rect class="rgn" data-id="${rg.id}" x="${x}" y="${y}" width="${w}" height="${h}"
+      return `<rect class="rgn" data-id="${esc(rg.id)}" x="${x}" y="${y}" width="${w}" height="${h}"
         fill="transparent" stroke="${stroke}" stroke-width="2" ${dash}></rect>
-        <text x="${x + 2}" y="${y + 12}" fill="${stroke}" font-size="11">${rg.kind}</text>`;
+        <text x="${x + 2}" y="${y + 12}" fill="${stroke}" font-size="11">${esc(rg.kind)}</text>`;
     };
 
     const diffFig = (s, r) => `
