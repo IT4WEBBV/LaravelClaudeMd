@@ -307,6 +307,22 @@ This is a Node tool (no Laravel/Pest harness here), so validation is by self-tes
   server/clustering into sibling files. Bias toward **single file** to preserve the
   "copy one file into `tools/visual-parity/`" ergonomics; split only if it gets unwieldy.
 
+## Future enhancements (post-ship, observed in test drive — not yet implemented)
+
+- **Dilate the diff mask before clustering.** Connected-component clustering fragments a
+  single element's change when a "hole" interrupts it — most commonly text glyphs over a
+  recolored fill, which carve a recolored CTA into a main region plus a few-pixel sliver.
+  A light morphological dilation (a 1–2px "close") over the mask before `clusterMask`
+  would bridge glyph-sized gaps so each visually-contiguous element yields one region.
+  Make it a CONFIG knob (`CLUSTER_DILATE_PX`, default small, 0 = off); it's pure logic →
+  unit-testable in `parity-lib.test.mjs`. This is the concrete form of the original
+  "grid-merge if too many micro-boxes" note above.
+- **Document/tune `PIXELMATCH_OPTS.threshold` for colour parity.** The default `0.1` is
+  lenient and lets a subtle recolor (a few levels per channel) fall *under* it, so it
+  never registers as a changed pixel and never reaches the worklist. Documented in
+  `SKILL.md` (CONFIG-knob row + caveat); a future version could expose a per-surface
+  threshold or a dedicated "colour-strict" mode.
+
 ## File layout
 
 ```
