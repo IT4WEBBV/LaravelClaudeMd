@@ -237,41 +237,78 @@ export function reportScript(worklistByKey) {
   return `<script>
 const WL = ${safeJson}; // key: surface.viewport.section -> regions[]
 const KINDS = ['recolor','shift','resize','missing','extra','typography','overlap','ignore','other','unclassified'];
+const STATUSES = ['open','wontfix','fixed'];
 const key = (el) => el.dataset.surface + '.' + el.dataset.vp + '.' + el.dataset.section;
+
+// ── inline editor popover (replaces native prompt() chains) ──
+const ed = document.createElement('div');
+ed.id = 'editor';
+const mkRow = (labelText, child) => { const r=document.createElement('div'); r.className='ed-row'; const l=document.createElement('label'); l.textContent=labelText; r.appendChild(l); r.appendChild(child); return r; };
+const edKind = document.createElement('select');
+KINDS.forEach(k => { const o=document.createElement('option'); o.value=k; o.textContent=k; edKind.appendChild(o); });
+const edStatus = document.createElement('div'); edStatus.className='ed-seg';
+STATUSES.forEach(st => { const b=document.createElement('button'); b.type='button'; b.dataset.st=st; b.textContent=st; edStatus.appendChild(b); });
+const edNote = document.createElement('input'); edNote.type='text'; edNote.placeholder='optional note';
+const edActions = document.createElement('div'); edActions.className='ed-actions';
+const edDel = document.createElement('button'); edDel.className='ed-danger'; edDel.textContent='Delete';
+const edClose = document.createElement('button'); edClose.id='ed-close'; edClose.textContent='Done';
+const spacer = document.createElement('span'); spacer.style.flex='1';
+edActions.appendChild(edDel); edActions.appendChild(spacer); edActions.appendChild(edClose);
+ed.appendChild(mkRow('Kind', edKind));
+ed.appendChild(mkRow('Status', edStatus));
+ed.appendChild(mkRow('Note', edNote));
+ed.appendChild(edActions);
+document.body.appendChild(ed);
+
+let editing = null;
+const find = () => editing ? (WL[editing.k]||[]).find(r => r.id === editing.id) : null;
+
+function openEditor(k, id, wrap, clientX, clientY) {
+  const rg = (WL[k]||[]).find(r => r.id === id); if (!rg) return;
+  editing = { k, id, wrap };
+  edKind.value = rg.kind;
+  edNote.value = rg.note || '';
+  edStatus.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.st === (rg.status || 'open')));
+  ed.style.display = 'block';
+  const w = 280, pad = 12;
+  let left = Math.min(clientX + 10, window.innerWidth - w - pad);
+  let top = clientY + 10;
+  if (top + 190 > window.innerHeight) top = Math.max(pad, clientY - 200);
+  ed.style.left = Math.max(pad, left) + 'px';
+  ed.style.top = (top + window.scrollY) + 'px';
+}
+function closeEditor() { ed.style.display = 'none'; editing = null; }
+
+edKind.onchange = () => { const rg = find(); if (rg) { rg.kind = edKind.value; rg.source='human'; delete rg.detail; redraw(editing.wrap); } };
+edNote.oninput = () => { const rg = find(); if (rg) { rg.note = edNote.value; rg.source='human'; } };
+edStatus.querySelectorAll('button').forEach(b => b.onclick = () => {
+  const rg = find(); if (!rg) return;
+  rg.status = b.dataset.st; rg.source='human';
+  edStatus.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  redraw(editing.wrap);
+});
+edDel.onclick = () => { if (!editing) return; WL[editing.k] = (WL[editing.k]||[]).filter(r => r.id !== editing.id); redraw(editing.wrap); closeEditor(); };
+edClose.onclick = closeEditor;
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeEditor(); });
 
 function redraw(wrap) {
   const k = key(wrap), svg = wrap.querySelector('.overlay');
   svg.querySelectorAll('.rgn,.rgn-label').forEach(n => n.remove());
   for (const rg of WL[k] || []) {
     const [x,y,w,h] = rg.box;
-    const stroke = rg.source === 'human' ? '#3b82f6' : '#f59e0b';
+    const stroke = rg.status === 'wontfix' ? '#22c55e' : (rg.status === 'fixed' ? '#3b82f6' : (rg.source === 'human' ? '#60a5fa' : '#f59e0b'));
     const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
     rect.setAttribute('class','rgn'); rect.dataset.id = rg.id;
     rect.setAttribute('x',x); rect.setAttribute('y',y); rect.setAttribute('width',w); rect.setAttribute('height',h);
     rect.setAttribute('fill','transparent'); rect.setAttribute('stroke',stroke); rect.setAttribute('stroke-width','2');
-    if (rg.status === 'wontfix') { rect.setAttribute('stroke-dasharray','6 4'); rect.setAttribute('opacity','0.5'); }
-    rect.onclick = (e) => { e.stopPropagation(); editRegion(k, rg.id, wrap); };
+    if (rg.status === 'wontfix') { rect.setAttribute('stroke-dasharray','6 4'); rect.setAttribute('opacity','0.65'); }
+    rect.onclick = (e) => { e.stopPropagation(); openEditor(k, rg.id, wrap, e.clientX, e.clientY); };
     svg.appendChild(rect);
     const t = document.createElementNS('http://www.w3.org/2000/svg','text');
     t.setAttribute('class','rgn-label');
     t.setAttribute('x',x+2); t.setAttribute('y',y+12); t.setAttribute('fill',stroke); t.setAttribute('font-size','11');
-    t.textContent = rg.kind; svg.appendChild(t);
+    t.textContent = (rg.status === 'wontfix' ? '✓ ' : '') + rg.kind; svg.appendChild(t);
   }
-}
-
-function editRegion(k, id, wrap) {
-  const rg = (WL[k]||[]).find(r => r.id === id); if (!rg) return;
-  const kind = prompt('kind (' + KINDS.join('/') + ') — blank to DELETE:', rg.kind);
-  if (kind === null) return;
-  if (kind === '') { WL[k] = WL[k].filter(r => r.id !== id); redraw(wrap); return; }
-  rg.kind = kind;
-  const n = prompt('note:', rg.note || '');
-  if (n !== null) rg.note = n;
-  const st = prompt('status (open/wontfix/fixed):', rg.status);
-  if (st) rg.status = st;
-  rg.source = 'human';
-  delete rg.detail;
-  redraw(wrap);
 }
 
 function svgPoint(svg, evt) {
@@ -293,14 +330,18 @@ document.querySelectorAll('.diffwrap').forEach(wrap => {
     const w = Math.abs(end.x-start.x), h = Math.abs(end.y-start.y);
     start = null;
     if (w < 4 || h < 4) return;
-    (WL[k] = WL[k] || []).push({ id: 'h' + Date.now() + '-' + Math.floor(Math.random() * 1e6), box:[x,y,w,h], source:'human', kind:'other', note:'', status:'open' });
-    editRegion(k, WL[k][WL[k].length-1].id, wrap);
+    const id = 'h' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
+    (WL[k] = WL[k] || []).push({ id, box:[x,y,w,h], source:'human', kind:'other', note:'', status:'open' });
+    redraw(wrap);
+    openEditor(k, id, wrap, e.clientX, e.clientY);
   });
 });
 
-document.querySelectorAll('img').forEach(i => i.onclick = () => document.fullscreenElement ? document.exitFullscreen() : i.requestFullscreen());
+// fullscreen zoom on the legacy/rebuild images only (the diff image hosts the annotation overlay)
+document.querySelectorAll('.trio img').forEach(i => { if (i.closest('.diffwrap')) return; i.onclick = () => document.fullscreenElement ? document.exitFullscreen() : i.requestFullscreen(); });
 
 document.getElementById('save').onclick = async () => {
+  const btn = document.getElementById('save'); btn.textContent = 'Saving…';
   const files = {};
   for (const [k, regions] of Object.entries(WL)) {
     const [surface, viewport, section] = k.split('.');
@@ -310,7 +351,7 @@ document.getElementById('save').onclick = async () => {
   for (const data of Object.values(files)) {
     await fetch('/worklist', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
   }
-  alert('Saved.');
+  btn.textContent = 'Saved ✓'; setTimeout(() => btn.textContent = 'Save worklist', 1500);
 };
 \x3c/script>`;
 }
@@ -337,7 +378,7 @@ export function reportHtml(results) {
 
     const diffFig = (s, r) => `
       <figure class="diffwrap" data-section="${s.section}" data-vp="${r.viewport}" data-surface="${r.surface}">
-        <figcaption>diff (red = differs) · ${s.openCount ?? 0} open</figcaption>
+        <figcaption>diff (red = differs) · ${s.openCount ?? 0} open · ✎ click a box or drag to annotate</figcaption>
         <div class="canvas">
           <img src="${s.base}.diff.png">
           <svg class="overlay" preserveAspectRatio="none" viewBox="0 0 ${s.diffW ?? 1} ${s.diffH ?? 1}">
@@ -379,6 +420,21 @@ export function reportHtml(results) {
   .canvas img{width:100%;display:block}
   .overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   .overlay .rgn{pointer-events:all;cursor:pointer}
+  .overlay .rgn:hover{fill:rgba(245,158,11,.22)}
+  .diffwrap .canvas{cursor:crosshair}
+  .diffwrap figcaption{color:#f59e0b;font-weight:600}
+  #editor{position:absolute;z-index:50;display:none;width:280px;background:#18181b;border:1px solid #3f3f46;border-radius:8px;padding:10px;box-shadow:0 8px 24px rgba(0,0,0,.55);font-size:.8rem}
+  #editor .ed-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  #editor label{width:46px;color:#a1a1aa}
+  #editor select,#editor input{flex:1;background:#0a0a0a;color:#f5f5f5;border:1px solid #3f3f46;border-radius:5px;padding:4px 6px}
+  #editor .ed-seg{display:flex;gap:4px;flex:1}
+  #editor .ed-seg button{flex:1;background:#0a0a0a;color:#a1a1aa;border:1px solid #3f3f46;border-radius:5px;padding:4px;cursor:pointer;text-transform:capitalize}
+  #editor .ed-seg button.on{background:#f59e0b;color:#000;border-color:#f59e0b;font-weight:600}
+  #editor .ed-seg button[data-st=wontfix].on{background:#22c55e;color:#000;border-color:#22c55e}
+  #editor .ed-seg button[data-st=fixed].on{background:#3b82f6;color:#fff;border-color:#3b82f6}
+  #editor .ed-actions{display:flex;align-items:center;gap:8px}
+  #editor .ed-danger{background:#7f1d1d;color:#fff;border:1px solid #991b1b;border-radius:5px;padding:4px 8px;cursor:pointer}
+  #editor #ed-close{background:#3f3f46;color:#fff;border:none;border-radius:5px;padding:4px 12px;cursor:pointer}
 </style></head><body>
 <header><h1>Visual parity — reference vs rebuild · green ≤0.5% · click image to zoom · % UNDERCOUNTS background-heavy bands → trust the diff image + heights</h1><button id="save">Save worklist</button></header>
 ${results.map(block).join('\n')}
