@@ -205,3 +205,22 @@ test('classifyHumanRegions labels a human box over the recolored CTA as recolor 
   assert.equal(regions[0].source, 'human');
 });
 
+test('region box is hidden until its fix-list row is hovered', async () => {
+  const results = [{ surface: 'home', viewport: 'desktop', sections: [{
+    section: 'hero', base: 'home.desktop.hero', pct: '4.20', legacyH: 100, rebuildH: 100,
+    legacyTop: 190, rebuildTop: 190, diffW: 1280, diffH: 70, adjustedPct: 4.2, openCount: 1,
+    regions: [{ id: 'a1', box: [40,10,160,48], source: 'auto', kind: 'recolor', detail: 'x', note: '', status: 'open' }],
+  }] }];
+  const html = reportHtml(results);
+  const f = join(tmpdir(), `vp-hover-${Date.now()}.html`); writeFileSync(f, html);
+  const p2 = await browser.newPage();
+  try {
+    await p2.goto(pathToFileURL(f).href);
+    const before = await p2.evaluate(() => getComputedStyle(document.querySelector('.overlay .rgn')).visibility);
+    assert.equal(before, 'hidden', 'box hidden by default');
+    await p2.hover('.fix-row[data-id="a1"]');
+    const during = await p2.evaluate(() => getComputedStyle(document.querySelector('.overlay .rgn')).visibility);
+    assert.equal(during, 'visible', 'box revealed while its row is hovered');
+  } finally { await p2.close(); unlinkSync(f); }
+});
+

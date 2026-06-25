@@ -64,6 +64,12 @@ test('reportHtml escapes user-controlled region kind', () => {
   assert.ok(!html.includes('>a<b<'), 'no raw unescaped a<b in markup');
 });
 
+test('region boxes are hidden by default, revealed on fix-list hover', () => {
+  const html = reportHtml(sampleResults);
+  assert.ok(html.includes('.overlay .rgn,.overlay .rgn-label{visibility:hidden}'), 'boxes hidden by default');
+  assert.ok(html.includes('.overlay .rgn.show'), 'reveal rule present');
+});
+
 test('reportHtml shows adjusted metric line + open count', () => {
   const html = reportHtml(sampleResults);
   assert.ok(html.includes('adj 4.2%'), 'adjusted pct');

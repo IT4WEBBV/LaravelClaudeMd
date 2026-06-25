@@ -307,8 +307,9 @@ function openEditor(k, id, clientX, clientY) {
   let left = Math.min(clientX + 10, window.innerWidth - w - pad);
   let top = clientY + 10; if (top + 160 > window.innerHeight) top = Math.max(pad, clientY - 170);
   ed.style.left = Math.max(pad, left) + 'px'; ed.style.top = (top + window.scrollY) + 'px';
+  setHi(k, id, true);
 }
-function closeEditor() { ed.style.display = 'none'; editing = null; }
+function closeEditor() { if (editing) setHi(editing.k, editing.id, false); ed.style.display = 'none'; editing = null; }
 edNote.oninput = () => { const rg = find(); if (rg) { rg.note = edNote.value; rg.source = 'human'; renderAll(); } };
 edSeg.querySelectorAll('button').forEach(b => b.onclick = () => {
   const rg = find(); if (!rg) return;
@@ -338,7 +339,7 @@ function drawPane(svg, k, pane) {
     rect.onclick = (e) => { e.stopPropagation(); openEditor(k, rg.id, e.clientX, e.clientY); };
     svg.appendChild(rect);
     const t = document.createElementNS('http://www.w3.org/2000/svg','text');
-    t.setAttribute('class','rgn-label'); t.setAttribute('x',x+2); t.setAttribute('y',y+12);
+    t.setAttribute('class','rgn-label'); t.dataset.id = rg.id; t.setAttribute('x',x+2); t.setAttribute('y',y+12);
     t.setAttribute('fill',stroke); t.setAttribute('font-size','11'); t.textContent = labelOf(rg);
     svg.appendChild(t);
   }
@@ -361,7 +362,7 @@ function drawFixlist(box, k) {
   }
 }
 function setHi(k, id, on) {
-  document.querySelectorAll('.sec[data-key="' + CSS.escape(k) + '"] .rgn[data-id="' + CSS.escape(id) + '"]').forEach(r => r.classList.toggle('hi', on));
+  document.querySelectorAll('.sec[data-key="' + CSS.escape(k) + '"] .overlay [data-id="' + CSS.escape(id) + '"]').forEach(el => el.classList.toggle('show', on));
 }
 
 function renderAll() {
@@ -454,7 +455,7 @@ export function reportHtml(results, { reportName } = {}) {
       const [x, y, w, h] = rg.box, stroke = colorFor(rg);
       const dash = rg.status === 'wontfix' ? 'stroke-dasharray="6 4" opacity="0.65"' : '';
       return `<rect class="rgn" data-id="${esc(rg.id)}" x="${x}" y="${y}" width="${w}" height="${h}" fill="transparent" stroke="${stroke}" stroke-width="2" ${dash}></rect>` +
-        `<text class="rgn-label" x="${x + 2}" y="${y + 12}" fill="${stroke}" font-size="11">${esc(labelOf(rg))}</text>`;
+        `<text class="rgn-label" data-id="${esc(rg.id)}" x="${x + 2}" y="${y + 12}" fill="${stroke}" font-size="11">${esc(labelOf(rg))}</text>`;
     };
     const fixRow = (rg) => {
       const meta = rg.detail ? esc(rg.detail) : `(${rg.box.join(',')})`;
@@ -505,8 +506,9 @@ export function reportHtml(results, { reportName } = {}) {
   .canvas img{width:100%;display:block;border:1px solid #27272a;background:#fff;cursor:zoom-in}
   img:fullscreen{width:auto;height:100vh;background:#fff}
   .overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-  .overlay .rgn{pointer-events:all;cursor:pointer}
-  .overlay .rgn:hover,.overlay .rgn.hi{fill:rgba(96,165,250,.25)}
+  .overlay .rgn,.overlay .rgn-label{visibility:hidden}
+  .overlay .rgn.show{visibility:visible;fill:rgba(96,165,250,.18);pointer-events:all;cursor:pointer}
+  .overlay .rgn-label.show{visibility:visible}
   .pane .canvas{cursor:crosshair}
   .miss h3{color:#f59e0b}
   .fixlist{font-size:.8rem;border:1px solid #27272a;border-radius:6px;background:#0f0f10;max-height:480px;overflow:auto}
