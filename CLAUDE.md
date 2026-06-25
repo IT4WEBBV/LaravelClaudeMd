@@ -495,3 +495,53 @@ Re-run step 3 whenever either repo adds a new skill (existing ones update via `g
 **Caveats**
 - Only link the `skills/` folders. Do **not** symlink `DevOps-Claude-Config/settings.json` or its `CLAUDE.md` over yours — that repo is a colleague's personal config; its settings/instructions are not ours.
 - Skill names must be unique across the two repos. If both ever ship a folder with the same name, the second `ln` silently wins — rename one before linking.
+
+---
+
+## Second Brain (basic-memory archival memory)
+
+A cross-project knowledge vault lives at `~/GitProjects/SecondBrain/SecondBrain/` (private repo
+`jonneroelofs/SecondBrain`), served to AI via the
+[`basic-memory`](https://github.com/basicmachines-co/basic-memory) MCP server. It is the
+**archival tier** (queried on demand). Native Claude Code auto-memory is the **hot tier** (always
+injected, small, "current sprint" horizon). Markdown is the source of truth; the SQLite index in
+`~/.basic-memory/` is rebuildable (`basic-memory reindex`). Synced via git, **not** basic-memory cloud.
+
+**READ it** (`search_notes` / `build_context`, or CLI `basic-memory tool search-notes "<query>"`) when:
+- starting work on a project → read its `projects/<name>` note first
+- touching an it4web package → read its `packages/<name>` note
+- making an architecture/tooling decision → search `decisions/`
+- hitting a recurring/procedural task → search `playbooks/`
+
+**WRITE to it** (`write_note`) when something non-obvious is worth reusing across sessions — a
+decision, gotcha, convention, or "why". One fact per note; new facts start `confidence: provisional`
+and become `confirmed` when they recur. Observations as `- [category] ...`, relations as typed
+wikilinks (see the vault's own `README.md`).
+
+- **Never store** secrets, credentials, or client PII — it is a git repo.
+- **Don't duplicate** what this CLAUDE.md or a skill already documents — link to it instead.
+- The vault repo **commits directly to `main`** (no PRs); that exception is declared in the vault's
+  own `CLAUDE.md` and applies only there.
+
+### Second Brain (multi-machine setup)
+
+Like the skills, the vault is one more git repo pulled into `~/GitProjects`. On a new machine:
+
+```bash
+# 1. Clone the vault
+git clone git@github.com:jonneroelofs/SecondBrain.git ~/GitProjects/SecondBrain/SecondBrain
+
+# 2. Install basic-memory (needs Python >=3.12; uv fetches it automatically)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv tool install basic-memory
+
+# 3. Register the project (points basic-memory at the local clone) and make it default
+basic-memory project add SecondBrain ~/GitProjects/SecondBrain/SecondBrain
+basic-memory project default SecondBrain
+basic-memory reindex            # initial index (0.22.1 has no `sync` subcommand)
+
+# 4. Register the MCP server with Claude Code (user scope; takes effect next session)
+claude mcp add --scope user basic-memory -- "$HOME/.local/bin/basic-memory" mcp
+```
+
+Pull the vault repo at session start alongside the other config repos.
