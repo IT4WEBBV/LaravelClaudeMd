@@ -226,6 +226,7 @@ async function run() {
                     await fs.writeFile(path.join(OUT_DIR, `${base}.diff.png`), PNG.sync.write(diff));
                     const fresh = await detectRegions(lp, rp, diff, lt, rt, { minPixels: CONFIG.noiseMinPixels });
                     const merged = mergeRegions(fresh, priorSectionRegions(priorWorklist, s.name));
+                    await classifyHumanRegions(lp, rp, merged, lt, rt);
                     const wontfixBoxes = merged.filter(r => r.status === 'wontfix').map(r => r.box);
                     const changedInWontfix = countMaskInBoxes(maskFromDiff(diff.data, diff.width, diff.height), diff.width, wontfixBoxes);
                     sectionResults.push({
@@ -556,6 +557,22 @@ export async function detectRegions(lp, rp, diff, legacyTop, rebuildTop, { minPi
     out.push({ id: `a${++n}`, box: [reg.x, reg.y, reg.w, reg.h], source: 'auto', kind, detail, status: 'open' });
   }
   return out;
+}
+
+// Classify human-drawn regions the same way auto regions are classified: hit-test the box
+// centre on both sides and run classifyKind. Run on re-runs so a box YOU drew comes back
+// labelled — categories are the machine's job, not yours. Preserves note/status/pane.
+export async function classifyHumanRegions(lp, rp, regions, legacyTop, rebuildTop) {
+  for (const rg of regions) {
+    if (rg.source !== 'human' || (rg.kind && rg.kind !== 'other')) continue;
+    const cx = rg.box[0] + Math.floor(rg.box[2] / 2);
+    const cy = rg.box[1] + Math.floor(rg.box[3] / 2);
+    const lh = await captureHit(lp, cx, legacyTop + cy);
+    const rh = await captureHit(rp, cx, rebuildTop + cy);
+    const { kind, detail } = classifyKind(lh, rh);
+    rg.kind = kind; rg.detail = detail;
+  }
+  return regions;
 }
 
 // Hit-test a document point on one render; returns the Hit shape classifyKind expects.

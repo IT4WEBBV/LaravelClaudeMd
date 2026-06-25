@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { captureHit, detectRegions, reportHtml, loadConfig } from './parity-harness.mjs';
+import { captureHit, detectRegions, reportHtml, loadConfig, classifyHumanRegions } from './parity-harness.mjs';
 import { PNG } from 'pngjs';
 
 let browser, page;
@@ -189,5 +189,19 @@ test('file:// Copy feedback: feedbackMarkdown is callable in-page and yields mar
     assert.match(md, /## Visual parity feedback — report: members/);
     assert.match(md, /\[recolor\] hero/);
   } finally { await p.close(); unlinkSync(f); }
+});
+
+test('classifyHumanRegions labels a human box over the recolored CTA as recolor (note preserved)', async () => {
+  const ref = await browser.newPage();
+  const neu = await browser.newPage();
+  await ref.goto(pathToFileURL(join(process.cwd(), 'fixtures/ref.html')).href);
+  await neu.goto(pathToFileURL(join(process.cwd(), 'fixtures/new.html')).href);
+  // CTA band top=190; CTA sits at doc y 200..248, x 40..200 -> band-local box ~ (40,10,160,48).
+  const regions = [{ id: 'h1', box: [40, 10, 160, 48], source: 'human', kind: null, note: 'mine', status: 'open' }];
+  await classifyHumanRegions(ref, neu, regions, 190, 190);
+  await ref.close(); await neu.close();
+  assert.equal(regions[0].kind, 'recolor', 'machine fills the kind for the human box');
+  assert.equal(regions[0].note, 'mine', 'human note is preserved');
+  assert.equal(regions[0].source, 'human');
 });
 
