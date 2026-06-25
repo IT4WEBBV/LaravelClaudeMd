@@ -170,9 +170,21 @@ export function feedbackMarkdown(worklistByKey, { reportName } = {}) {
   const lines = [`## Visual parity feedback${reportName ? ` — report: ${reportName}` : ''}`];
   for (const [head, items] of Object.entries(bySurfaceVp)) {
     lines.push('', `### ${head}`);
-    for (const { section, r } of items) {
+    // collapse identical machine differences (same section+kind+detail); humans stay individual
+    const groups = new Map();
+    for (const it of items) {
+      const r = it.r;
+      const sig = r.source === 'human' ? 'h:' + r.id : `${it.section}|${r.kind || '?'}|${r.detail || ''}`;
+      if (!groups.has(sig)) groups.set(sig, []);
+      groups.get(sig).push(it);
+    }
+    for (const members of groups.values()) {
+      const { section, r } = members[0];
+      const count = members.length;
       const cat = r.source === 'human' && !r.kind ? 'you' : (r.kind || 'unclassified');
-      const where = r.detail ? `${r.detail} @ (${r.box.join(',')})` : `@ (${r.box.join(',')})`;
+      const where = count > 1
+        ? (r.detail ? `${r.detail} ×${count}` : `${count} regions`)
+        : (r.detail ? `${r.detail} @ (${r.box.join(',')})` : `@ (${r.box.join(',')})`);
       const note = r.note ? ` — note: "${r.note}"` : '';
       lines.push(`- [${cat}] ${section} — ${where}${note} — ${r.status || 'open'}`);
     }

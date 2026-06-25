@@ -70,6 +70,27 @@ test('region boxes are hidden by default, revealed on fix-list hover', () => {
   assert.ok(html.includes('.overlay .rgn.show'), 'reveal rule present');
 });
 
+test('reportHtml groups identical machine differences into one row with a count', () => {
+  const regs = [
+    { id:'a1', box:[0,0,10,10], source:'auto', kind:'shift', detail:'Δx -1px, Δy -13px', status:'open' },
+    { id:'a2', box:[0,20,10,10], source:'auto', kind:'shift', detail:'Δx -1px, Δy -13px', status:'open' },
+    { id:'a3', box:[0,40,10,10], source:'auto', kind:'resize', detail:'Δw 0px, Δh 3px', status:'open' },
+  ];
+  const res = [{ surface:'home', viewport:'desktop', sections:[{ ...sampleSection, regions: regs }] }];
+  const html = reportHtml(res);
+  assert.ok(html.includes('×2'), 'two identical shifts collapse into one row ×2');
+  assert.ok(html.includes('data-ids="a1,a2"'), 'grouped row carries both member ids');
+  assert.ok(html.includes('>resize<'), 'a different difference stays its own row');
+});
+
+test('reportHtml keeps human-drawn boxes visible (show class), machine boxes hidden', () => {
+  const res = [{ surface:'home', viewport:'desktop', sections:[{ ...sampleSection, regions:[
+    { id:'h1', box:[1,2,3,4], source:'human', kind:null, note:'mine', status:'open' },
+  ] }] }];
+  const html = reportHtml(res);
+  assert.ok(html.includes('class="rgn show"'), 'human box is always shown');
+});
+
 test('reportHtml shows adjusted metric line + open count', () => {
   const html = reportHtml(sampleResults);
   assert.ok(html.includes('adj 4.2%'), 'adjusted pct');

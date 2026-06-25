@@ -198,6 +198,17 @@ test('feedbackMarkdown omits the report suffix when no reportName', () => {
   assert.ok(!md.includes('report:'));
 });
 
+test('feedbackMarkdown collapses identical machine diffs into one ×N line', () => {
+  const wl = { 'home.desktop.nav': [
+    { id:'a1', box:[0,0,1,1], source:'auto', kind:'shift', detail:'Δx -1px, Δy -13px', status:'open' },
+    { id:'a2', box:[0,2,1,1], source:'auto', kind:'shift', detail:'Δx -1px, Δy -13px', status:'open' },
+    { id:'a3', box:[0,4,1,1], source:'auto', kind:'shift', detail:'Δx -1px, Δy -13px', status:'open' },
+  ] };
+  const md = feedbackMarkdown(wl);
+  assert.match(md, /- \[shift\] nav — Δx -1px, Δy -13px ×3 — open/);
+  assert.equal((md.match(/\[shift\]/g) || []).length, 1, 'one shift line, not three');
+});
+
 // ─── Phase A: resolveStorageState ────────────────────────────────────────────
 test('resolveStorageState: per-surface profile, default fallback, unknown throws', () => {
   const profiles = { maria: 'auth.maria.json' };

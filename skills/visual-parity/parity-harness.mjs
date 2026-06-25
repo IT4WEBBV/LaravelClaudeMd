@@ -280,6 +280,14 @@ const paneOf = (rg) => rg.pane || (rg.kind === 'missing' ? 'legacy' : 'rebuild')
 const colorFor = (rg) => rg.status === 'wontfix' ? '#22c55e' : (rg.source === 'human' ? '#60a5fa' : '#f59e0b');
 const labelOf = (rg) => rg.source === 'human' && !rg.kind ? 'you' : (rg.kind || 'unclassified');
 const escapeHtml = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+// identical machine differences (same kind+detail) collapse into one row; humans never group
+const groupKey = (rg) => rg.source === 'human' ? 'h:' + rg.id : 'a:' + (rg.kind || '?') + '|' + (rg.detail || '');
+function groupsFor(k) {
+  const live = (WL[k] || []).filter(r => r.status !== 'fixed');
+  const map = new Map();
+  for (const rg of live) { const g = groupKey(rg); if (!map.has(g)) map.set(g, []); map.get(g).push(rg); }
+  return [...map.values()];
+}
 
 // ── editor popover: note + ignore toggle + delete (NO kind — categories are machine-owned) ──
 const ed = document.createElement('div'); ed.id = 'editor';
@@ -295,29 +303,31 @@ edActions.append(edDel, spacer, edClose);
 ed.append(mkRow('Note', edNote), mkRow('Status', edSeg), edActions);
 document.body.appendChild(ed);
 
-let editing = null;
-const find = () => editing ? (WL[editing.k]||[]).find(r => r.id === editing.id) : null;
-function openEditor(k, id, clientX, clientY) {
-  const rg = (WL[k]||[]).find(r => r.id === id); if (!rg) return;
-  editing = { k, id };
-  edNote.value = rg.note || '';
-  edSeg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.st === (rg.status || 'open')));
+let editing = null; // { k, ids: [...] }
+const members = () => editing ? (WL[editing.k]||[]).filter(r => editing.ids.includes(r.id)) : [];
+function openEditor(k, ids, clientX, clientY) {
+  if (typeof ids === 'string') ids = [ids];
+  const list = (WL[k]||[]).filter(r => ids.includes(r.id)); if (!list.length) return;
+  editing = { k, ids };
+  const rep = list[0];
+  edNote.value = rep.note || '';
+  edSeg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.st === (rep.status || 'open')));
   ed.style.display = 'block';
   const w = 280, pad = 12;
   let left = Math.min(clientX + 10, window.innerWidth - w - pad);
   let top = clientY + 10; if (top + 160 > window.innerHeight) top = Math.max(pad, clientY - 170);
   ed.style.left = Math.max(pad, left) + 'px'; ed.style.top = (top + window.scrollY) + 'px';
-  setHi(k, id, true);
+  showIds(k, ids, true);
 }
-function closeEditor() { if (editing) setHi(editing.k, editing.id, false); ed.style.display = 'none'; editing = null; }
-edNote.oninput = () => { const rg = find(); if (rg) { rg.note = edNote.value; rg.source = 'human'; renderAll(); } };
+function closeEditor() { if (editing) showIds(editing.k, editing.ids, false); ed.style.display = 'none'; editing = null; }
+edNote.oninput = () => { members().forEach(rg => { rg.note = edNote.value; rg.source = rg.source || 'human'; }); renderAll(); };
 edSeg.querySelectorAll('button').forEach(b => b.onclick = () => {
-  const rg = find(); if (!rg) return;
-  rg.status = b.dataset.st; rg.source = rg.source || 'human';
+  if (!editing) return;
+  members().forEach(rg => { rg.status = b.dataset.st; rg.source = rg.source || 'human'; });
   edSeg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
   renderAll();
 });
-edDel.onclick = () => { if (!editing) return; WL[editing.k] = (WL[editing.k]||[]).filter(r => r.id !== editing.id); closeEditor(); renderAll(); };
+edDel.onclick = () => { if (!editing) return; WL[editing.k] = (WL[editing.k]||[]).filter(r => !editing.ids.includes(r.id)); closeEditor(); renderAll(); };
 edClose.onclick = closeEditor;
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeEditor(); });
 
@@ -331,38 +341,48 @@ function drawPane(svg, k, pane) {
   for (const rg of WL[k] || []) {
     if (rg.status === 'fixed' || paneOf(rg) !== pane) continue;
     const [x,y,w,h] = rg.box, stroke = colorFor(rg);
+    const human = rg.source === 'human';
     const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
-    rect.setAttribute('class','rgn'); rect.dataset.id = rg.id;
+    rect.setAttribute('class', 'rgn' + (human ? ' show' : '')); rect.dataset.id = rg.id;   // human boxes stay visible
     rect.setAttribute('x',x); rect.setAttribute('y',y); rect.setAttribute('width',w); rect.setAttribute('height',h);
     rect.setAttribute('fill','transparent'); rect.setAttribute('stroke',stroke); rect.setAttribute('stroke-width','2');
     if (rg.status === 'wontfix') { rect.setAttribute('stroke-dasharray','6 4'); rect.setAttribute('opacity','0.65'); }
-    rect.onclick = (e) => { e.stopPropagation(); openEditor(k, rg.id, e.clientX, e.clientY); };
+    rect.onclick = (e) => { e.stopPropagation(); openEditor(k, [rg.id], e.clientX, e.clientY); };
     svg.appendChild(rect);
     const t = document.createElementNS('http://www.w3.org/2000/svg','text');
-    t.setAttribute('class','rgn-label'); t.dataset.id = rg.id; t.setAttribute('x',x+2); t.setAttribute('y',y+12);
-    t.setAttribute('fill',stroke); t.setAttribute('font-size','11'); t.textContent = labelOf(rg);
-    svg.appendChild(t);
+    t.setAttribute('class','rgn-label' + (human ? ' show' : '')); t.dataset.id = rg.id;
+    t.setAttribute('x',x+2); t.setAttribute('y',y+12); t.setAttribute('fill',stroke); t.setAttribute('font-size','11');
+    t.textContent = labelOf(rg); svg.appendChild(t);
   }
 }
 
 function drawFixlist(box, k) {
-  const regions = (WL[k]||[]).filter(r => r.status !== 'fixed');
+  const groups = groupsFor(k);
   box.innerHTML = '';
-  if (!regions.length) { box.innerHTML = '<div class="fix-empty">no differences — clean ✓</div>'; return; }
-  for (const rg of regions) {
+  if (!groups.length) { box.innerHTML = '<div class="fix-empty">no differences — clean ✓</div>'; return; }
+  for (const members of groups) {
+    const rep = members[0], ids = members.map(m => m.id);
+    const ignored = members.every(m => m.status === 'wontfix');
     const row = document.createElement('div');
-    row.className = 'fix-row' + (rg.status === 'wontfix' ? ' ignored' : ''); row.dataset.id = rg.id;
-    row.innerHTML = '<span class="cat" style="color:' + colorFor(rg) + '">' + escapeHtml(labelOf(rg)) + '</span>'
-      + '<span class="meta">' + (rg.detail ? escapeHtml(rg.detail) : '(' + rg.box.join(',') + ')') + '</span>'
-      + (rg.note ? '<span class="note">' + escapeHtml(rg.note) + '</span>' : '');
-    row.onmouseenter = () => setHi(k, rg.id, true);
-    row.onmouseleave = () => setHi(k, rg.id, false);
-    row.onclick = (e) => openEditor(k, rg.id, e.clientX, e.clientY);
+    row.className = 'fix-row' + (ignored ? ' ignored' : ''); row.dataset.id = rep.id; row.dataset.ids = ids.join(',');
+    const count = members.length > 1 ? '<span class="count">×' + members.length + '</span>' : '';
+    row.innerHTML = '<span class="cat" style="color:' + colorFor(rep) + '">' + escapeHtml(labelOf(rep)) + '</span>'
+      + '<span class="meta">' + (rep.detail ? escapeHtml(rep.detail) : '(' + rep.box.join(',') + ')') + '</span>' + count
+      + (rep.note ? '<span class="note">' + escapeHtml(rep.note) + '</span>' : '');
+    row.onmouseenter = () => showIds(k, ids, true);
+    row.onmouseleave = () => showIds(k, ids, false);
+    row.onclick = (e) => openEditor(k, ids, e.clientX, e.clientY);
     box.appendChild(row);
   }
 }
-function setHi(k, id, on) {
-  document.querySelectorAll('.sec[data-key="' + CSS.escape(k) + '"] .overlay [data-id="' + CSS.escape(id) + '"]').forEach(el => el.classList.toggle('show', on));
+// reveal/hide a set of MACHINE boxes (human boxes are always visible, so leave them alone)
+function showIds(k, ids, on) {
+  const regions = WL[k] || [];
+  for (const id of ids) {
+    const rg = regions.find(r => r.id === id);
+    if (rg && rg.source === 'human') continue;
+    document.querySelectorAll('.sec[data-key="' + CSS.escape(k) + '"] .overlay [data-id="' + CSS.escape(id) + '"]').forEach(el => el.classList.toggle('show', on));
+  }
 }
 
 function renderAll() {
@@ -389,7 +409,7 @@ document.querySelectorAll('.sec .pane').forEach(pane => {
     start = null; if (w < 4 || h < 4) return;
     const id = 'h' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
     (WL[k] = WL[k] || []).push({ id, box:[x,y,w,h], source:'human', kind:null, note:'', status:'open', pane: pane.dataset.pane });
-    renderAll(); openEditor(k, id, e.clientX, e.clientY);
+    renderAll(); openEditor(k, [id], e.clientX, e.clientY);
   });
 });
 
@@ -451,18 +471,28 @@ export function reportHtml(results, { reportName } = {}) {
     const paneOf = (rg) => rg.pane || (rg.kind === 'missing' ? 'legacy' : 'rebuild');
     const colorFor = (rg) => rg.status === 'wontfix' ? '#22c55e' : (rg.source === 'human' ? '#60a5fa' : '#f59e0b');
     const labelOf = (rg) => rg.source === 'human' && !rg.kind ? 'you' : (rg.kind || 'unclassified');
+    const groupKey = (rg) => rg.source === 'human' ? 'h:' + rg.id : 'a:' + (rg.kind || '?') + '|' + (rg.detail || '');
+    const groupRegions = (regions) => {
+      const map = new Map();
+      for (const rg of regions) { const g = groupKey(rg); if (!map.has(g)) map.set(g, []); map.get(g).push(rg); }
+      return [...map.values()];
+    };
     const boxSvg = (rg) => {
       const [x, y, w, h] = rg.box, stroke = colorFor(rg);
+      const cls = 'rgn' + (rg.source === 'human' ? ' show' : '');
       const dash = rg.status === 'wontfix' ? 'stroke-dasharray="6 4" opacity="0.65"' : '';
-      return `<rect class="rgn" data-id="${esc(rg.id)}" x="${x}" y="${y}" width="${w}" height="${h}" fill="transparent" stroke="${stroke}" stroke-width="2" ${dash}></rect>` +
-        `<text class="rgn-label" data-id="${esc(rg.id)}" x="${x + 2}" y="${y + 12}" fill="${stroke}" font-size="11">${esc(labelOf(rg))}</text>`;
+      return `<rect class="${cls}" data-id="${esc(rg.id)}" x="${x}" y="${y}" width="${w}" height="${h}" fill="transparent" stroke="${stroke}" stroke-width="2" ${dash}></rect>` +
+        `<text class="rgn-label${rg.source === 'human' ? ' show' : ''}" data-id="${esc(rg.id)}" x="${x + 2}" y="${y + 12}" fill="${stroke}" font-size="11">${esc(labelOf(rg))}</text>`;
     };
-    const fixRow = (rg) => {
-      const meta = rg.detail ? esc(rg.detail) : `(${rg.box.join(',')})`;
-      return `<div class="fix-row${rg.status === 'wontfix' ? ' ignored' : ''}" data-id="${esc(rg.id)}">` +
-        `<span class="cat" style="color:${colorFor(rg)}">${esc(labelOf(rg))}</span>` +
-        `<span class="meta">${meta}</span>` +
-        (rg.note ? `<span class="note">${esc(rg.note)}</span>` : '') + `</div>`;
+    const fixRow = (members) => {
+      const rep = members[0], ids = members.map(m => esc(m.id)).join(',');
+      const ignored = members.every(m => m.status === 'wontfix');
+      const count = members.length > 1 ? `<span class="count">×${members.length}</span>` : '';
+      const meta = rep.detail ? esc(rep.detail) : `(${rep.box.join(',')})`;
+      return `<div class="fix-row${ignored ? ' ignored' : ''}" data-id="${esc(rep.id)}" data-ids="${ids}">` +
+        `<span class="cat" style="color:${colorFor(rep)}">${esc(labelOf(rep))}</span>` +
+        `<span class="meta">${meta}</span>${count}` +
+        (rep.note ? `<span class="note">${esc(rep.note)}</span>` : '') + `</div>`;
     };
 
     const block = (r) => {
@@ -472,7 +502,7 @@ export function reportHtml(results, { reportName } = {}) {
             const live = (s.regions ?? []).filter(rg => rg.status !== 'fixed');
             const legacyBoxes = live.filter(rg => paneOf(rg) === 'legacy').map(boxSvg).join('');
             const rebuildBoxes = live.filter(rg => paneOf(rg) === 'rebuild').map(boxSvg).join('');
-            const fixRows = live.length ? live.map(fixRow).join('') : '<div class="fix-empty">no differences — clean ✓</div>';
+            const fixRows = live.length ? groupRegions(live).map(fixRow).join('') : '<div class="fix-empty">no differences — clean ✓</div>';
             const k = `${r.surface}.${r.viewport}.${s.section}`;
             return `<div class="sec" data-key="${esc(k)}">
               <h3>${esc(s.section)} — <span class="${heavy ? 'bad' : 'ok'}">${s.pct}% diff</span>
@@ -517,6 +547,7 @@ export function reportHtml(results, { reportName } = {}) {
   .fix-row.ignored{opacity:.5}
   .fix-row .cat{font-weight:700}
   .fix-row .meta{color:#a1a1aa;font-size:.75rem}
+  .fix-row .count{color:#fbbf24;font-size:.72rem;font-weight:700}
   .fix-row .note{color:#f5f5f5;flex-basis:100%}
   .fix-empty{color:#22c55e;padding:.5rem}
   .diff-toggle{background:#27272a;color:#a1a1aa;border:1px solid #3f3f46;border-radius:5px;padding:1px 7px;cursor:pointer;font-size:.7rem}
