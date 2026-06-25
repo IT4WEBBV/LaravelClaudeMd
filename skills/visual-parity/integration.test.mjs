@@ -172,3 +172,22 @@ test('loadConfig reads an external --config module and normalizes', async () => 
     assert.ok(cfg.dir, 'carries config dir for relative auth paths');
   } finally { unlinkSync(f); }
 });
+
+test('file:// Copy feedback: feedbackMarkdown is callable in-page and yields markdown', async () => {
+  const results = [{ surface: 'home', viewport: 'desktop', sections: [{
+    section: 'hero', base: 'home.desktop.hero', pct: '4.20', legacyH: 100, rebuildH: 100,
+    legacyTop: 190, rebuildTop: 190, diffW: 1280, diffH: 70, adjustedPct: 4.2, openCount: 1,
+    regions: [{ id: 'a1', box: [40,10,160,48], source: 'auto', kind: 'recolor', detail: 'bg x -> y', note: '', status: 'open' }],
+  }] }];
+  const html = reportHtml(results, { reportName: 'members' });
+  const f = join(tmpdir(), `vp-fb-${Date.now()}.html`); writeFileSync(f, html);
+  const p = await browser.newPage(); const errs = []; p.on('pageerror', e => errs.push(e));
+  try {
+    await p.goto(pathToFileURL(f).href);
+    const md = await p.evaluate(() => feedbackMarkdown(WL, { reportName: REPORT_NAME }));
+    assert.equal(errs.length, 0, `page errors: ${errs.map(e=>e.message).join('; ')}`);
+    assert.match(md, /## Visual parity feedback — report: members/);
+    assert.match(md, /\[recolor\] hero/);
+  } finally { await p.close(); unlinkSync(f); }
+});
+

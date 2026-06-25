@@ -27,52 +27,59 @@ const sampleSection = {
 };
 
 const sampleResults = [
-  {
-    surface: 'home',
-    viewport: 'desktop',
-    sections: [sampleSection],
-  },
+  { surface: 'home', viewport: 'desktop', sections: [sampleSection] },
 ];
 
-test('reportHtml includes overlay with correct viewBox', () => {
+test('reportHtml renders legacy + rebuild panes and a fix-list', () => {
   const html = reportHtml(sampleResults);
-  assert.ok(html.includes('class="overlay"'), 'should have class="overlay"');
-  assert.ok(html.includes('viewBox="0 0 1280 70"'), 'should have viewBox with diffW and diffH');
+  assert.ok(html.includes('class="pane legacy"'), 'legacy pane');
+  assert.ok(html.includes('class="pane rebuild"'), 'rebuild pane');
+  assert.ok(html.includes('class="fixlist"'), 'fix-list pane');
 });
 
-test('reportHtml includes region rect with data-id', () => {
+test('reportHtml renders the region box and a linked fix-list row', () => {
   const html = reportHtml(sampleResults);
-  assert.ok(html.includes('class="rgn"'), 'should have class="rgn"');
-  assert.ok(html.includes('data-id="a1"'), 'should have data-id="a1"');
+  assert.ok(html.includes('class="rgn" data-id="a1"'), 'box rect with data-id');
+  assert.ok(html.includes('class="fix-row" data-id="a1"'), 'fix-list row with the same data-id');
 });
 
-test('reportHtml includes region kind text', () => {
+test('reportHtml shows the machine kind read-only (no kind <select>)', () => {
   const html = reportHtml(sampleResults);
-  assert.ok(html.includes('>recolor<'), 'should show the region kind as text content');
+  assert.ok(html.includes('>recolor<'), 'machine kind shown as text');
+  assert.ok(!html.includes('<select'), 'human no longer picks a kind');
+});
+
+test('reportHtml keeps the raw diff behind a toggle', () => {
+  const html = reportHtml(sampleResults);
+  assert.ok(html.includes('class="diff-toggle"'), 'diff toggle button');
+  assert.ok(html.includes('home.desktop.hero.diff.png'), 'raw diff image still referenced');
 });
 
 test('reportHtml escapes user-controlled region kind', () => {
   const results = [
-    {
-      surface: 'home',
-      viewport: 'desktop',
-      sections: [{ ...sampleSection, regions: [{ ...sampleRegion, kind: 'a<b' }] }],
-    },
+    { surface: 'home', viewport: 'desktop', sections: [{ ...sampleSection, regions: [{ ...sampleRegion, kind: 'a<b' }] }] },
   ];
   const html = reportHtml(results);
   assert.ok(html.includes('a&lt;b'), 'should escape < in kind');
-  assert.ok(!html.includes('a<b'), 'should not contain raw unescaped a<b');
+  assert.ok(!html.includes('>a<b<'), 'no raw unescaped a<b in markup');
 });
 
-test('reportHtml includes adjusted metric line', () => {
+test('reportHtml shows adjusted metric line + open count', () => {
   const html = reportHtml(sampleResults);
-  assert.ok(html.includes('adj 4.2%'), 'should show adj pct');
-  assert.ok(html.includes('1 open'), 'should show open count');
+  assert.ok(html.includes('adj 4.2%'), 'adjusted pct');
+  assert.ok(html.includes('1 open'), 'open count');
+});
+
+test('reportHtml embeds feedbackMarkdown + the report name', () => {
+  const html = reportHtml(sampleResults, { reportName: 'members' });
+  assert.ok(html.includes('function feedbackMarkdown'), 'serializer embedded for client-side Copy feedback');
+  assert.ok(html.includes('const REPORT_NAME = "members"'), 'report name embedded');
+  assert.ok(html.includes('id="copyfeedback"'), 'Copy feedback button present');
 });
 
 test('worklistByKey builds map keyed by surface.viewport.section', () => {
   const map = worklistByKey(sampleResults);
-  assert.ok('home.desktop.hero' in map, 'should have home.desktop.hero key');
+  assert.ok('home.desktop.hero' in map);
   assert.equal(map['home.desktop.hero'].length, 1);
   assert.equal(map['home.desktop.hero'][0].id, 'a1');
 });
@@ -82,13 +89,10 @@ test('worklistByKey skips missing sections', () => {
     {
       surface: 'home',
       viewport: 'desktop',
-      sections: [
-        sampleSection,
-        { section: 'footer', missing: { legacy: true, rebuild: false } },
-      ],
+      sections: [sampleSection, { section: 'footer', missing: { legacy: true, rebuild: false } }],
     },
   ];
   const map = worklistByKey(resultsWithMissing);
   assert.ok('home.desktop.hero' in map);
-  assert.ok(!('home.desktop.footer' in map), 'should not include missing sections');
+  assert.ok(!('home.desktop.footer' in map));
 });

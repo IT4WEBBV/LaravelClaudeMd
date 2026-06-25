@@ -264,127 +264,174 @@ async function run() {
     }
 }
 
-export function reportScript(worklistByKey) {
+export function reportScript(worklistByKey, reportName) {
   const safeJson = JSON.stringify(worklistByKey).replace(/</g, '\\u003c');
   return `<script>
 const WL = ${safeJson}; // key: surface.viewport.section -> regions[]
-const KINDS = ['recolor','shift','resize','missing','extra','typography','overlap','ignore','other','unclassified'];
-const STATUSES = ['open','wontfix','fixed'];
-const key = (el) => el.dataset.surface + '.' + el.dataset.vp + '.' + el.dataset.section;
+const REPORT_NAME = ${JSON.stringify(reportName || null)};
+const STATUSES = ['open','wontfix'];
+const served = location.protocol.startsWith('http');
 
-// ── inline editor popover (replaces native prompt() chains) ──
-const ed = document.createElement('div');
-ed.id = 'editor';
-const mkRow = (labelText, child) => { const r=document.createElement('div'); r.className='ed-row'; const l=document.createElement('label'); l.textContent=labelText; r.appendChild(l); r.appendChild(child); return r; };
-const edKind = document.createElement('select');
-KINDS.forEach(k => { const o=document.createElement('option'); o.value=k; o.textContent=k; edKind.appendChild(o); });
-const edStatus = document.createElement('div'); edStatus.className='ed-seg';
-STATUSES.forEach(st => { const b=document.createElement('button'); b.type='button'; b.dataset.st=st; b.textContent=st; edStatus.appendChild(b); });
-const edNote = document.createElement('input'); edNote.type='text'; edNote.placeholder='optional note';
+// fix-list serializer — the SAME pure function the Node side uses (embedded verbatim)
+${feedbackMarkdown.toString()}
+
+const paneOf = (rg) => rg.pane || (rg.kind === 'missing' ? 'legacy' : 'rebuild');
+const colorFor = (rg) => rg.status === 'wontfix' ? '#22c55e' : (rg.source === 'human' ? '#60a5fa' : '#f59e0b');
+const labelOf = (rg) => rg.source === 'human' && !rg.kind ? 'you' : (rg.kind || 'unclassified');
+const escapeHtml = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+// ── editor popover: note + ignore toggle + delete (NO kind — categories are machine-owned) ──
+const ed = document.createElement('div'); ed.id = 'editor';
+const mkRow = (t, child) => { const r=document.createElement('div'); r.className='ed-row'; const l=document.createElement('label'); l.textContent=t; r.appendChild(l); r.appendChild(child); return r; };
+const edNote = document.createElement('input'); edNote.type='text'; edNote.placeholder='what looks wrong? (your words)';
+const edSeg = document.createElement('div'); edSeg.className='ed-seg';
+STATUSES.forEach(st => { const b=document.createElement('button'); b.type='button'; b.dataset.st=st; b.textContent = st==='wontfix' ? 'ignore' : 'open'; edSeg.appendChild(b); });
 const edActions = document.createElement('div'); edActions.className='ed-actions';
 const edDel = document.createElement('button'); edDel.className='ed-danger'; edDel.textContent='Delete';
 const edClose = document.createElement('button'); edClose.id='ed-close'; edClose.textContent='Done';
 const spacer = document.createElement('span'); spacer.style.flex='1';
-edActions.appendChild(edDel); edActions.appendChild(spacer); edActions.appendChild(edClose);
-ed.appendChild(mkRow('Kind', edKind));
-ed.appendChild(mkRow('Status', edStatus));
-ed.appendChild(mkRow('Note', edNote));
-ed.appendChild(edActions);
+edActions.append(edDel, spacer, edClose);
+ed.append(mkRow('Note', edNote), mkRow('Status', edSeg), edActions);
 document.body.appendChild(ed);
 
 let editing = null;
 const find = () => editing ? (WL[editing.k]||[]).find(r => r.id === editing.id) : null;
-
-function openEditor(k, id, wrap, clientX, clientY) {
+function openEditor(k, id, clientX, clientY) {
   const rg = (WL[k]||[]).find(r => r.id === id); if (!rg) return;
-  editing = { k, id, wrap };
-  edKind.value = rg.kind;
+  editing = { k, id };
   edNote.value = rg.note || '';
-  edStatus.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.st === (rg.status || 'open')));
+  edSeg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.st === (rg.status || 'open')));
   ed.style.display = 'block';
   const w = 280, pad = 12;
   let left = Math.min(clientX + 10, window.innerWidth - w - pad);
-  let top = clientY + 10;
-  if (top + 190 > window.innerHeight) top = Math.max(pad, clientY - 200);
-  ed.style.left = Math.max(pad, left) + 'px';
-  ed.style.top = (top + window.scrollY) + 'px';
+  let top = clientY + 10; if (top + 160 > window.innerHeight) top = Math.max(pad, clientY - 170);
+  ed.style.left = Math.max(pad, left) + 'px'; ed.style.top = (top + window.scrollY) + 'px';
 }
 function closeEditor() { ed.style.display = 'none'; editing = null; }
-
-edKind.onchange = () => { const rg = find(); if (rg) { rg.kind = edKind.value; rg.source='human'; delete rg.detail; redraw(editing.wrap); } };
-edNote.oninput = () => { const rg = find(); if (rg) { rg.note = edNote.value; rg.source='human'; } };
-edStatus.querySelectorAll('button').forEach(b => b.onclick = () => {
+edNote.oninput = () => { const rg = find(); if (rg) { rg.note = edNote.value; rg.source = 'human'; renderAll(); } };
+edSeg.querySelectorAll('button').forEach(b => b.onclick = () => {
   const rg = find(); if (!rg) return;
-  rg.status = b.dataset.st; rg.source='human';
-  edStatus.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
-  redraw(editing.wrap);
+  rg.status = b.dataset.st; rg.source = rg.source || 'human';
+  edSeg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  renderAll();
 });
-edDel.onclick = () => { if (!editing) return; WL[editing.k] = (WL[editing.k]||[]).filter(r => r.id !== editing.id); redraw(editing.wrap); closeEditor(); };
+edDel.onclick = () => { if (!editing) return; WL[editing.k] = (WL[editing.k]||[]).filter(r => r.id !== editing.id); closeEditor(); renderAll(); };
 edClose.onclick = closeEditor;
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeEditor(); });
-
-function redraw(wrap) {
-  const k = key(wrap), svg = wrap.querySelector('.overlay');
-  svg.querySelectorAll('.rgn,.rgn-label').forEach(n => n.remove());
-  for (const rg of WL[k] || []) {
-    const [x,y,w,h] = rg.box;
-    const stroke = rg.status === 'wontfix' ? '#22c55e' : (rg.status === 'fixed' ? '#3b82f6' : (rg.source === 'human' ? '#60a5fa' : '#f59e0b'));
-    const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
-    rect.setAttribute('class','rgn'); rect.dataset.id = rg.id;
-    rect.setAttribute('x',x); rect.setAttribute('y',y); rect.setAttribute('width',w); rect.setAttribute('height',h);
-    rect.setAttribute('fill','transparent'); rect.setAttribute('stroke',stroke); rect.setAttribute('stroke-width','2');
-    if (rg.status === 'wontfix') { rect.setAttribute('stroke-dasharray','6 4'); rect.setAttribute('opacity','0.65'); }
-    rect.onclick = (e) => { e.stopPropagation(); openEditor(k, rg.id, wrap, e.clientX, e.clientY); };
-    svg.appendChild(rect);
-    const t = document.createElementNS('http://www.w3.org/2000/svg','text');
-    t.setAttribute('class','rgn-label');
-    t.setAttribute('x',x+2); t.setAttribute('y',y+12); t.setAttribute('fill',stroke); t.setAttribute('font-size','11');
-    t.textContent = (rg.status === 'wontfix' ? '✓ ' : '') + rg.kind; svg.appendChild(t);
-  }
-}
 
 function svgPoint(svg, evt) {
   const vb = svg.viewBox.baseVal, rect = svg.getBoundingClientRect();
   return { x: Math.round((evt.clientX-rect.left)/rect.width*vb.width), y: Math.round((evt.clientY-rect.top)/rect.height*vb.height) };
 }
 
-document.querySelectorAll('.diffwrap').forEach(wrap => {
-  redraw(wrap);
-  const svg = wrap.querySelector('.overlay');
-  let start = null;
+function drawPane(svg, k, pane) {
+  svg.querySelectorAll('.rgn,.rgn-label').forEach(n => n.remove());
+  for (const rg of WL[k] || []) {
+    if (rg.status === 'fixed' || paneOf(rg) !== pane) continue;
+    const [x,y,w,h] = rg.box, stroke = colorFor(rg);
+    const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    rect.setAttribute('class','rgn'); rect.dataset.id = rg.id;
+    rect.setAttribute('x',x); rect.setAttribute('y',y); rect.setAttribute('width',w); rect.setAttribute('height',h);
+    rect.setAttribute('fill','transparent'); rect.setAttribute('stroke',stroke); rect.setAttribute('stroke-width','2');
+    if (rg.status === 'wontfix') { rect.setAttribute('stroke-dasharray','6 4'); rect.setAttribute('opacity','0.65'); }
+    rect.onclick = (e) => { e.stopPropagation(); openEditor(k, rg.id, e.clientX, e.clientY); };
+    svg.appendChild(rect);
+    const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('class','rgn-label'); t.setAttribute('x',x+2); t.setAttribute('y',y+12);
+    t.setAttribute('fill',stroke); t.setAttribute('font-size','11'); t.textContent = labelOf(rg);
+    svg.appendChild(t);
+  }
+}
+
+function drawFixlist(box, k) {
+  const regions = (WL[k]||[]).filter(r => r.status !== 'fixed');
+  box.innerHTML = '';
+  if (!regions.length) { box.innerHTML = '<div class="fix-empty">no differences — clean ✓</div>'; return; }
+  for (const rg of regions) {
+    const row = document.createElement('div');
+    row.className = 'fix-row' + (rg.status === 'wontfix' ? ' ignored' : ''); row.dataset.id = rg.id;
+    row.innerHTML = '<span class="cat" style="color:' + colorFor(rg) + '">' + escapeHtml(labelOf(rg)) + '</span>'
+      + '<span class="meta">' + (rg.detail ? escapeHtml(rg.detail) : '(' + rg.box.join(',') + ')') + '</span>'
+      + (rg.note ? '<span class="note">' + escapeHtml(rg.note) + '</span>' : '');
+    row.onmouseenter = () => setHi(k, rg.id, true);
+    row.onmouseleave = () => setHi(k, rg.id, false);
+    row.onclick = (e) => openEditor(k, rg.id, e.clientX, e.clientY);
+    box.appendChild(row);
+  }
+}
+function setHi(k, id, on) {
+  document.querySelectorAll('.sec[data-key="' + CSS.escape(k) + '"] .rgn[data-id="' + CSS.escape(id) + '"]').forEach(r => r.classList.toggle('hi', on));
+}
+
+function renderAll() {
+  document.querySelectorAll('.sec[data-key]').forEach(sec => {
+    const k = sec.dataset.key;
+    sec.querySelectorAll('.pane').forEach(p => drawPane(p.querySelector('.overlay'), k, p.dataset.pane));
+    drawFixlist(sec.querySelector('.fixlist-rows'), k);
+    const open = (WL[k]||[]).filter(r => r.status !== 'wontfix' && r.status !== 'fixed').length;
+    const c = sec.querySelector('.opencount'); if (c) c.textContent = open + ' open';
+  });
+}
+
+// drag on a readable pane to add a human region tagged with that pane
+document.querySelectorAll('.sec .pane').forEach(pane => {
+  const svg = pane.querySelector('.overlay'); const sec = pane.closest('.sec'); const k = sec.dataset.key;
   svg.style.pointerEvents = 'all';
+  let start = null;
   svg.addEventListener('mousedown', e => { if (e.target.classList.contains('rgn')) return; start = svgPoint(svg,e); });
   svg.addEventListener('mouseleave', () => { start = null; });
   svg.addEventListener('mouseup', e => {
     if (!start) return;
-    const end = svgPoint(svg,e), k = key(wrap);
-    const x = Math.min(start.x,end.x), y = Math.min(start.y,end.y);
-    const w = Math.abs(end.x-start.x), h = Math.abs(end.y-start.y);
-    start = null;
-    if (w < 4 || h < 4) return;
+    const end = svgPoint(svg,e);
+    const x = Math.min(start.x,end.x), y = Math.min(start.y,end.y), w = Math.abs(end.x-start.x), h = Math.abs(end.y-start.y);
+    start = null; if (w < 4 || h < 4) return;
     const id = 'h' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
-    (WL[k] = WL[k] || []).push({ id, box:[x,y,w,h], source:'human', kind:'other', note:'', status:'open' });
-    redraw(wrap);
-    openEditor(k, id, wrap, e.clientX, e.clientY);
+    (WL[k] = WL[k] || []).push({ id, box:[x,y,w,h], source:'human', kind:null, note:'', status:'open', pane: pane.dataset.pane });
+    renderAll(); openEditor(k, id, e.clientX, e.clientY);
   });
 });
 
-// fullscreen zoom on the legacy/rebuild images only (the diff image hosts the annotation overlay)
-document.querySelectorAll('.trio img').forEach(i => { if (i.closest('.diffwrap')) return; i.onclick = () => document.fullscreenElement ? document.exitFullscreen() : i.requestFullscreen(); });
+// raw-diff toggle per section
+document.querySelectorAll('.diff-toggle').forEach(btn => {
+  btn.onclick = () => { const d = btn.closest('.sec').querySelector('.diffrow'); d.hidden = !d.hidden; btn.textContent = d.hidden ? 'show raw diff ▸' : 'hide raw diff ▾'; };
+});
 
-document.getElementById('save').onclick = async () => {
-  const btn = document.getElementById('save'); btn.textContent = 'Saving…';
-  const files = {};
-  for (const [k, regions] of Object.entries(WL)) {
-    const [surface, viewport, section] = k.split('.');
-    const id = surface + '.' + viewport;
-    (files[id] = files[id] || { surface, viewport, sections: [] }).sections.push({ section, regions });
+// fullscreen zoom on a pane image
+document.querySelectorAll('.pane img').forEach(i => { i.onclick = () => document.fullscreenElement ? document.exitFullscreen() : i.requestFullscreen(); });
+
+// Copy feedback — file://-safe: clipboard, else select-in-textarea fallback. Never blocks.
+const fb = document.getElementById('copyfeedback');
+function flash(t){ const o = fb.dataset.label; fb.textContent = t; setTimeout(() => fb.textContent = o, 1500); }
+fb.dataset.label = fb.textContent;
+fb.onclick = async () => {
+  const md = feedbackMarkdown(WL, { reportName: REPORT_NAME });
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try { await navigator.clipboard.writeText(md); flash('Copied ✓'); return; } catch (e) {}
   }
-  for (const data of Object.values(files)) {
-    await fetch('/worklist', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
-  }
-  btn.textContent = 'Saved ✓'; setTimeout(() => btn.textContent = 'Save worklist', 1500);
+  const ta = document.getElementById('fbtext'); ta.value = md; ta.hidden = false; ta.focus(); ta.select();
+  try { document.execCommand('copy'); flash('Copied ✓'); } catch (e) { flash('select + copy'); }
 };
+
+// optional disk persistence — only when served over http(s)
+const saveBtn = document.getElementById('save');
+if (served) {
+  saveBtn.hidden = false;
+  saveBtn.onclick = async () => {
+    saveBtn.textContent = 'Saving…';
+    const files = {};
+    for (const [k, regions] of Object.entries(WL)) {
+      const [surface, viewport, section] = k.split('.');
+      const id = surface + '.' + viewport;
+      (files[id] = files[id] || { surface, viewport, sections: [] }).sections.push({ section, regions });
+    }
+    for (const data of Object.values(files)) {
+      await fetch('/worklist', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+    }
+    saveBtn.textContent = 'Saved ✓'; setTimeout(() => saveBtn.textContent = 'Save to disk', 1500);
+  };
+}
+
+renderAll();
 \x3c/script>`;
 }
 
@@ -397,80 +444,98 @@ export function worklistByKey(results) {
   return map;
 }
 
-export function reportHtml(results) {
+export function reportHtml(results, { reportName } = {}) {
     const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const paneOf = (rg) => rg.pane || (rg.kind === 'missing' ? 'legacy' : 'rebuild');
+    const colorFor = (rg) => rg.status === 'wontfix' ? '#22c55e' : (rg.source === 'human' ? '#60a5fa' : '#f59e0b');
+    const labelOf = (rg) => rg.source === 'human' && !rg.kind ? 'you' : (rg.kind || 'unclassified');
     const boxSvg = (rg) => {
-      const [x, y, w, h] = rg.box;
-      const stroke = rg.source === 'human' ? '#3b82f6' : '#f59e0b';
-      const dash = rg.status === 'wontfix' ? 'stroke-dasharray="6 4" opacity="0.5"' : '';
-      return `<rect class="rgn" data-id="${esc(rg.id)}" x="${x}" y="${y}" width="${w}" height="${h}"
-        fill="transparent" stroke="${stroke}" stroke-width="2" ${dash}></rect>
-        <text class="rgn-label" x="${x + 2}" y="${y + 12}" fill="${stroke}" font-size="11">${esc(rg.kind)}</text>`;
+      const [x, y, w, h] = rg.box, stroke = colorFor(rg);
+      const dash = rg.status === 'wontfix' ? 'stroke-dasharray="6 4" opacity="0.65"' : '';
+      return `<rect class="rgn" data-id="${esc(rg.id)}" x="${x}" y="${y}" width="${w}" height="${h}" fill="transparent" stroke="${stroke}" stroke-width="2" ${dash}></rect>` +
+        `<text class="rgn-label" x="${x + 2}" y="${y + 12}" fill="${stroke}" font-size="11">${esc(labelOf(rg))}</text>`;
     };
-
-    const diffFig = (s, r) => `
-      <figure class="diffwrap" data-section="${s.section}" data-vp="${r.viewport}" data-surface="${r.surface}">
-        <figcaption>diff (red = differs) · ${s.openCount ?? 0} open · ✎ click a box or drag to annotate</figcaption>
-        <div class="canvas">
-          <img src="${s.base}.diff.png">
-          <svg class="overlay" preserveAspectRatio="none" viewBox="0 0 ${s.diffW ?? 1} ${s.diffH ?? 1}">
-            ${(s.regions ?? []).map(rg => boxSvg(rg)).join('')}
-          </svg>
-        </div>
-      </figure>`;
+    const fixRow = (rg) => {
+      const meta = rg.detail ? esc(rg.detail) : `(${rg.box.join(',')})`;
+      return `<div class="fix-row${rg.status === 'wontfix' ? ' ignored' : ''}" data-id="${esc(rg.id)}">` +
+        `<span class="cat" style="color:${colorFor(rg)}">${esc(labelOf(rg))}</span>` +
+        `<span class="meta">${meta}</span>` +
+        (rg.note ? `<span class="note">${esc(rg.note)}</span>` : '') + `</div>`;
+    };
 
     const block = (r) => {
         const rows = r.sections.map(s => {
-            if (s.missing) return `<div class="sec miss"><h3>${s.section} — ANCHOR NOT FOUND (legacy:${s.missing.legacy} rebuild:${s.missing.rebuild})</h3></div>`;
+            if (s.missing) return `<div class="sec miss"><h3>${esc(s.section)} — ANCHOR NOT FOUND (legacy:${s.missing.legacy} rebuild:${s.missing.rebuild})</h3></div>`;
             const heavy = parseFloat(s.pct) > 0.5;
-            return `<div class="sec">
-              <h3>${s.section} — <span class="${heavy ? 'bad' : 'ok'}">${s.pct}% diff</span>
-                <span class="dim">· adj ${s.adjustedPct}% · ${s.openCount} open · (legacy ${s.legacyH}px / rebuild ${s.rebuildH}px)</span></h3>
-              <div class="trio">
-                <figure><figcaption>legacy</figcaption><img src="${s.base}.legacy.png"></figure>
-                <figure><figcaption>rebuild</figcaption><img src="${s.base}.rebuild.png"></figure>
-                ${diffFig(s, r)}
+            const live = (s.regions ?? []).filter(rg => rg.status !== 'fixed');
+            const legacyBoxes = live.filter(rg => paneOf(rg) === 'legacy').map(boxSvg).join('');
+            const rebuildBoxes = live.filter(rg => paneOf(rg) === 'rebuild').map(boxSvg).join('');
+            const fixRows = live.length ? live.map(fixRow).join('') : '<div class="fix-empty">no differences — clean ✓</div>';
+            const k = `${r.surface}.${r.viewport}.${s.section}`;
+            return `<div class="sec" data-key="${esc(k)}">
+              <h3>${esc(s.section)} — <span class="${heavy ? 'bad' : 'ok'}">${s.pct}% diff</span>
+                <span class="dim">· adj ${s.adjustedPct}% · <span class="opencount">${s.openCount} open</span> · (legacy ${s.legacyH}px / rebuild ${s.rebuildH}px) · <button class="diff-toggle">show raw diff ▸</button></span></h3>
+              <div class="panes">
+                <figure class="pane legacy" data-pane="legacy"><figcaption>legacy · ✎ draw</figcaption>
+                  <div class="canvas"><img src="${s.base}.legacy.png"><svg class="overlay" preserveAspectRatio="none" viewBox="0 0 ${s.diffW ?? 1} ${s.legacyH ?? s.diffH ?? 1}">${legacyBoxes}</svg></div></figure>
+                <figure class="pane rebuild" data-pane="rebuild"><figcaption>rebuild · ✎ draw</figcaption>
+                  <div class="canvas"><img src="${s.base}.rebuild.png"><svg class="overlay" preserveAspectRatio="none" viewBox="0 0 ${s.diffW ?? 1} ${s.rebuildH ?? s.diffH ?? 1}">${rebuildBoxes}</svg></div></figure>
+                <div class="fixlist"><div class="fixlist-rows">${fixRows}</div></div>
               </div>
+              <div class="diffrow" hidden><figcaption>raw diff (red = differs)</figcaption><img src="${s.base}.diff.png"></div>
             </div>`;
         }).join('\n');
-        return `<section class="surface"><h2>${r.surface} @ ${r.viewport}</h2>${rows}</section>`;
+        return `<section class="surface"><h2>${esc(r.surface)} @ ${esc(r.viewport)}</h2>${rows}</section>`;
     };
     return `<!doctype html><html><head><meta charset="utf-8"><title>Visual parity — reference vs rebuild</title>
 <style>
   body{font-family:ui-sans-serif,system-ui,sans-serif;margin:0;background:#0a0a0a;color:#f5f5f5}
-  header{padding:1rem 1.5rem;background:#18181b;border-bottom:1px solid #27272a;position:sticky;top:0}
-  h1{margin:0;font-size:1.1rem} h2{font-size:1rem;color:#a1a1aa;margin:1.5rem 1.5rem .5rem}
+  header{padding:1rem 1.5rem;background:#18181b;border-bottom:1px solid #27272a;position:sticky;top:0;z-index:40;display:flex;gap:.75rem;align-items:center}
+  header h1{margin:0;font-size:1rem;flex:1}
+  header button{background:#f59e0b;color:#000;border:none;border-radius:6px;padding:6px 12px;font-weight:600;cursor:pointer}
+  header button#save{background:#3f3f46;color:#fff}
+  h2{font-size:1rem;color:#a1a1aa;margin:1.5rem 1.5rem .5rem}
   .surface{border-bottom:1px solid #27272a;padding-bottom:1rem}
   .sec{padding:.5rem 1.5rem 1rem} .sec h3{font-size:.9rem;font-weight:500;color:#d4d4d8;margin:.5rem 0}
   .ok{color:#22c55e;font-weight:700}.bad{color:#ef4444;font-weight:700}.dim{color:#71717a;font-size:.8rem}
-  .trio{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem}
+  .panes{display:grid;grid-template-columns:1fr 1fr minmax(240px,.8fr);gap:.75rem;align-items:start}
   figure{margin:0}figcaption{font-size:.7rem;color:#71717a;text-transform:uppercase;letter-spacing:.05em;padding-bottom:.25rem}
-  img{width:100%;display:block;border:1px solid #27272a;background:#fff;cursor:zoom-in}
+  .canvas{position:relative;display:block}
+  .canvas img{width:100%;display:block;border:1px solid #27272a;background:#fff;cursor:zoom-in}
   img:fullscreen{width:auto;height:100vh;background:#fff}
-  .miss h3{color:#f59e0b}
-  .canvas{position:relative;display:inline-block;width:100%}
-  .canvas img{width:100%;display:block}
   .overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   .overlay .rgn{pointer-events:all;cursor:pointer}
-  .overlay .rgn:hover{fill:rgba(245,158,11,.22)}
-  .diffwrap .canvas{cursor:crosshair}
-  .diffwrap figcaption{color:#f59e0b;font-weight:600}
+  .overlay .rgn:hover,.overlay .rgn.hi{fill:rgba(96,165,250,.25)}
+  .pane .canvas{cursor:crosshair}
+  .miss h3{color:#f59e0b}
+  .fixlist{font-size:.8rem;border:1px solid #27272a;border-radius:6px;background:#0f0f10;max-height:480px;overflow:auto}
+  .fix-row{padding:.35rem .5rem;border-bottom:1px solid #1f1f22;cursor:pointer;display:flex;gap:.4rem;flex-wrap:wrap;align-items:baseline}
+  .fix-row:hover{background:#1c1c20}
+  .fix-row.ignored{opacity:.5}
+  .fix-row .cat{font-weight:700}
+  .fix-row .meta{color:#a1a1aa;font-size:.75rem}
+  .fix-row .note{color:#f5f5f5;flex-basis:100%}
+  .fix-empty{color:#22c55e;padding:.5rem}
+  .diff-toggle{background:#27272a;color:#a1a1aa;border:1px solid #3f3f46;border-radius:5px;padding:1px 7px;cursor:pointer;font-size:.7rem}
+  .diffrow{padding:.5rem 0}
+  .diffrow img{width:50%;display:block;border:1px solid #27272a;background:#fff}
+  #fbtext{position:fixed;bottom:8px;right:8px;width:40vw;height:30vh;z-index:60;background:#0a0a0a;color:#ddd;border:1px solid #3f3f46}
   #editor{position:absolute;z-index:50;display:none;width:280px;background:#18181b;border:1px solid #3f3f46;border-radius:8px;padding:10px;box-shadow:0 8px 24px rgba(0,0,0,.55);font-size:.8rem}
   #editor .ed-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
   #editor label{width:46px;color:#a1a1aa}
-  #editor select,#editor input{flex:1;background:#0a0a0a;color:#f5f5f5;border:1px solid #3f3f46;border-radius:5px;padding:4px 6px}
+  #editor input{flex:1;background:#0a0a0a;color:#f5f5f5;border:1px solid #3f3f46;border-radius:5px;padding:4px 6px}
   #editor .ed-seg{display:flex;gap:4px;flex:1}
   #editor .ed-seg button{flex:1;background:#0a0a0a;color:#a1a1aa;border:1px solid #3f3f46;border-radius:5px;padding:4px;cursor:pointer;text-transform:capitalize}
   #editor .ed-seg button.on{background:#f59e0b;color:#000;border-color:#f59e0b;font-weight:600}
   #editor .ed-seg button[data-st=wontfix].on{background:#22c55e;color:#000;border-color:#22c55e}
-  #editor .ed-seg button[data-st=fixed].on{background:#3b82f6;color:#fff;border-color:#3b82f6}
   #editor .ed-actions{display:flex;align-items:center;gap:8px}
   #editor .ed-danger{background:#7f1d1d;color:#fff;border:1px solid #991b1b;border-radius:5px;padding:4px 8px;cursor:pointer}
   #editor #ed-close{background:#3f3f46;color:#fff;border:none;border-radius:5px;padding:4px 12px;cursor:pointer}
 </style></head><body>
-<header><h1>Visual parity — reference vs rebuild · green ≤0.5% · click image to zoom · % UNDERCOUNTS background-heavy bands → trust the diff image + heights</h1><button id="save">Save worklist</button></header>
+<header><h1>Visual parity — legacy │ rebuild │ fix-list · annotate on the readable panes · % undercounts background-heavy bands → trust the panes</h1><button id="copyfeedback">Copy feedback</button><button id="save" hidden>Save to disk</button></header>
+<textarea id="fbtext" hidden></textarea>
 ${results.map(block).join('\n')}
-${reportScript(worklistByKey(results))}
+${reportScript(worklistByKey(results), reportName)}
 </body></html>`;
 }
 
