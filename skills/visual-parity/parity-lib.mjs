@@ -218,6 +218,7 @@ export function normalizeConfig(raw) {
     viewports: raw.viewports ?? DEFAULT_VIEWPORTS,
     surfaces: raw.surfaces,
     authProfiles: raw.authProfiles ?? {},
+    defaultStorageState: raw.defaultStorageState,
     noiseMinPixels: raw.noiseMinPixels ?? 12,
     threshold: raw.threshold ?? 0.1,
   };

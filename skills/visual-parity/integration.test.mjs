@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { captureHit, detectRegions, reportHtml } from './parity-harness.mjs';
+import { captureHit, detectRegions, reportHtml, loadConfig } from './parity-harness.mjs';
 import { PNG } from 'pngjs';
 
 let browser, page;
@@ -159,4 +159,16 @@ test('serve: GET path traversal is clamped to 403', async () => {
   } finally {
     await new Promise(resolve => server.close(resolve));
   }
+});
+
+test('loadConfig reads an external --config module and normalizes', async () => {
+  const f = join(tmpdir(), `vpcfg-${Date.now()}.mjs`);
+  writeFileSync(f, `export default { legacy:'a', rebuild:'b', surfaces:[{name:'home',path:'/'}] }`);
+  try {
+    const cfg = await loadConfig(['--config', f]);
+    assert.equal(cfg.legacy, 'a');
+    assert.equal(cfg.noiseMinPixels, 12);
+    assert.equal(cfg.viewports.length, 2);
+    assert.ok(cfg.dir, 'carries config dir for relative auth paths');
+  } finally { unlinkSync(f); }
 });

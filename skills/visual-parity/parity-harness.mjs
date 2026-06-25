@@ -29,6 +29,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import {
   maskFromDiff, clusterMask, classifyKind, mergeRegions,
   countMaskInBoxes, adjustedPct, worklistFilename, readWorklist, writeWorklist, priorSectionRegions,
+  normalizeConfig, resolveStorageState, groupResultsByReport, reportFilename, feedbackMarkdown,
 } from './parity-lib.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -158,11 +159,37 @@ function nextTop(allTops, top, pageH) {
     return greater.length ? Math.min(...greater) : pageH;
 }
 
+// Resolve the active config: external --config <path> module (default-exporting the config
+// object) or the in-file CONFIG block as a backward-compatible fallback.
+export async function loadConfig(argv = []) {
+  const ci = argv.indexOf('--config');
+  if (ci !== -1 && argv[ci + 1]) {
+    const abs = path.resolve(process.cwd(), argv[ci + 1]);
+    const mod = await import(pathToFileURL(abs).href);
+    return { ...normalizeConfig(mod.default), dir: path.dirname(abs) };
+  }
+  return { ...normalizeConfig({
+    legacy: LEGACY, rebuild: REBUILD, viewports: VIEWPORTS, surfaces: SURFACES,
+    authProfiles: {}, noiseMinPixels: NOISE_MIN_PIXELS, threshold: PIXELMATCH_OPTS.threshold,
+  }), dir: __dirname };
+}
+
 async function run() {
-    const filters = process.argv.slice(2);
-    const surfaces = SURFACES.filter(s => !filters.length || filters.includes(s.name));
-    const vpNames = VIEWPORTS.map(x => x.name);
-    const vps = VIEWPORTS.filter(v => !filters.length || filters.includes(v.name) || !filters.some(f => vpNames.includes(f)));
+    const argv = process.argv.slice(2);
+    const CONFIG = await loadConfig(argv);
+    PIXELMATCH_OPTS.threshold = CONFIG.threshold;
+    const ri = argv.indexOf('--report');
+    const reportFilter = ri !== -1 ? argv[ri + 1] : null;
+    const filters = [];
+    for (let i = 0; i < argv.length; i++) {
+        if (argv[i] === '--config' || argv[i] === '--report') { i++; continue; }
+        if (argv[i] === '--serve' || /^\d+$/.test(argv[i])) continue;
+        filters.push(argv[i]);
+    }
+    const vpNames = CONFIG.viewports.map(x => x.name);
+    let surfaces = CONFIG.surfaces.filter(s => !filters.length || filters.includes(s.name));
+    if (reportFilter) surfaces = surfaces.filter(s => (s.report || 'default') === reportFilter);
+    const vps = CONFIG.viewports.filter(v => !filters.length || filters.includes(v.name) || !filters.some(f => vpNames.includes(f)));
 
     if (!existsSync(OUT_DIR)) mkdirSync(OUT_DIR, { recursive: true });
 
@@ -172,10 +199,12 @@ async function run() {
         for (const surface of surfaces) {
             for (const vp of vps) {
                 console.log(`\n→ ${surface.name} @ ${vp.name} (${vp.width}×${vp.height})`);
-                const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, ignoreHTTPSErrors: true, deviceScaleFactor: 1 });
+                const stateRel = resolveStorageState(surface, CONFIG.authProfiles, CONFIG.defaultStorageState);
+                const stateAbs = stateRel ? path.resolve(CONFIG.dir, stateRel) : undefined;
+                const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, ignoreHTTPSErrors: true, deviceScaleFactor: 1, storageState: stateAbs && existsSync(stateAbs) ? stateAbs : undefined });
                 const lp = await ctx.newPage(), rp = await ctx.newPage();
-                await prepare(lp, `${LEGACY}${surface.path}`, surface);
-                await prepare(rp, `${REBUILD}${surface.path}`, surface);
+                await prepare(lp, `${CONFIG.legacy}${surface.path}`, surface);
+                await prepare(rp, `${CONFIG.rebuild}${surface.path}`, surface);
 
                 const [legMeta, rebMeta] = await Promise.all([anchorTops(lp, surface.sections), anchorTops(rp, surface.sections)]);
                 const [legPng, rebPng] = await Promise.all([fullPagePng(lp), fullPagePng(rp)]);
@@ -195,7 +224,7 @@ async function run() {
                     await fs.writeFile(path.join(OUT_DIR, `${base}.legacy.png`), PNG.sync.write(lBand));
                     await fs.writeFile(path.join(OUT_DIR, `${base}.rebuild.png`), PNG.sync.write(rBand));
                     await fs.writeFile(path.join(OUT_DIR, `${base}.diff.png`), PNG.sync.write(diff));
-                    const fresh = await detectRegions(lp, rp, diff, lt, rt, { minPixels: NOISE_MIN_PIXELS });
+                    const fresh = await detectRegions(lp, rp, diff, lt, rt, { minPixels: CONFIG.noiseMinPixels });
                     const merged = mergeRegions(fresh, priorSectionRegions(priorWorklist, s.name));
                     const wontfixBoxes = merged.filter(r => r.status === 'wontfix').map(r => r.box);
                     const changedInWontfix = countMaskInBoxes(maskFromDiff(diff.data, diff.width, diff.height), diff.width, wontfixBoxes);
@@ -220,13 +249,16 @@ async function run() {
                         })),
                     },
                 );
-                results.push({ surface: surface.name, viewport: vp.name, sections: sectionResults });
+                results.push({ surface: surface.name, viewport: vp.name, report: surface.report || 'default', sections: sectionResults });
                 await ctx.close();
             }
         }
         await fs.writeFile(path.join(OUT_DIR, 'analysis.json'), JSON.stringify(results, null, 2));
-        await fs.writeFile(path.join(OUT_DIR, 'report.html'), reportHtml(results));
-        console.log(`\nReport: file://${path.join(OUT_DIR, 'report.html')}`);
+        for (const g of groupResultsByReport(results)) {
+            const file = reportFilename(g.name);
+            await fs.writeFile(path.join(OUT_DIR, file), reportHtml(g.results, { reportName: g.name === 'default' ? null : g.name }));
+            console.log(`\nReport: file://${path.join(OUT_DIR, file)}`);
+        }
     } finally {
         await browser.close();
     }

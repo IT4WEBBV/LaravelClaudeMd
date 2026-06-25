@@ -232,5 +232,7 @@ test('normalizeConfig applies defaults and validates', () => {
   assert.equal(c.threshold, 0.1);
   assert.deepEqual(c.authProfiles, {});
   assert.equal(c.viewports.length, 2);
+  assert.equal(c.defaultStorageState, undefined);
+  assert.equal(normalizeConfig({ legacy: 'a', rebuild: 'b', surfaces: [], defaultStorageState: 'auth.json' }).defaultStorageState, 'auth.json');
   assert.throws(() => normalizeConfig({ legacy: 'a' }), /surfaces/);
 });
