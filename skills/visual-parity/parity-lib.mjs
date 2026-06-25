@@ -152,3 +152,73 @@ export function priorSectionRegions(prior, sectionName) {
   const section = prior?.sections?.find(s => s.section === sectionName);
   return section?.regions ?? [];
 }
+
+// ── Fix-list serializer (reused in the browser report via .toString()) ───────
+// worklistByKey: { "surface.viewport.section": Region[] }. Drops fixed items;
+// human regions without a machine kind render as [you].
+export function feedbackMarkdown(worklistByKey, { reportName } = {}) {
+  const bySurfaceVp = {};
+  for (const [k, regions] of Object.entries(worklistByKey || {})) {
+    const dot = k.indexOf('.'), dot2 = k.indexOf('.', dot + 1);
+    const surface = k.slice(0, dot), viewport = k.slice(dot + 1, dot2), section = k.slice(dot2 + 1);
+    for (const r of regions || []) {
+      if (r.status === 'fixed') continue;
+      const head = `${surface} @ ${viewport}`;
+      (bySurfaceVp[head] = bySurfaceVp[head] || []).push({ section, r });
+    }
+  }
+  const lines = [`## Visual parity feedback${reportName ? ` — report: ${reportName}` : ''}`];
+  for (const [head, items] of Object.entries(bySurfaceVp)) {
+    lines.push('', `### ${head}`);
+    for (const { section, r } of items) {
+      const cat = r.source === 'human' && !r.kind ? 'you' : (r.kind || 'unclassified');
+      const where = r.detail ? `${r.detail} @ (${r.box.join(',')})` : `@ (${r.box.join(',')})`;
+      const note = r.note ? ` — note: "${r.note}"` : '';
+      lines.push(`- [${cat}] ${section} — ${where}${note} — ${r.status || 'open'}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+// ── Per-surface auth resolution ──────────────────────────────────────────────
+// surface.auth -> authProfiles[surface.auth]; no auth -> defaultState; unknown -> throw.
+export function resolveStorageState(surface, authProfiles = {}, defaultState) {
+  if (!surface.auth) return defaultState;
+  if (!(surface.auth in authProfiles)) throw new Error(`unknown auth profile: ${surface.auth}`);
+  return authProfiles[surface.auth];
+}
+
+// ── Named-report grouping ────────────────────────────────────────────────────
+// Splits results by their `report` tag (default 'default'), preserving first-seen order.
+export function groupResultsByReport(results) {
+  const order = [], byName = {};
+  for (const r of results) {
+    const name = r.report || 'default';
+    if (!(name in byName)) { byName[name] = []; order.push(name); }
+    byName[name].push(r);
+  }
+  return order.map(name => ({ name, results: byName[name] }));
+}
+
+export function reportFilename(groupName) {
+  return groupName === 'default' ? 'report.html' : `report.${groupName}.html`;
+}
+
+// ── Config normalization (defaults mirror the in-file CONFIG constants) ───────
+const DEFAULT_VIEWPORTS = [
+  { name: 'desktop', width: 1920, height: 1080 },
+  { name: 'mobile',  width: 390,  height: 844 },
+];
+export function normalizeConfig(raw) {
+  if (!raw?.legacy || !raw?.rebuild || !Array.isArray(raw?.surfaces)) {
+    throw new Error('config must define legacy, rebuild, and surfaces');
+  }
+  return {
+    legacy: raw.legacy, rebuild: raw.rebuild,
+    viewports: raw.viewports ?? DEFAULT_VIEWPORTS,
+    surfaces: raw.surfaces,
+    authProfiles: raw.authProfiles ?? {},
+    noiseMinPixels: raw.noiseMinPixels ?? 12,
+    threshold: raw.threshold ?? 0.1,
+  };
+}
