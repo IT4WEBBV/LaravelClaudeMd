@@ -34,7 +34,7 @@ digraph parity {
   "Stand up the pixel-diff harness" [shape=box];
   "Run harness → report.html + worklist.*.json" [shape=box];
   "Worklist empty and trivial %?" [shape=diamond];
-  "Optionally --serve and annotate" [shape=box];
+  "Open the report; annotate panes" [shape=box];
   "Work worklist top to bottom" [shape=box];
   "Pick region: read kind + box + numbers" [shape=box];
   "unclassified region?" [shape=diamond];
@@ -50,8 +50,8 @@ digraph parity {
   "Stand up the pixel-diff harness" -> "Run harness → report.html + worklist.*.json";
   "Run harness → report.html + worklist.*.json" -> "Worklist empty and trivial %?" [label=""];
   "Worklist empty and trivial %?" -> "done" [label="yes — parity reached"];
-  "Worklist empty and trivial %?" -> "Optionally --serve and annotate" [label="no — regions remain"];
-  "Optionally --serve and annotate" -> "Work worklist top to bottom";
+  "Worklist empty and trivial %?" -> "Open the report; annotate panes" [label="no — regions remain"];
+  "Open the report; annotate panes" -> "Work worklist top to bottom";
   "Work worklist top to bottom" -> "Pick region: read kind + box + numbers";
   "Pick region: read kind + box + numbers" -> "unclassified region?" ;
   "unclassified region?" -> "Open BOTH in Playwright @ same viewport" [label="yes — fall back to DOM measurement"];
@@ -69,7 +69,7 @@ digraph parity {
 
 **The worklist — not the % — is the gate.** The harness writes `out/worklist.<surface>.<viewport>.json` alongside `report.html`. Each region in the worklist has a bounding box, a kind, pixel count, and status (`open` / `wontfix` / `fixed`). Work the open regions top to bottom; when the worklist is empty, the surface is done.
 
-**Kind vocabulary:** The auto-classifier emits `recolor`, `shift`, `resize`, `missing`, `extra`, `typography`, `overlap`, or `unclassified`. Human annotations (drawn via `--serve`) may additionally use `other` (free-form, the default for drag-added regions) or `ignore`. Marking a region's status `wontfix` — not its kind — is the mechanism for intentional diffs; they are excluded from the adjusted %.
+**Kind vocabulary (machine-assigned — you never pick one).** The classifier labels each difference `recolor`, `shift`, `resize`, `missing`, `extra`, `typography`, `overlap`, or `unclassified`; a box *you* draw shows as `you` until the next run classifies it. Your only inputs are a free-text **note** and an **ignore** toggle. Marking a region `ignore` (status `wontfix`) — not its kind — is the mechanism for intentional diffs; they are excluded from the adjusted %.
 
 - **`unclassified` regions** are where the harness couldn't match a DOM element — fall back to manual measurement with `getBoundingClientRect`.
 - **`wontfix` regions** are intentional differences (a removed feature, a known divergence). Mark them via `--serve`; they are excluded from the **adjusted %** on re-run.
@@ -77,22 +77,46 @@ digraph parity {
 
 ## 1. Stand up the harness
 
-Copy **both** `parity-harness.mjs` **and** `parity-lib.mjs` (next to this skill) into the project (e.g. `tools/visual-parity/`). `parity-harness.mjs` imports `parity-lib.mjs` at runtime — both files must be in the same directory. Then edit the **CONFIG block** at the top of `parity-harness.mjs`: `LEGACY` / `REBUILD` URLs, the `VIEWPORTS`, and `SURFACES` (each page + its sections, cut by heading-text anchors top→bottom). Then:
+The engine lives in **the skill** — don't copy it into the project. Run it from here against a small project config that **Claude** owns:
 
 ```bash
-cd tools/visual-parity
-npm init -y && npm i -D playwright pixelmatch pngjs && npx playwright install chromium
-node parity-harness.mjs                # ALL surfaces, ALL viewports → out/report.html + out/worklist.*.json
-node parity-harness.mjs home           # one surface, BOTH viewports (no viewport arg!)
-node parity-harness.mjs --serve        # serve the report for annotation (default :8088)
-open out/report.html
+# one-time deps (installed once in the skill dir; chromium is cached globally)
+cd ~/.claude/skills/visual-parity && npm init -y && npm i -D playwright pixelmatch pngjs && npx playwright install chromium
+
+# then, from the project (after authoring visual-parity.config.mjs — see below):
+node ~/.claude/skills/visual-parity/parity-harness.mjs --config ./visual-parity.config.mjs        # all surfaces
+node ~/.claude/skills/visual-parity/parity-harness.mjs --config ./visual-parity.config.mjs home    # one surface, BOTH viewports
 ```
 
-**Run without a viewport arg to keep desktop + mobile in one report.** Passing a single viewport (`node parity-harness.mjs home desktop`) overwrites `report.html` with just that viewport — a common footgun. The report is regenerated each run.
+Reports + worklists land in `./out/` next to the config. With **no** `--config` the harness falls back to an in-file CONFIG block (legacy single-file mode), so older copied setups keep working. Run **without a viewport arg** to keep desktop + mobile together.
 
-**Annotation via `--serve`:** `node parity-harness.mjs --serve` starts an HTTP server (default port 8088) serving `report.html` with interactive overlays. Click a region to edit its kind, note, or status; draw a new rectangle to add a human region. Hit **Save worklist** — your edits POST back to the server and merge into the same `worklist.*.json` files on disk. `wontfix` regions persist across re-runs and are excluded from the **adjusted %**. Use this to mark intentional differences so they don't pollute future worklists.
+**The config is Claude's artifact** — you generate and maintain it; the user only ever touches the report. Commit it in the project for reproducibility:
 
-**CONFIG knobs** (at the top of `parity-harness.mjs`, below the SURFACES block):
+```js
+// visual-parity.config.mjs
+export default {
+  legacy:  'https://reference.example.com',
+  rebuild: 'https://rebuild.example.test',
+  viewports: [ { name:'desktop', width:1920, height:1080 }, { name:'mobile', width:390, height:844 } ],
+  noiseMinPixels: 12,
+  threshold: 0.1,
+  authProfiles: { member: 'auth.member.json' },          // profile -> storageState file (relative to config)
+  surfaces: [
+    { name:'home', path:'/', waitText:'…', report:'public', sections:[
+        { name:'nav', fixedTop:0 }, { name:'hero', anchor:'Hero heading' }, { name:'footer', selector:'footer' } ] },
+    { name:'dashboard', path:'/dashboard', waitText:'…', auth:'member', report:'members', sections:[
+        { name:'content', anchor:'Welcome' } ] },
+  ],
+};
+```
+
+**Read the report — don't eyeball the diff.** Open `out/report.<name>.html`. Each section is **legacy │ rebuild │ fix-list**: the two readable panes are the annotation surface (drag a box on either), and the **fix-list** is the punch-list of differences — machine-found *and* the boxes you draw. The raw red diff sits behind a `show raw diff ▸` toggle. **You never pick a category** — the machine labels each difference and a box you draw comes back labelled on the next run (`you` until then). Your only inputs are a **note** and an **ignore** toggle.
+
+**Hand feedback back with "Copy feedback"** — it serializes the fix-list to Markdown onto your clipboard and works whether the report is opened as a `file://` page *or* served (no server, no CORS, never hangs). Paste it back, or screenshot a section (the panes are fully labelled). Optionally run `--serve` (default :8088) to additionally persist annotations to `out/worklist.*.json` on disk — a **Save to disk** button appears only when served.
+
+**Named reports + per-surface auth.** Tag a surface `report:'X'` and it lands in `report.X.html`; one run emits one file per tag (untagged → `report.html`), so a single sweep covers public + member states without clobbering. Tag a surface `auth:'profile'` to capture it logged in. Mint a profile's combined (both-sides) storageState with the `login-state.mjs` template: `node login-state.mjs <email> <password> auth.member.json`.
+
+**CONFIG knobs** (in `visual-parity.config.mjs`):
 
 | Knob | Default | Effect |
 |------|---------|--------|

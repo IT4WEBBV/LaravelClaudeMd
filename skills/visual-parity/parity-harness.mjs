@@ -29,6 +29,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import {
   maskFromDiff, clusterMask, classifyKind, mergeRegions,
   countMaskInBoxes, adjustedPct, worklistFilename, readWorklist, writeWorklist, priorSectionRegions,
+  normalizeConfig, resolveStorageState, groupResultsByReport, reportFilename, feedbackMarkdown,
 } from './parity-lib.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -158,11 +159,37 @@ function nextTop(allTops, top, pageH) {
     return greater.length ? Math.min(...greater) : pageH;
 }
 
+// Resolve the active config: external --config <path> module (default-exporting the config
+// object) or the in-file CONFIG block as a backward-compatible fallback.
+export async function loadConfig(argv = []) {
+  const ci = argv.indexOf('--config');
+  if (ci !== -1 && argv[ci + 1]) {
+    const abs = path.resolve(process.cwd(), argv[ci + 1]);
+    const mod = await import(pathToFileURL(abs).href);
+    return { ...normalizeConfig(mod.default), dir: path.dirname(abs) };
+  }
+  return { ...normalizeConfig({
+    legacy: LEGACY, rebuild: REBUILD, viewports: VIEWPORTS, surfaces: SURFACES,
+    authProfiles: {}, noiseMinPixels: NOISE_MIN_PIXELS, threshold: PIXELMATCH_OPTS.threshold,
+  }), dir: __dirname };
+}
+
 async function run() {
-    const filters = process.argv.slice(2);
-    const surfaces = SURFACES.filter(s => !filters.length || filters.includes(s.name));
-    const vpNames = VIEWPORTS.map(x => x.name);
-    const vps = VIEWPORTS.filter(v => !filters.length || filters.includes(v.name) || !filters.some(f => vpNames.includes(f)));
+    const argv = process.argv.slice(2);
+    const CONFIG = await loadConfig(argv);
+    PIXELMATCH_OPTS.threshold = CONFIG.threshold;
+    const ri = argv.indexOf('--report');
+    const reportFilter = ri !== -1 ? argv[ri + 1] : null;
+    const filters = [];
+    for (let i = 0; i < argv.length; i++) {
+        if (argv[i] === '--config' || argv[i] === '--report') { i++; continue; }
+        if (argv[i] === '--serve' || /^\d+$/.test(argv[i])) continue;
+        filters.push(argv[i]);
+    }
+    const vpNames = CONFIG.viewports.map(x => x.name);
+    let surfaces = CONFIG.surfaces.filter(s => !filters.length || filters.includes(s.name));
+    if (reportFilter) surfaces = surfaces.filter(s => (s.report || 'default') === reportFilter);
+    const vps = CONFIG.viewports.filter(v => !filters.length || filters.includes(v.name) || !filters.some(f => vpNames.includes(f)));
 
     if (!existsSync(OUT_DIR)) mkdirSync(OUT_DIR, { recursive: true });
 
@@ -172,10 +199,12 @@ async function run() {
         for (const surface of surfaces) {
             for (const vp of vps) {
                 console.log(`\n→ ${surface.name} @ ${vp.name} (${vp.width}×${vp.height})`);
-                const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, ignoreHTTPSErrors: true, deviceScaleFactor: 1 });
+                const stateRel = resolveStorageState(surface, CONFIG.authProfiles, CONFIG.defaultStorageState);
+                const stateAbs = stateRel ? path.resolve(CONFIG.dir, stateRel) : undefined;
+                const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, ignoreHTTPSErrors: true, deviceScaleFactor: 1, storageState: stateAbs && existsSync(stateAbs) ? stateAbs : undefined });
                 const lp = await ctx.newPage(), rp = await ctx.newPage();
-                await prepare(lp, `${LEGACY}${surface.path}`, surface);
-                await prepare(rp, `${REBUILD}${surface.path}`, surface);
+                await prepare(lp, `${CONFIG.legacy}${surface.path}`, surface);
+                await prepare(rp, `${CONFIG.rebuild}${surface.path}`, surface);
 
                 const [legMeta, rebMeta] = await Promise.all([anchorTops(lp, surface.sections), anchorTops(rp, surface.sections)]);
                 const [legPng, rebPng] = await Promise.all([fullPagePng(lp), fullPagePng(rp)]);
@@ -195,8 +224,9 @@ async function run() {
                     await fs.writeFile(path.join(OUT_DIR, `${base}.legacy.png`), PNG.sync.write(lBand));
                     await fs.writeFile(path.join(OUT_DIR, `${base}.rebuild.png`), PNG.sync.write(rBand));
                     await fs.writeFile(path.join(OUT_DIR, `${base}.diff.png`), PNG.sync.write(diff));
-                    const fresh = await detectRegions(lp, rp, diff, lt, rt, { minPixels: NOISE_MIN_PIXELS });
+                    const fresh = await detectRegions(lp, rp, diff, lt, rt, { minPixels: CONFIG.noiseMinPixels });
                     const merged = mergeRegions(fresh, priorSectionRegions(priorWorklist, s.name));
+                    await classifyHumanRegions(lp, rp, merged, lt, rt);
                     const wontfixBoxes = merged.filter(r => r.status === 'wontfix').map(r => r.box);
                     const changedInWontfix = countMaskInBoxes(maskFromDiff(diff.data, diff.width, diff.height), diff.width, wontfixBoxes);
                     sectionResults.push({
@@ -220,98 +250,210 @@ async function run() {
                         })),
                     },
                 );
-                results.push({ surface: surface.name, viewport: vp.name, sections: sectionResults });
+                results.push({ surface: surface.name, viewport: vp.name, report: surface.report || 'default', sections: sectionResults });
                 await ctx.close();
             }
         }
         await fs.writeFile(path.join(OUT_DIR, 'analysis.json'), JSON.stringify(results, null, 2));
-        await fs.writeFile(path.join(OUT_DIR, 'report.html'), reportHtml(results));
-        console.log(`\nReport: file://${path.join(OUT_DIR, 'report.html')}`);
+        for (const g of groupResultsByReport(results)) {
+            const file = reportFilename(g.name);
+            await fs.writeFile(path.join(OUT_DIR, file), reportHtml(g.results, { reportName: g.name === 'default' ? null : g.name }));
+            console.log(`\nReport: file://${path.join(OUT_DIR, file)}`);
+        }
     } finally {
         await browser.close();
     }
 }
 
-export function reportScript(worklistByKey) {
+export function reportScript(worklistByKey, reportName) {
   const safeJson = JSON.stringify(worklistByKey).replace(/</g, '\\u003c');
   return `<script>
 const WL = ${safeJson}; // key: surface.viewport.section -> regions[]
-const KINDS = ['recolor','shift','resize','missing','extra','typography','overlap','ignore','other','unclassified'];
-const key = (el) => el.dataset.surface + '.' + el.dataset.vp + '.' + el.dataset.section;
+const REPORT_NAME = ${JSON.stringify(reportName || null)};
+const STATUSES = ['open','wontfix'];
+const served = location.protocol.startsWith('http');
 
-function redraw(wrap) {
-  const k = key(wrap), svg = wrap.querySelector('.overlay');
-  svg.querySelectorAll('.rgn,.rgn-label').forEach(n => n.remove());
-  for (const rg of WL[k] || []) {
-    const [x,y,w,h] = rg.box;
-    const stroke = rg.source === 'human' ? '#3b82f6' : '#f59e0b';
-    const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
-    rect.setAttribute('class','rgn'); rect.dataset.id = rg.id;
-    rect.setAttribute('x',x); rect.setAttribute('y',y); rect.setAttribute('width',w); rect.setAttribute('height',h);
-    rect.setAttribute('fill','transparent'); rect.setAttribute('stroke',stroke); rect.setAttribute('stroke-width','2');
-    if (rg.status === 'wontfix') { rect.setAttribute('stroke-dasharray','6 4'); rect.setAttribute('opacity','0.5'); }
-    rect.onclick = (e) => { e.stopPropagation(); editRegion(k, rg.id, wrap); };
-    svg.appendChild(rect);
-    const t = document.createElementNS('http://www.w3.org/2000/svg','text');
-    t.setAttribute('class','rgn-label');
-    t.setAttribute('x',x+2); t.setAttribute('y',y+12); t.setAttribute('fill',stroke); t.setAttribute('font-size','11');
-    t.textContent = rg.kind; svg.appendChild(t);
-  }
+// fix-list serializer — the SAME pure function the Node side uses (embedded verbatim)
+${feedbackMarkdown.toString()}
+
+const paneOf = (rg) => rg.pane || (rg.kind === 'missing' ? 'legacy' : 'rebuild');
+const colorFor = (rg) => rg.status === 'wontfix' ? '#22c55e' : (rg.source === 'human' ? '#60a5fa' : '#f59e0b');
+const labelOf = (rg) => rg.source === 'human' && !rg.kind ? 'you' : (rg.kind || 'unclassified');
+const escapeHtml = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+// identical machine differences (same kind+detail) collapse into one row; humans never group
+const groupKey = (rg) => rg.source === 'human' ? 'h:' + rg.id : 'a:' + (rg.kind || '?') + '|' + (rg.detail || '');
+function groupsFor(k) {
+  const live = (WL[k] || []).filter(r => r.status !== 'fixed');
+  const map = new Map();
+  for (const rg of live) { const g = groupKey(rg); if (!map.has(g)) map.set(g, []); map.get(g).push(rg); }
+  return [...map.values()];
 }
 
-function editRegion(k, id, wrap) {
-  const rg = (WL[k]||[]).find(r => r.id === id); if (!rg) return;
-  const kind = prompt('kind (' + KINDS.join('/') + ') — blank to DELETE:', rg.kind);
-  if (kind === null) return;
-  if (kind === '') { WL[k] = WL[k].filter(r => r.id !== id); redraw(wrap); return; }
-  rg.kind = kind;
-  const n = prompt('note:', rg.note || '');
-  if (n !== null) rg.note = n;
-  const st = prompt('status (open/wontfix/fixed):', rg.status);
-  if (st) rg.status = st;
-  rg.source = 'human';
-  delete rg.detail;
-  redraw(wrap);
+// ── editor popover: note + ignore toggle + delete (NO kind — categories are machine-owned) ──
+const ed = document.createElement('div'); ed.id = 'editor';
+const mkRow = (t, child) => { const r=document.createElement('div'); r.className='ed-row'; const l=document.createElement('label'); l.textContent=t; r.appendChild(l); r.appendChild(child); return r; };
+const edNote = document.createElement('input'); edNote.type='text'; edNote.placeholder='what looks wrong? (your words)';
+const edSeg = document.createElement('div'); edSeg.className='ed-seg';
+STATUSES.forEach(st => { const b=document.createElement('button'); b.type='button'; b.dataset.st=st; b.textContent = st==='wontfix' ? 'ignore' : 'open'; edSeg.appendChild(b); });
+const edActions = document.createElement('div'); edActions.className='ed-actions';
+const edDel = document.createElement('button'); edDel.className='ed-danger'; edDel.textContent='Delete';
+const edClose = document.createElement('button'); edClose.id='ed-close'; edClose.textContent='Done';
+const spacer = document.createElement('span'); spacer.style.flex='1';
+edActions.append(edDel, spacer, edClose);
+ed.append(mkRow('Note', edNote), mkRow('Status', edSeg), edActions);
+document.body.appendChild(ed);
+
+let editing = null; // { k, ids: [...] }
+const members = () => editing ? (WL[editing.k]||[]).filter(r => editing.ids.includes(r.id)) : [];
+function openEditor(k, ids, clientX, clientY) {
+  if (typeof ids === 'string') ids = [ids];
+  const list = (WL[k]||[]).filter(r => ids.includes(r.id)); if (!list.length) return;
+  editing = { k, ids };
+  const rep = list[0];
+  edNote.value = rep.note || '';
+  edSeg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.st === (rep.status || 'open')));
+  ed.style.display = 'block';
+  const w = 280, pad = 12;
+  let left = Math.min(clientX + 10, window.innerWidth - w - pad);
+  let top = clientY + 10; if (top + 160 > window.innerHeight) top = Math.max(pad, clientY - 170);
+  ed.style.left = Math.max(pad, left) + 'px'; ed.style.top = (top + window.scrollY) + 'px';
+  showIds(k, ids, true);
 }
+function closeEditor() { if (editing) showIds(editing.k, editing.ids, false); ed.style.display = 'none'; editing = null; }
+edNote.oninput = () => { members().forEach(rg => { rg.note = edNote.value; rg.source = rg.source || 'human'; }); renderAll(); };
+edSeg.querySelectorAll('button').forEach(b => b.onclick = () => {
+  if (!editing) return;
+  members().forEach(rg => { rg.status = b.dataset.st; rg.source = rg.source || 'human'; });
+  edSeg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  renderAll();
+});
+edDel.onclick = () => { if (!editing) return; WL[editing.k] = (WL[editing.k]||[]).filter(r => !editing.ids.includes(r.id)); closeEditor(); renderAll(); };
+edClose.onclick = closeEditor;
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeEditor(); });
 
 function svgPoint(svg, evt) {
   const vb = svg.viewBox.baseVal, rect = svg.getBoundingClientRect();
   return { x: Math.round((evt.clientX-rect.left)/rect.width*vb.width), y: Math.round((evt.clientY-rect.top)/rect.height*vb.height) };
 }
 
-document.querySelectorAll('.diffwrap').forEach(wrap => {
-  redraw(wrap);
-  const svg = wrap.querySelector('.overlay');
-  let start = null;
+function drawPane(svg, k, pane) {
+  svg.querySelectorAll('.rgn,.rgn-label').forEach(n => n.remove());
+  for (const rg of WL[k] || []) {
+    if (rg.status === 'fixed' || paneOf(rg) !== pane) continue;
+    const [x,y,w,h] = rg.box, stroke = colorFor(rg);
+    const human = rg.source === 'human';
+    const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    rect.setAttribute('class', 'rgn' + (human ? ' show' : '')); rect.dataset.id = rg.id;   // human boxes stay visible
+    rect.setAttribute('x',x); rect.setAttribute('y',y); rect.setAttribute('width',w); rect.setAttribute('height',h);
+    rect.setAttribute('fill','transparent'); rect.setAttribute('stroke',stroke); rect.setAttribute('stroke-width','2');
+    if (rg.status === 'wontfix') { rect.setAttribute('stroke-dasharray','6 4'); rect.setAttribute('opacity','0.65'); }
+    rect.onclick = (e) => { e.stopPropagation(); openEditor(k, [rg.id], e.clientX, e.clientY); };
+    svg.appendChild(rect);
+    const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('class','rgn-label' + (human ? ' show' : '')); t.dataset.id = rg.id;
+    t.setAttribute('x',x+2); t.setAttribute('y',y+12); t.setAttribute('fill',stroke); t.setAttribute('font-size','11');
+    t.textContent = labelOf(rg); svg.appendChild(t);
+  }
+}
+
+function drawFixlist(box, k) {
+  const groups = groupsFor(k);
+  box.innerHTML = '';
+  if (!groups.length) { box.innerHTML = '<div class="fix-empty">no differences — clean ✓</div>'; return; }
+  for (const members of groups) {
+    const rep = members[0], ids = members.map(m => m.id);
+    const ignored = members.every(m => m.status === 'wontfix');
+    const row = document.createElement('div');
+    row.className = 'fix-row' + (ignored ? ' ignored' : ''); row.dataset.id = rep.id; row.dataset.ids = ids.join(',');
+    const count = members.length > 1 ? '<span class="count">×' + members.length + '</span>' : '';
+    row.innerHTML = '<span class="cat" style="color:' + colorFor(rep) + '">' + escapeHtml(labelOf(rep)) + '</span>'
+      + '<span class="meta">' + (rep.detail ? escapeHtml(rep.detail) : '(' + rep.box.join(',') + ')') + '</span>' + count
+      + (rep.note ? '<span class="note">' + escapeHtml(rep.note) + '</span>' : '');
+    row.onmouseenter = () => showIds(k, ids, true);
+    row.onmouseleave = () => showIds(k, ids, false);
+    row.onclick = (e) => openEditor(k, ids, e.clientX, e.clientY);
+    box.appendChild(row);
+  }
+}
+// reveal/hide a set of MACHINE boxes (human boxes are always visible, so leave them alone)
+function showIds(k, ids, on) {
+  const regions = WL[k] || [];
+  for (const id of ids) {
+    const rg = regions.find(r => r.id === id);
+    if (rg && rg.source === 'human') continue;
+    document.querySelectorAll('.sec[data-key="' + CSS.escape(k) + '"] .overlay [data-id="' + CSS.escape(id) + '"]').forEach(el => el.classList.toggle('show', on));
+  }
+}
+
+function renderAll() {
+  document.querySelectorAll('.sec[data-key]').forEach(sec => {
+    const k = sec.dataset.key;
+    sec.querySelectorAll('.pane').forEach(p => drawPane(p.querySelector('.overlay'), k, p.dataset.pane));
+    drawFixlist(sec.querySelector('.fixlist-rows'), k);
+    const open = (WL[k]||[]).filter(r => r.status !== 'wontfix' && r.status !== 'fixed').length;
+    const c = sec.querySelector('.opencount'); if (c) c.textContent = open + ' open';
+  });
+}
+
+// drag on a readable pane to add a human region tagged with that pane
+document.querySelectorAll('.sec .pane').forEach(pane => {
+  const svg = pane.querySelector('.overlay'); const sec = pane.closest('.sec'); const k = sec.dataset.key;
   svg.style.pointerEvents = 'all';
+  let start = null;
   svg.addEventListener('mousedown', e => { if (e.target.classList.contains('rgn')) return; start = svgPoint(svg,e); });
   svg.addEventListener('mouseleave', () => { start = null; });
   svg.addEventListener('mouseup', e => {
     if (!start) return;
-    const end = svgPoint(svg,e), k = key(wrap);
-    const x = Math.min(start.x,end.x), y = Math.min(start.y,end.y);
-    const w = Math.abs(end.x-start.x), h = Math.abs(end.y-start.y);
-    start = null;
-    if (w < 4 || h < 4) return;
-    (WL[k] = WL[k] || []).push({ id: 'h' + Date.now() + '-' + Math.floor(Math.random() * 1e6), box:[x,y,w,h], source:'human', kind:'other', note:'', status:'open' });
-    editRegion(k, WL[k][WL[k].length-1].id, wrap);
+    const end = svgPoint(svg,e);
+    const x = Math.min(start.x,end.x), y = Math.min(start.y,end.y), w = Math.abs(end.x-start.x), h = Math.abs(end.y-start.y);
+    start = null; if (w < 4 || h < 4) return;
+    const id = 'h' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
+    (WL[k] = WL[k] || []).push({ id, box:[x,y,w,h], source:'human', kind:null, note:'', status:'open', pane: pane.dataset.pane });
+    renderAll(); openEditor(k, [id], e.clientX, e.clientY);
   });
 });
 
-document.querySelectorAll('img').forEach(i => i.onclick = () => document.fullscreenElement ? document.exitFullscreen() : i.requestFullscreen());
+// raw-diff toggle per section
+document.querySelectorAll('.diff-toggle').forEach(btn => {
+  btn.onclick = () => { const d = btn.closest('.sec').querySelector('.diffrow'); d.hidden = !d.hidden; btn.textContent = d.hidden ? 'show raw diff ▸' : 'hide raw diff ▾'; };
+});
 
-document.getElementById('save').onclick = async () => {
-  const files = {};
-  for (const [k, regions] of Object.entries(WL)) {
-    const [surface, viewport, section] = k.split('.');
-    const id = surface + '.' + viewport;
-    (files[id] = files[id] || { surface, viewport, sections: [] }).sections.push({ section, regions });
+// fullscreen zoom on a pane image
+document.querySelectorAll('.pane img').forEach(i => { i.onclick = () => document.fullscreenElement ? document.exitFullscreen() : i.requestFullscreen(); });
+
+// Copy feedback — file://-safe: clipboard, else select-in-textarea fallback. Never blocks.
+const fb = document.getElementById('copyfeedback');
+function flash(t){ const o = fb.dataset.label; fb.textContent = t; setTimeout(() => fb.textContent = o, 1500); }
+fb.dataset.label = fb.textContent;
+fb.onclick = async () => {
+  const md = feedbackMarkdown(WL, { reportName: REPORT_NAME });
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try { await navigator.clipboard.writeText(md); flash('Copied ✓'); return; } catch (e) {}
   }
-  for (const data of Object.values(files)) {
-    await fetch('/worklist', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
-  }
-  alert('Saved.');
+  const ta = document.getElementById('fbtext'); ta.value = md; ta.hidden = false; ta.focus(); ta.select();
+  try { document.execCommand('copy'); flash('Copied ✓'); } catch (e) { flash('select + copy'); }
 };
+
+// optional disk persistence — only when served over http(s)
+const saveBtn = document.getElementById('save');
+if (served) {
+  saveBtn.hidden = false;
+  saveBtn.onclick = async () => {
+    saveBtn.textContent = 'Saving…';
+    const files = {};
+    for (const [k, regions] of Object.entries(WL)) {
+      const [surface, viewport, section] = k.split('.');
+      const id = surface + '.' + viewport;
+      (files[id] = files[id] || { surface, viewport, sections: [] }).sections.push({ section, regions });
+    }
+    for (const data of Object.values(files)) {
+      await fetch('/worklist', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+    }
+    saveBtn.textContent = 'Saved ✓'; setTimeout(() => saveBtn.textContent = 'Save to disk', 1500);
+  };
+}
+
+renderAll();
 \x3c/script>`;
 }
 
@@ -324,65 +466,110 @@ export function worklistByKey(results) {
   return map;
 }
 
-export function reportHtml(results) {
+export function reportHtml(results, { reportName } = {}) {
     const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    const boxSvg = (rg) => {
-      const [x, y, w, h] = rg.box;
-      const stroke = rg.source === 'human' ? '#3b82f6' : '#f59e0b';
-      const dash = rg.status === 'wontfix' ? 'stroke-dasharray="6 4" opacity="0.5"' : '';
-      return `<rect class="rgn" data-id="${esc(rg.id)}" x="${x}" y="${y}" width="${w}" height="${h}"
-        fill="transparent" stroke="${stroke}" stroke-width="2" ${dash}></rect>
-        <text class="rgn-label" x="${x + 2}" y="${y + 12}" fill="${stroke}" font-size="11">${esc(rg.kind)}</text>`;
+    const paneOf = (rg) => rg.pane || (rg.kind === 'missing' ? 'legacy' : 'rebuild');
+    const colorFor = (rg) => rg.status === 'wontfix' ? '#22c55e' : (rg.source === 'human' ? '#60a5fa' : '#f59e0b');
+    const labelOf = (rg) => rg.source === 'human' && !rg.kind ? 'you' : (rg.kind || 'unclassified');
+    const groupKey = (rg) => rg.source === 'human' ? 'h:' + rg.id : 'a:' + (rg.kind || '?') + '|' + (rg.detail || '');
+    const groupRegions = (regions) => {
+      const map = new Map();
+      for (const rg of regions) { const g = groupKey(rg); if (!map.has(g)) map.set(g, []); map.get(g).push(rg); }
+      return [...map.values()];
     };
-
-    const diffFig = (s, r) => `
-      <figure class="diffwrap" data-section="${s.section}" data-vp="${r.viewport}" data-surface="${r.surface}">
-        <figcaption>diff (red = differs) · ${s.openCount ?? 0} open</figcaption>
-        <div class="canvas">
-          <img src="${s.base}.diff.png">
-          <svg class="overlay" preserveAspectRatio="none" viewBox="0 0 ${s.diffW ?? 1} ${s.diffH ?? 1}">
-            ${(s.regions ?? []).map(rg => boxSvg(rg)).join('')}
-          </svg>
-        </div>
-      </figure>`;
+    const boxSvg = (rg) => {
+      const [x, y, w, h] = rg.box, stroke = colorFor(rg);
+      const cls = 'rgn' + (rg.source === 'human' ? ' show' : '');
+      const dash = rg.status === 'wontfix' ? 'stroke-dasharray="6 4" opacity="0.65"' : '';
+      return `<rect class="${cls}" data-id="${esc(rg.id)}" x="${x}" y="${y}" width="${w}" height="${h}" fill="transparent" stroke="${stroke}" stroke-width="2" ${dash}></rect>` +
+        `<text class="rgn-label${rg.source === 'human' ? ' show' : ''}" data-id="${esc(rg.id)}" x="${x + 2}" y="${y + 12}" fill="${stroke}" font-size="11">${esc(labelOf(rg))}</text>`;
+    };
+    const fixRow = (members) => {
+      const rep = members[0], ids = members.map(m => esc(m.id)).join(',');
+      const ignored = members.every(m => m.status === 'wontfix');
+      const count = members.length > 1 ? `<span class="count">×${members.length}</span>` : '';
+      const meta = rep.detail ? esc(rep.detail) : `(${rep.box.join(',')})`;
+      return `<div class="fix-row${ignored ? ' ignored' : ''}" data-id="${esc(rep.id)}" data-ids="${ids}">` +
+        `<span class="cat" style="color:${colorFor(rep)}">${esc(labelOf(rep))}</span>` +
+        `<span class="meta">${meta}</span>${count}` +
+        (rep.note ? `<span class="note">${esc(rep.note)}</span>` : '') + `</div>`;
+    };
 
     const block = (r) => {
         const rows = r.sections.map(s => {
-            if (s.missing) return `<div class="sec miss"><h3>${s.section} — ANCHOR NOT FOUND (legacy:${s.missing.legacy} rebuild:${s.missing.rebuild})</h3></div>`;
+            if (s.missing) return `<div class="sec miss"><h3>${esc(s.section)} — ANCHOR NOT FOUND (legacy:${s.missing.legacy} rebuild:${s.missing.rebuild})</h3></div>`;
             const heavy = parseFloat(s.pct) > 0.5;
-            return `<div class="sec">
-              <h3>${s.section} — <span class="${heavy ? 'bad' : 'ok'}">${s.pct}% diff</span>
-                <span class="dim">· adj ${s.adjustedPct}% · ${s.openCount} open · (legacy ${s.legacyH}px / rebuild ${s.rebuildH}px)</span></h3>
-              <div class="trio">
-                <figure><figcaption>legacy</figcaption><img src="${s.base}.legacy.png"></figure>
-                <figure><figcaption>rebuild</figcaption><img src="${s.base}.rebuild.png"></figure>
-                ${diffFig(s, r)}
+            const live = (s.regions ?? []).filter(rg => rg.status !== 'fixed');
+            const legacyBoxes = live.filter(rg => paneOf(rg) === 'legacy').map(boxSvg).join('');
+            const rebuildBoxes = live.filter(rg => paneOf(rg) === 'rebuild').map(boxSvg).join('');
+            const fixRows = live.length ? groupRegions(live).map(fixRow).join('') : '<div class="fix-empty">no differences — clean ✓</div>';
+            const k = `${r.surface}.${r.viewport}.${s.section}`;
+            return `<div class="sec" data-key="${esc(k)}">
+              <h3>${esc(s.section)} — <span class="${heavy ? 'bad' : 'ok'}">${s.pct}% diff</span>
+                <span class="dim">· adj ${s.adjustedPct}% · <span class="opencount">${s.openCount} open</span> · (legacy ${s.legacyH}px / rebuild ${s.rebuildH}px) · <button class="diff-toggle">show raw diff ▸</button></span></h3>
+              <div class="panes">
+                <figure class="pane legacy" data-pane="legacy"><figcaption>legacy · ✎ draw</figcaption>
+                  <div class="canvas"><img src="${s.base}.legacy.png"><svg class="overlay" preserveAspectRatio="none" viewBox="0 0 ${s.diffW ?? 1} ${s.legacyH ?? s.diffH ?? 1}">${legacyBoxes}</svg></div></figure>
+                <figure class="pane rebuild" data-pane="rebuild"><figcaption>rebuild · ✎ draw</figcaption>
+                  <div class="canvas"><img src="${s.base}.rebuild.png"><svg class="overlay" preserveAspectRatio="none" viewBox="0 0 ${s.diffW ?? 1} ${s.rebuildH ?? s.diffH ?? 1}">${rebuildBoxes}</svg></div></figure>
+                <div class="fixlist"><div class="fixlist-rows">${fixRows}</div></div>
               </div>
+              <div class="diffrow" hidden><figcaption>raw diff (red = differs)</figcaption><img src="${s.base}.diff.png"></div>
             </div>`;
         }).join('\n');
-        return `<section class="surface"><h2>${r.surface} @ ${r.viewport}</h2>${rows}</section>`;
+        return `<section class="surface"><h2>${esc(r.surface)} @ ${esc(r.viewport)}</h2>${rows}</section>`;
     };
     return `<!doctype html><html><head><meta charset="utf-8"><title>Visual parity — reference vs rebuild</title>
 <style>
   body{font-family:ui-sans-serif,system-ui,sans-serif;margin:0;background:#0a0a0a;color:#f5f5f5}
-  header{padding:1rem 1.5rem;background:#18181b;border-bottom:1px solid #27272a;position:sticky;top:0}
-  h1{margin:0;font-size:1.1rem} h2{font-size:1rem;color:#a1a1aa;margin:1.5rem 1.5rem .5rem}
+  header{padding:1rem 1.5rem;background:#18181b;border-bottom:1px solid #27272a;position:sticky;top:0;z-index:40;display:flex;gap:.75rem;align-items:center}
+  header h1{margin:0;font-size:1rem;flex:1}
+  header button{background:#f59e0b;color:#000;border:none;border-radius:6px;padding:6px 12px;font-weight:600;cursor:pointer}
+  header button#save{background:#3f3f46;color:#fff}
+  h2{font-size:1rem;color:#a1a1aa;margin:1.5rem 1.5rem .5rem}
   .surface{border-bottom:1px solid #27272a;padding-bottom:1rem}
   .sec{padding:.5rem 1.5rem 1rem} .sec h3{font-size:.9rem;font-weight:500;color:#d4d4d8;margin:.5rem 0}
   .ok{color:#22c55e;font-weight:700}.bad{color:#ef4444;font-weight:700}.dim{color:#71717a;font-size:.8rem}
-  .trio{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem}
+  .panes{display:grid;grid-template-columns:1fr 1fr minmax(240px,.8fr);gap:.75rem;align-items:start}
   figure{margin:0}figcaption{font-size:.7rem;color:#71717a;text-transform:uppercase;letter-spacing:.05em;padding-bottom:.25rem}
-  img{width:100%;display:block;border:1px solid #27272a;background:#fff;cursor:zoom-in}
+  .canvas{position:relative;display:block}
+  .canvas img{width:100%;display:block;border:1px solid #27272a;background:#fff;cursor:zoom-in}
   img:fullscreen{width:auto;height:100vh;background:#fff}
-  .miss h3{color:#f59e0b}
-  .canvas{position:relative;display:inline-block;width:100%}
-  .canvas img{width:100%;display:block}
   .overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-  .overlay .rgn{pointer-events:all;cursor:pointer}
+  .overlay .rgn,.overlay .rgn-label{visibility:hidden}
+  .overlay .rgn.show{visibility:visible;fill:rgba(96,165,250,.18);pointer-events:all;cursor:pointer}
+  .overlay .rgn-label.show{visibility:visible}
+  .pane .canvas{cursor:crosshair}
+  .miss h3{color:#f59e0b}
+  .fixlist{font-size:.8rem;border:1px solid #27272a;border-radius:6px;background:#0f0f10;max-height:480px;overflow:auto}
+  .fix-row{padding:.35rem .5rem;border-bottom:1px solid #1f1f22;cursor:pointer;display:flex;gap:.4rem;flex-wrap:wrap;align-items:baseline}
+  .fix-row:hover{background:#1c1c20}
+  .fix-row.ignored{opacity:.5}
+  .fix-row .cat{font-weight:700}
+  .fix-row .meta{color:#a1a1aa;font-size:.75rem}
+  .fix-row .count{color:#fbbf24;font-size:.72rem;font-weight:700}
+  .fix-row .note{color:#f5f5f5;flex-basis:100%}
+  .fix-empty{color:#22c55e;padding:.5rem}
+  .diff-toggle{background:#27272a;color:#a1a1aa;border:1px solid #3f3f46;border-radius:5px;padding:1px 7px;cursor:pointer;font-size:.7rem}
+  .diffrow{padding:.5rem 0}
+  .diffrow img{width:50%;display:block;border:1px solid #27272a;background:#fff}
+  #fbtext{position:fixed;bottom:8px;right:8px;width:40vw;height:30vh;z-index:60;background:#0a0a0a;color:#ddd;border:1px solid #3f3f46}
+  #editor{position:absolute;z-index:50;display:none;width:280px;background:#18181b;border:1px solid #3f3f46;border-radius:8px;padding:10px;box-shadow:0 8px 24px rgba(0,0,0,.55);font-size:.8rem}
+  #editor .ed-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  #editor label{width:46px;color:#a1a1aa}
+  #editor input{flex:1;background:#0a0a0a;color:#f5f5f5;border:1px solid #3f3f46;border-radius:5px;padding:4px 6px}
+  #editor .ed-seg{display:flex;gap:4px;flex:1}
+  #editor .ed-seg button{flex:1;background:#0a0a0a;color:#a1a1aa;border:1px solid #3f3f46;border-radius:5px;padding:4px;cursor:pointer;text-transform:capitalize}
+  #editor .ed-seg button.on{background:#f59e0b;color:#000;border-color:#f59e0b;font-weight:600}
+  #editor .ed-seg button[data-st=wontfix].on{background:#22c55e;color:#000;border-color:#22c55e}
+  #editor .ed-actions{display:flex;align-items:center;gap:8px}
+  #editor .ed-danger{background:#7f1d1d;color:#fff;border:1px solid #991b1b;border-radius:5px;padding:4px 8px;cursor:pointer}
+  #editor #ed-close{background:#3f3f46;color:#fff;border:none;border-radius:5px;padding:4px 12px;cursor:pointer}
 </style></head><body>
-<header><h1>Visual parity — reference vs rebuild · green ≤0.5% · click image to zoom · % UNDERCOUNTS background-heavy bands → trust the diff image + heights</h1><button id="save">Save worklist</button></header>
+<header><h1>Visual parity — legacy │ rebuild │ fix-list · annotate on the readable panes · % undercounts background-heavy bands → trust the panes</h1><button id="copyfeedback">Copy feedback</button><button id="save" hidden>Save to disk</button></header>
+<textarea id="fbtext" hidden></textarea>
 ${results.map(block).join('\n')}
-${reportScript(worklistByKey(results))}
+${reportScript(worklistByKey(results), reportName)}
 </body></html>`;
 }
 
@@ -403,6 +590,22 @@ export async function detectRegions(lp, rp, diff, legacyTop, rebuildTop, { minPi
     out.push({ id: `a${++n}`, box: [reg.x, reg.y, reg.w, reg.h], source: 'auto', kind, detail, status: 'open' });
   }
   return out;
+}
+
+// Classify human-drawn regions the same way auto regions are classified: hit-test the box
+// centre on both sides and run classifyKind. Run on re-runs so a box YOU drew comes back
+// labelled — categories are the machine's job, not yours. Preserves note/status/pane.
+export async function classifyHumanRegions(lp, rp, regions, legacyTop, rebuildTop) {
+  for (const rg of regions) {
+    if (rg.source !== 'human' || (rg.kind && rg.kind !== 'other')) continue;
+    const cx = rg.box[0] + Math.floor(rg.box[2] / 2);
+    const cy = rg.box[1] + Math.floor(rg.box[3] / 2);
+    const lh = await captureHit(lp, cx, legacyTop + cy);
+    const rh = await captureHit(rp, cx, rebuildTop + cy);
+    const { kind, detail } = classifyKind(lh, rh);
+    rg.kind = kind; rg.detail = detail;
+  }
+  return regions;
 }
 
 // Hit-test a document point on one render; returns the Hit shape classifyKind expects.

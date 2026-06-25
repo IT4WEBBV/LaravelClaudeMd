@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { maskFromDiff, clusterMask, classifyKind, iou, mergeRegions, countMaskInBoxes, adjustedPct, worklistFilename, readWorklist, writeWorklist, priorSectionRegions } from './parity-lib.mjs';
+import { maskFromDiff, clusterMask, classifyKind, iou, mergeRegions, countMaskInBoxes, adjustedPct, worklistFilename, readWorklist, writeWorklist, priorSectionRegions, feedbackMarkdown, resolveStorageState, groupResultsByReport, reportFilename, normalizeConfig } from './parity-lib.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -173,4 +173,77 @@ test('writeWorklist then readWorklist round-trips; priorSectionRegions filters b
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+// ─── Phase A: feedbackMarkdown ───────────────────────────────────────────────
+test('feedbackMarkdown groups by surface@viewport, drops fixed, labels human as [you]', () => {
+  const wl = {
+    'landing.desktop.content': [
+      { id: 'a1', box: [40,10,160,48], source: 'auto', kind: 'recolor', detail: 'bg #fff → #f7f7f7', note: 'too grey', status: 'open' },
+      { id: 'a2', box: [0,0,10,10], source: 'auto', kind: 'shift', detail: 'Δy 12px', status: 'fixed' },
+      { id: 'h1', box: [120,200,80,30], source: 'human', kind: undefined, note: 'logo too big', status: 'open' },
+    ],
+  };
+  const md = feedbackMarkdown(wl, { reportName: 'members' });
+  assert.match(md, /## Visual parity feedback — report: members/);
+  assert.match(md, /### landing @ desktop/);
+  assert.match(md, /- \[recolor\] content — bg #fff → #f7f7f7 @ \(40,10,160,48\) — note: "too grey" — open/);
+  assert.match(md, /- \[you\] content — @ \(120,200,80,30\) — note: "logo too big" — open/);
+  assert.ok(!md.includes('Δy 12px'), 'fixed items are dropped');
+});
+
+test('feedbackMarkdown omits the report suffix when no reportName', () => {
+  const md = feedbackMarkdown({ 'home.desktop.nav': [{ id: 'a1', box: [0,0,1,1], source: 'auto', kind: 'shift', status: 'open' }] });
+  assert.match(md, /## Visual parity feedback\n/);
+  assert.ok(!md.includes('report:'));
+});
+
+test('feedbackMarkdown collapses identical machine diffs into one ×N line', () => {
+  const wl = { 'home.desktop.nav': [
+    { id:'a1', box:[0,0,1,1], source:'auto', kind:'shift', detail:'Δx -1px, Δy -13px', status:'open' },
+    { id:'a2', box:[0,2,1,1], source:'auto', kind:'shift', detail:'Δx -1px, Δy -13px', status:'open' },
+    { id:'a3', box:[0,4,1,1], source:'auto', kind:'shift', detail:'Δx -1px, Δy -13px', status:'open' },
+  ] };
+  const md = feedbackMarkdown(wl);
+  assert.match(md, /- \[shift\] nav — Δx -1px, Δy -13px ×3 — open/);
+  assert.equal((md.match(/\[shift\]/g) || []).length, 1, 'one shift line, not three');
+});
+
+// ─── Phase A: resolveStorageState ────────────────────────────────────────────
+test('resolveStorageState: per-surface profile, default fallback, unknown throws', () => {
+  const profiles = { maria: 'auth.maria.json' };
+  assert.equal(resolveStorageState({ name: 'landing', auth: 'maria' }, profiles, undefined), 'auth.maria.json');
+  assert.equal(resolveStorageState({ name: 'home' }, profiles, 'auth.json'), 'auth.json');
+  assert.equal(resolveStorageState({ name: 'home' }, profiles, undefined), undefined);
+  assert.throws(() => resolveStorageState({ name: 'x', auth: 'ghost' }, profiles, undefined), /unknown auth profile/);
+});
+
+// ─── Phase A: groupResultsByReport / reportFilename ──────────────────────────
+test('groupResultsByReport splits by report tag, default first', () => {
+  const results = [
+    { surface: 'home', viewport: 'desktop', report: 'public', sections: [] },
+    { surface: 'landing', viewport: 'desktop', report: 'members', sections: [] },
+    { surface: 'home', viewport: 'mobile', report: 'public', sections: [] },
+    { surface: 'x', viewport: 'desktop', sections: [] },
+  ];
+  const groups = groupResultsByReport(results);
+  assert.deepEqual(groups.map(g => g.name), ['public', 'members', 'default']);
+  assert.equal(groups[0].results.length, 2);
+});
+
+test('reportFilename maps default to report.html and names the rest', () => {
+  assert.equal(reportFilename('default'), 'report.html');
+  assert.equal(reportFilename('members'), 'report.members.html');
+});
+
+// ─── Phase A: normalizeConfig ────────────────────────────────────────────────
+test('normalizeConfig applies defaults and validates', () => {
+  const c = normalizeConfig({ legacy: 'a', rebuild: 'b', surfaces: [{ name: 'home', path: '/' }] });
+  assert.equal(c.noiseMinPixels, 12);
+  assert.equal(c.threshold, 0.1);
+  assert.deepEqual(c.authProfiles, {});
+  assert.equal(c.viewports.length, 2);
+  assert.equal(c.defaultStorageState, undefined);
+  assert.equal(normalizeConfig({ legacy: 'a', rebuild: 'b', surfaces: [], defaultStorageState: 'auth.json' }).defaultStorageState, 'auth.json');
+  assert.throws(() => normalizeConfig({ legacy: 'a' }), /surfaces/);
 });
