@@ -110,6 +110,18 @@ export default {
 };
 ```
 
+**Anchoring a section — `anchor:` is only one of three modes.** Each section is cut at its top by exactly one of these (see `parity-harness.mjs` `anchorTops`):
+
+| Mode | Use when | Example |
+|------|----------|---------|
+| `fixedTop: <y>` | A known/sticky band (nav at `0`), or a page that opens straight into content with no heading (`fixedTop:0` = whole page as one band) | `{ name:'nav', fixedTop:0 }` |
+| `anchor: 'text'` | The band starts at an `<h1/h2/h3>` whose text contains this string | `{ name:'hero', anchor:'Hero heading' }` |
+| `selector: 'css'` | **No heading to anchor on** — cut at any element instead (the one selector is matched independently on each side, so they self-align even across different markup) | `{ name:'grid', selector:'.video-grid' }` |
+
+**"This page has no heading" is a one-line config fix — never a reason to abandon the harness.** A page that opens on a grid / gallery / table with no heading uses `selector:` (a stable wrapper present on both sides) or `fixedTop:0`. That's exactly what those modes are for; reaching for one is a 30-second edit, not a workaround.
+
+**The report IS the harness output.** The deliverable for a phase is whatever `parity-harness.mjs` writes to `out/report.*.html` — that file, with its content-aligned bands, pixel diff, band heights, and worklist. Never capture screenshots by hand and assemble your own side-by-side HTML to stand in for it: a collage has no diff, no heights, no worklist, so it answers "do these look similar?" (the eyeballing this skill exists to forbid) instead of "does the rebuild match?".
+
 **Read the report — don't eyeball the diff.** Open `out/report.<name>.html`. Each section is **legacy │ rebuild │ fix-list**: the two readable panes are the annotation surface (drag a box on either), and the **fix-list** is the punch-list of differences — machine-found *and* the boxes you draw. The raw red diff sits behind a `show raw diff ▸` toggle. **You never pick a category** — the machine labels each difference and a box you draw comes back labelled on the next run (`you` until then). Your only inputs are a **note** and an **ignore** toggle.
 
 **Hand feedback back with "Copy feedback"** — it serializes the fix-list to Markdown onto your clipboard and works whether the report is opened as a `file://` page *or* served (no server, no CORS, never hangs). Paste it back, or screenshot a section (the panes are fully labelled). Optionally run `--serve` (default :8088) to additionally persist annotations to `out/worklist.*.json` on disk — a **Save to disk** button appears only when served.
@@ -170,6 +182,7 @@ Rules that catch what eyeballing misses:
 - Reproducing the shape but skipping its sub-elements (dots, badges, pseudo, shadows).
 - Running one viewport and calling the report complete.
 - Batching many CSS guesses, then looking once at the end.
+- "This page has no heading, so the harness can't do this surface" — `anchor:` is one of three cut modes; use `selector:`/`fixedTop:`. Never hand-build a stand-in report.
 
 ## Rationalization table
 
@@ -183,3 +196,4 @@ Rules that catch what eyeballing misses:
 | "It's just a decorative dot" | The user will notice the missing dot. Enumerate every sub-element of the reference. |
 | "I'll check all viewports at the end" | Run them together now; mobile usually diverges most and silently. |
 | "The worklist is empty so it's done" | Empty worklist with a non-trivial pixel% means the noise floor hid regions or the diff is background-only — open the diff image and lower `NOISE_MIN_PIXELS`. |
+| "No heading here, so I'll just capture + hand-build the report" | `anchor:` is one of three section-cut modes — no heading → `selector:`/`fixedTop:`. The harness's `out/report.*.html` is the only report; a hand-built collage hides every real diff. |

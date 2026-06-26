@@ -286,7 +286,8 @@ function groupsFor(k) {
   const live = (WL[k] || []).filter(r => r.status !== 'fixed');
   const map = new Map();
   for (const rg of live) { const g = groupKey(rg); if (!map.has(g)) map.set(g, []); map.get(g).push(rg); }
-  return [...map.values()];
+  // human annotations lead the list — never buried under machine rows (sort is stable, so machine order is preserved)
+  return [...map.values()].sort((a, b) => (b[0].source === 'human') - (a[0].source === 'human'));
 }
 
 // ── editor popover: note + ignore toggle + delete (NO kind — categories are machine-owned) ──
@@ -409,7 +410,7 @@ document.querySelectorAll('.sec .pane').forEach(pane => {
     start = null; if (w < 4 || h < 4) return;
     const id = 'h' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
     (WL[k] = WL[k] || []).push({ id, box:[x,y,w,h], source:'human', kind:null, note:'', status:'open', pane: pane.dataset.pane });
-    renderAll(); openEditor(k, [id], e.clientX, e.clientY);
+    renderAll(); sec.querySelector('.fixlist').scrollTop = 0; openEditor(k, [id], e.clientX, e.clientY);
   });
 });
 
@@ -475,7 +476,8 @@ export function reportHtml(results, { reportName } = {}) {
     const groupRegions = (regions) => {
       const map = new Map();
       for (const rg of regions) { const g = groupKey(rg); if (!map.has(g)) map.set(g, []); map.get(g).push(rg); }
-      return [...map.values()];
+      // human annotations lead the list — never buried under machine rows (sort is stable, so machine order is preserved)
+      return [...map.values()].sort((a, b) => (b[0].source === 'human') - (a[0].source === 'human'));
     };
     const boxSvg = (rg) => {
       const [x, y, w, h] = rg.box, stroke = colorFor(rg);
