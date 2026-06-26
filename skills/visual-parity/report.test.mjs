@@ -91,6 +91,21 @@ test('reportHtml keeps human-drawn boxes visible (show class), machine boxes hid
   assert.ok(html.includes('class="rgn show"'), 'human box is always shown');
 });
 
+test('reportHtml sorts human annotations above machine rows (never buried below the scroll fold)', () => {
+  // human region is LAST in the input array, yet must render FIRST in the fix-list
+  const regs = [
+    { id:'a1', box:[0,0,10,10], source:'auto', kind:'shift', detail:'Δx -1px', status:'open' },
+    { id:'a2', box:[0,20,10,10], source:'auto', kind:'resize', detail:'Δh 3px', status:'open' },
+    { id:'h1', box:[5,5,20,20], source:'human', kind:null, note:'mine', status:'open' },
+  ];
+  const res = [{ surface:'home', viewport:'desktop', sections:[{ ...sampleSection, regions: regs }] }];
+  const html = reportHtml(res);
+  const iHuman = html.indexOf('class="fix-row" data-id="h1"');
+  const iMachine = html.indexOf('class="fix-row" data-id="a1"');
+  assert.ok(iHuman > -1 && iMachine > -1, 'both the human and a machine fix-row render');
+  assert.ok(iHuman < iMachine, 'human annotation sorts above machine rows');
+});
+
 test('reportHtml shows adjusted metric line + open count', () => {
   const html = reportHtml(sampleResults);
   assert.ok(html.includes('adj 4.2%'), 'adjusted pct');
