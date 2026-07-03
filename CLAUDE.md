@@ -271,6 +271,7 @@ BasicForm::make()
 - Minimal comments - code should be self-documenting
 - OOP or functional over procedural
 - Small classes, small methods (Sandi Metz rules as guidance)
+- Prefer Eloquent over bypassing it. Use raw `DB::`/query-builder writes only with a clear reason — bypassing Eloquent skips model events, casts, and relationship cleanup, which can silently orphan related rows. When a model already orchestrates its own cleanup (a cascade, or a method like `deleteSlideableAndSelf()`), go through it rather than deleting the row directly.
 - Prefer Laravel collections over plain PHP `foreach` loops
 - Always use `->get()` before `->each()` on query builders to make it explicit when we transition from query builder to collection:
   ```php
