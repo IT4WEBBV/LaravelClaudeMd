@@ -462,7 +462,7 @@ Personal skills are pooled from **two** git repos, so `~/.claude/skills/` is a *
 
 | Repo | Clone location | Provides |
 |------|----------------|----------|
-| `IT4WEBBV/LaravelClaudeMd` | `~/GitProjects/LaravelClaudeMd/LaravelClaudeMd` | `browser-verification`, `improve-codebase-architecture` |
+| `IT4WEBBV/LaravelClaudeMd` | `~/GitProjects/LaravelClaudeMd/LaravelClaudeMd` | `browser-verification`, `improve-codebase-architecture`, `slots` |
 | `IT4WEBBV/DevOps-Claude-Config` | `~/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config` | `handoff`, `memory-sync`, `release-changelog`, `retenium-prod` |
 
 > **Nested clone layout**: both repos are cloned one level deep — `~/GitProjects/<Repo>/<Repo>/` — to match `DevOps-Claude-Config`'s own README and its `memory-sync` skill, which expects that path. Keep this layout so Mark's skills work unmodified.
