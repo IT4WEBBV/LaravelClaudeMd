@@ -19,37 +19,34 @@ branches run side-by-side with their own URL, database, and host ports.
 - `<Project>-N` (N = 2..20) = **slot N**. The directory basename *is* the slot
   identity — **never rename a slot dir**.
 
-Each project's own `CLAUDE.md` + `scripts/slot-env.sh` are the source of truth
-for its URLs, ports, and dir naming. **Discover; never assume another project's
-scheme.**
+## The interface
 
-## Discover the slot interface first
+Every it4web slot project drives the lifecycle through **`scripts/worktree.sh`**:
 
-Slot tooling comes in two shapes. Detect which before doing anything:
+- create   = `./scripts/worktree.sh create <branch>`
+- teardown = `./scripts/worktree.sh remove <slot>`
 
-- **`scripts/worktree.sh` exists** → create = `./scripts/worktree.sh create <branch>`,
-  teardown = `./scripts/worktree.sh remove <slot>`. It is the interface — read
-  its usage header; do not reimplement it.
-- **No `worktree.sh`, but `scripts/restart.sh` accepts `--worktree`** → create =
-  `./scripts/restart.sh --worktree <branch>`; teardown is manual (see below).
-- **Only `scripts/slot-env.sh`, no create path** → the project can run as a slot
-  but has no create helper. Do it by hand and offer to port `worktree.sh`.
-- **None of these** → not a slot project. Say so; don't invent one.
+Read its usage header; don't reimplement it. If a project has no
+`scripts/worktree.sh`, it isn't slot-enabled — say so rather than improvising.
+
+For **ports and URLs**, each project's own `scripts/slot-env.sh` is the source of
+truth — the port scheme differs per project. Read them from the slot's env; never
+hardcode or copy another project's numbers.
 
 ## Start — "use a slot", "spin up a slot"
 
-1. Get the branch (ask if not given). Run the project's create command **from the
-   primary worktree**. Add `-p` for locally-mounted it4web packages. Let the
-   script enforce its own rules (primary-only, next free slot, safety checks) —
-   don't pre-model them.
-2. Report where it's reachable. Re-source the slot's env rather than guessing
-   ports — this works on any slot-capable project and can't drift:
+1. Get the branch (ask if not given). Run `./scripts/worktree.sh create <branch>`
+   **from the primary worktree** (add `-p` for locally-mounted it4web packages).
+   Let the script enforce its own rules (primary-only, next free slot, fresh-trunk
+   branching, safety checks) — don't pre-model them.
+2. Report where it's reachable by re-sourcing the slot's env (works on any
+   project, can't drift):
 
    ```bash
    cd <slot-dir>
    ( set -a; PROJECT_ROOT="$PWD"; source container/.env; source scripts/slot-env.sh
-     echo "URL:      https://$WEB_VHOST"
-     echo "DB port:  $DB_LOCAL_BINDED_PORT" )
+     echo "URL:     https://$WEB_VHOST"
+     echo "DB port: $DB_LOCAL_BINDED_PORT" )
    docker ps --filter "name=$(basename "$PWD" | tr '[:upper:]' '[:lower:]')" --format '{{.Names}}\t{{.Ports}}'
    ```
 
@@ -61,21 +58,17 @@ NOT run `stop.sh`.**
 1. Identify the exact slot (`git worktree list`, `docker ps`). **Confirm the
    directory with the user and state that its database and volumes will be
    destroyed** before running anything.
-2. **Gen-2** (`worktree.sh`): `./scripts/worktree.sh remove <slot>` — handles
-   `down -v`, the macOS ACL workaround, and `git worktree remove`.
-3. **Gen-1** (no `worktree.sh`): from inside the slot
-   `cd container && docker compose -f docker-compose.dev.yml down -v`, then from
-   the primary `chmod -RN <slot-dir>` (macOS) and
-   `git worktree remove --force <slot-dir>`. Offer to port `worktree.sh` so next
-   time is one command.
-4. **Never delete the local branch** unless the user explicitly asks (that is
+2. `./scripts/worktree.sh remove <slot>` — handles the `down -v`, the macOS ACL
+   workaround, and `git worktree remove`. Run it from inside the slot (no arg →
+   the current slot) or from the primary (the `<slot>` arg is required).
+3. **Never delete the local branch** unless the user explicitly asks (that is
    `--force-local-branch-removal` / `git branch -D` — it can drop unmerged work).
 
 ## Red flags — you're about to get it wrong
 
 - Reaching for `stop.sh` because the user said "stop" → WRONG. Stop = destroy.
-- Assuming `worktree.sh` exists, or hardcoding another project's ports/URL →
-  discover the interface first.
+- Computing or guessing a slot's ports instead of re-sourcing `slot-env.sh` → the
+  scheme differs per project.
 - Running teardown without naming the exact dir and confirming the data loss.
 - `git branch -D` / `--force-local-branch-removal` when the user didn't ask.
 
@@ -84,5 +77,4 @@ NOT run `stop.sh`.**
 | Excuse | Reality |
 |--------|---------|
 | "They said 'for now' / 'stop', so keep the data (`stop.sh`)" | For this user stop/teardown = destroy. `stop.sh` is never the answer. |
-| "worktree.sh must exist / the ports follow LaravelTemplate's scheme" | It's two shapes and per-project port schemes. Discover, don't assume. |
-| "I'll just `git worktree add` manually to create it" | Both shapes have a create command (`worktree.sh create` or `restart.sh --worktree`). Use it. |
+| "The slot's ports follow LaravelTemplate's scheme" | Port bases differ per project. Re-source the slot's own `slot-env.sh`; never copy numbers. |
