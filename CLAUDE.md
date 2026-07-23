@@ -380,12 +380,29 @@ This clears the Playwright Chrome profile that conflicts with an already-running
 
 ## Workflow
 
+### Talking to Other People
+
+**Never send anything to another human without my explicit permission.** Anything you write that leaves this chat and lands in front of someone else needs my approval first, in this conversation. That includes, but is not limited to:
+
+- GitHub: comments on PRs or issues, replies to reviewers, review submissions, and reactions (👍 etc.)
+- Chat and email: Slack/Teams messages, mail, DMs — whether sent by a tool, a script, or an MCP server
+- Ticket systems, calendar invites, and any other channel where a person reads the result
+
+This applies even when the message is ready, correct, and obviously helpful — and even when someone is directly asking a question and waiting on an answer. Everything sent from my accounts reads as coming from **me**, so I decide what gets said, how it's phrased, and when it goes out. **Draft it in chat instead**, and let me approve or send it.
+
+Permission is per message, not blanket: "yes, post that" covers that reply, not the next one. If in doubt, draft and ask.
+
+What is *not* covered — my own work describing itself, no other human is being addressed:
+
+- The PR **body**, title, and commit messages of a PR I am working on
+- Branch names, changelog entries, code comments, and documentation
+
 ### Git Workflow
 
 - **No co-author**: Do not add `Co-Authored-By` lines to git commit messages.
 - **No AI attribution**: Do not include "Generated with Claude Code" or similar AI tool references in PRs, commits, or code.
 - **Never commit directly to main**. Always create a feature branch and open a pull request when the work is done.
-- **Never post on a PR or issue without my explicit permission**: do not write comments, replies to reviewers, or review responses on GitHub — and do not add reactions (👍 etc.) — unless I have asked for it in this conversation. This includes answering a reviewer's question, even when the answer is ready and correct: colleagues read those comments as coming from me, so I decide what gets said and when. Instead, draft the reply in chat and let me approve or post it. Editing the PR **body** and title of a PR I am working on is fine (that is my own description of my own work); talking to other people is not.
+- **Never respond to another human without my permission** — see [Talking to Other People](#talking-to-other-people) above.
 - **Sync with remote when working on existing branches**: When checking out or reviewing an existing branch, always run `git fetch` and check if the local branch is up to date with the remote (`git status` or `git log --oneline HEAD..origin/<branch>`). Pull the latest changes before starting any work to avoid conflicts and working on stale code.
 - **Update the changelog**: When creating a PR, add a changelog entry using whichever convention the project uses:
   - **Fragment-based (project has a `.changelog/unreleased/` directory):** copy `.changelog/unreleased/TEMPLATE.md` to `.changelog/unreleased/<branch-name>.md` (branch name with `/` replaced by `-`) and fill in the `<details>` block. Do **not** edit `CHANGELOG.md` directly — the release workflow rolls fragments in at release time. See `.changelog/unreleased/README.md`.
