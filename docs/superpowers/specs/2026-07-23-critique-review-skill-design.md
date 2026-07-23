@@ -1,181 +1,161 @@
 # `/critique` — one review skill, four modes — design
 
 **Date:** 2026-07-23
-**Status:** approved design, revised after an independent plan-review → pending spec sign-off → implementation plan → PR
+**Status:** revised design (v3, cut down after review) → pending spec sign-off → implementation plan → PR
 **Canonical home:** `IT4WEBBV/LaravelClaudeMd`, `skills/critique/` (the PR target).
-**Related, out of scope:** a "pipeline" skill that chains brainstorm → plan → critique → handoff → work-on → critique via subagents. Deferred to its own design — see issue #14 and Non-goals.
+**Related, out of scope:** the "pipeline" skill — issue #14.
+**Previous revisions:** `f7007f0` (initial), `6117da4` (after independent plan-review). This version deliberately **removes** machinery those contained; see "What this skill is actually for".
 
 ## Summary
 
-Encode the two review steps that are currently done from memory into one skill with four modes.
+One skill, four modes, that encodes the two review steps currently done from memory: reviewing a design/plan before implementation, and reviewing a PR before merge.
 
-The existing chain — `brainstorming` → `writing-plans` → **review** → `handoff pr` → `work-on` → **review** — has skills for four of its six steps. The two unencoded steps are exactly the two quality gates, which is why review quality varies per run. `/critique` fills both, plus two review shapes that have no home today.
+1. **Four modes:** `plan`, `pr`, `alternatives`, `missing`. Same pipeline, different rubric.
+2. **One reviewer by default.** A single agent gets the whole rubric. Fan-out is an exception that must earn its place, not the architecture.
+3. **Compatibility is a standing `pr` concern**, not a package-only one — migrations, deploy operations, queued jobs and events break compatibility far more often than package APIs do.
+4. **Findings land in chat**, ranked, each ending in an explicit disposition: fix now / rework the plan / file an issue / drop.
+5. **No generic bug hunting.** That layer belongs to the built-in `/code-review`.
 
-1. **Four modes, one skill:** `plan`, `pr`, `alternatives`, `missing`. Same engine, different rubric.
-2. **Backwards compatibility is a conditional concern, not a mode** — added automatically when the review targets an `it4web/*` package or a change to one's version constraint.
-3. **Engine is Claude subagents**, fanned out per concern, deduplicated, then filtered by a **verify pass whose strictness depends on the mode**.
-4. **Findings land in chat**, ranked, then get triaged into one of four dispositions: fix now / rework the plan / file an issue / drop.
-5. **No generic bug hunting.** That layer belongs to the built-in `/code-review`; this skill owns the layer that is house-specific.
+## What this skill is actually for
 
-## Background — current state
+Worth stating plainly, because the previous revision of this spec got it wrong and grew an engine around it.
 
-Manual flow today, per feature: start a brainstorm, get a design + plan doc, ask Fable to review it, `/handoff pr`, `/work-on <PR>`, ask Fable to review the PR. The Fable reviews are ad-hoc prompts composed fresh each time — no fixed rubric, no false-positive filter, no defined disposition for what comes back.
+Asking an independent model "what do you think of this plan / this PR" already works. Tested during the design of this very spec: one agent, one prompt, no rubric fan-out, no verification pass — nine defensible findings, three of them serious, two of twelve off-target. That is a good result with none of the machinery.
 
-Prior art examined:
+So the skill's value is **not** better reasoning, and it should not spend tokens pretending otherwise. Its value is three narrower things:
 
-- **`counselors`** (`skills/counselors/`, 283 lines) — Aaron Francis's tool; fans a prompt out to multiple external AI CLIs in parallel and synthesises. Its documented value is cross-model *disagreement* (its examples include agents proposing three distinct architectures for one problem). Cost: 10–20+ minutes per run.
-- **`review-round`** (Retenium-local, 199 lines + `.claude/workflows/code-review.js`) — periodic whole-codebase review that files clustered GitHub issues. Two levers worth stealing: an **adversarial verify pass** to kill false positives, and a **data-only, re-runnable** engine that creates no GitHub objects by itself.
-- **Built-in `/code-review`** — reviews the working diff or a PR, verifies findings, reports them ranked. Strong on generic defects; structurally unable to grade house conventions. `/code-review ultra` is the heavyweight branch/PR review; it is billed and can only be launched by the human.
+- **The rubric is written down.** An ad-hoc prompt includes the house rules when it is composed carefully. The same prompt typed at 17:45 on a Friday does not — which is exactly when the review matters.
+- **The step exists and can be named.** The failure this design actually suffered was not a bad review; it was that the spec was written and moved past, and a human had to ask whether it had been reviewed at all. A named step in a chain is harder to skip than a habit.
+- **Target assembly is boring and easy to do incompletely.** Fetching the right diff, pulling in the plan the PR came from, running the repo search a rubric line depends on. Fiddly, mechanical, worth encoding.
 
-Technique borrowed from research: asking one agent for "three approaches" yields three variants of its own first answer. Genuinely distinct alternatives require naming an **axis of variation** up front.
+Everything in this spec should be justifiable against those three. Anything that is only justifiable as "more agents ought to find more" does not ship.
+
+## Background
+
+Prior art: **`counselors`** (Aaron Francis; multi-CLI fan-out, cross-model disagreement, 10–20+ min per run), **`review-round`** (Retenium-local; periodic whole-codebase review that files issues; source of the adversarial-verify idea), and the built-in **`/code-review`** (generic defects, maintained upstream, structurally unable to grade house conventions).
+
+Technique retained from research: asking one agent for "three approaches" yields three variants of its own first answer. Distinct alternatives require naming an **axis of variation** up front.
 
 ## Goals
 
 - One entry point, four rubrics, so review quality stops depending on how the prompt was phrased that day.
-- Findings that are worth acting on. A wall of nitpicks trains the reader to skim, which is worse than no review.
-- Fast enough to run on every PR — target **4–8 minutes** for a `pr` run. Slower than that and it gets skipped under deadline pressure.
+- **Token-efficient by default.** A slower single agent is preferred over a faster fan-out when the output is comparable. More agents are used only where they demonstrably produce better output.
+- Findings worth acting on. A wall of nitpicks trains the reader to skim.
 - Every finding ends in an explicit decision, including "drop it".
-- Works unchanged in all ~20 project repos **and** in the `it4web/*` package repos, which have a different directory shape.
+- Works unchanged in project repos and in `it4web/*` package repos.
 
 ## Non-goals
 
-- **Generic bug hunting.** `/code-review` already does it, is maintained upstream, and improves without our effort. `/critique pr` tells the human when a change (package edit, large diff) warrants running `ultra` themselves.
-- **Whole-codebase sweeps.** That is `review-round`'s job; `/critique` always reviews a bounded target.
-- **Posting to GitHub.** No comment, review, reaction, or issue is created without an explicit instruction in the session. Nothing this skill writes ever addresses a person.
-- **A findings ledger file.** Considered and rejected: findings go to chat and are triaged there. Re-runs are cheap; a stale ledger is not.
-- **The pipeline skill** (issue #14). The stations must be good before automating the sequence.
+- **Generic bug hunting** — `/code-review` owns it; `/critique pr` says when a change warrants `ultra`.
+- **Whole-codebase sweeps** — that is `review-round`.
+- **Posting to GitHub.** No comment, review, reaction, or issue without an explicit instruction. Nothing this skill writes ever addresses a person.
+- **A findings ledger file.** Re-runs are cheap; a stale ledger is a liability.
+- **The pipeline skill** (issue #14).
 
 ## Design
 
 ### Invocation
 
 ```
-/critique plan [path]          # default: newest file in docs/superpowers/specs/
+/critique plan [path]          # design, or design + implementation plan
 /critique pr [number]          # default: current branch's diff vs origin/main
 /critique alternatives [path|number]
-/critique missing [path|number]
+/critique missing [number|path] # code targets only
 /critique                      # infer mode, state which was chosen and why
 ```
 
-Inference for the bare form, **in this order**:
+Inference order for the bare form: an uncommitted or newer-than-HEAD spec in `docs/superpowers/specs/` → `plan`; otherwise uncommitted code or an open PR → `pr`; otherwise ask. Rule 1 must precede rule 2 because a brainstorm ends with an uncommitted spec. The chosen mode is always announced first.
 
-1. A spec in `docs/superpowers/specs/` that is uncommitted or newer than the last commit → `plan`.
-2. Otherwise, uncommitted/unpushed code changes or an open PR for the branch → `pr`.
-3. Otherwise ask.
+### Pipeline
 
-Rule 1 must precede rule 2: a brainstorm ends with an uncommitted spec, so the most common bare invocation would otherwise be inferred as `pr`. The chosen mode is always announced before work starts, so a wrong inference costs one sentence, not one run.
+1. **Resolve and assemble the target.** This is the part worth encoding:
+   - `plan` — the design doc, plus its implementation plan if one exists (see below).
+   - `pr` — `gh pr diff <n>` or `git diff origin/main...HEAD`, **plus** the linked issue/plan when the PR references one.
+   - `alternatives` — the design; when the target is a PR, the linked plan or issue is **required**, because a diff shows what changed and not why that approach was chosen.
+   - `missing` — the diff or path, plus targeted repo searches for the rubric lines that need them.
+   - Abort with a clear message if the target is empty.
+2. **Review.** One agent, the whole rubric for that mode. Model configurable, **Fable by default**. Reasoning effort is session-level; there is no per-dispatch override, so this spec promises none.
+3. **Filter.** One pass over all findings together: drop anything without a nameable failure scenario, merge duplicates, rank by severity. A single pass, not one agent per finding.
+4. **Report in chat** — ranked, `file:line` where one exists, one-sentence claim, concrete failure scenario.
+5. **Triage** — each finding gets a disposition: **fix now** / **rework the plan** / **file an issue** (hands off to `work-on`) / **drop** (reason stated once). Nothing is filed or posted unless chosen.
+
+**When more agents are allowed.** Only two cases, both of which must survive the A/B in Validation:
+
+- A rubric line needs *different evidence gathering* than the rest (searching the repo for prior instances is a different activity from reading a diff). Split by evidence source, never by topic.
+- `alternatives`, where separate agents exist to hold *different assigned axes* — the diversity is the product, not a throughput trick.
+
+**Escalation, on request only:** `--verify` runs an adversarial pass where a skeptic tries to refute each surviving finding. Worth it before a risky merge, wasteful on every PR. Note it must not be applied to `plan` or `missing` findings with refute-by-default semantics: those assert absence, have no positive evidence to defend, and would be wiped wholesale.
 
 ### Modes and rubrics
 
-Each mode decomposes into concerns; one subagent per concern, run in parallel.
+**`plan`** — reviews a design, or a design plus its implementation plan. It states which artifacts it found and applies only the applicable questions; complaining that a design has no test list is out of scope when no plan exists yet.
 
-**`plan`** — is this the right thing, and is the plan honest about itself?
-- Acceptance criteria are falsifiable, not aspirational.
-- The test list actually covers the acceptance criteria; each criterion maps to at least one named test.
-- The project-vs-package call is made explicitly.
-- Assumptions stated as fact but not verified — each one named, with what would verify it.
-- The smallest single fact that would invalidate the plan.
-- Steps whose ordering is a hidden dependency.
-- **How the proposed mechanism fails, and what it costs.** Added after the rubric's own review found that everything above audits the *plan's honesty* while nothing interrogates whether the thing being planned actually works, or what it spends — which is where the most serious findings turned out to live.
+*Always:* Are acceptance criteria falsifiable rather than aspirational? What is stated as fact but never verified, and what would verify it? What is the smallest single fact that would invalidate this? Is the project-vs-package call made explicitly? **How would the proposed mechanism fail, and what does it cost?**
 
-**`pr`** — does this meet the house bar? Rubric drawn from the global CLAUDE.md:
-- Null-safety band-aids: `?->`, `??`, `if (!$x)` guards that tolerate a bad state instead of fixing its cause, without a written justification.
-- Raw `DB::` / query-builder writes where Eloquent belongs (skipped model events, casts, relationship cleanup).
-- `->each()` on a query builder instead of `->get()->each()`.
-- Conditionals that want to be enum behaviour, strategy objects, or polymorphism.
-- `@php` in Blade; hand-rolled UI where a TallUI/Flux/TallFormbuilder component exists.
-- Data manipulation inside schema migrations instead of a deploy operation.
-- Tests that assert "doesn't throw" rather than correct behaviour; a bugfix without a test that fails before it.
-- Missing changelog fragment; modified files under `vendor/it4web/`.
+*Only when an implementation plan is present:* Does the plan implement *this* design, or a drifted version of it? Does each acceptance criterion map to at least one named test? Does each step end in something verifiable? Are there hidden ordering dependencies between steps?
 
-**`alternatives`** — is there a radically different approach?
-- N subagents (default 3), each **assigned a different axis of variation** before seeing the proposal, e.g. "solve this without adding a table", "solve this in the package layer", "solve this with no new UI", "solve this by deleting something".
-- Each returns a competing approach, its trade-offs, and — required — the condition under which it beats the current design. An alternative with no such condition is discarded.
-- A final pass reports only alternatives genuinely distinct from the proposal, not restatements. **This distinctness pass replaces the verify pass for this mode** (see Engine).
+**`pr`** — house bar, from the global CLAUDE.md: null-safety band-aids (`?->`, `??`, `if (!$x)`) that tolerate a bad state instead of fixing its cause without written justification; raw `DB::` where Eloquent belongs; `->each()` on a query builder; conditionals that want enum behaviour or polymorphism; `@php` in Blade; hand-rolled UI where a TallUI/Flux/TallFormbuilder component exists; data manipulation inside schema migrations; tests asserting "doesn't throw" rather than correct behaviour; a bugfix without a test that fails before it; missing changelog fragment; modified files under `vendor/it4web/`. Plus the compatibility concern below, always.
 
-**`missing`** — what is absent rather than wrong?
+**`alternatives`** — 3 agents (2 for small designs), each **assigned a different axis of variation** before seeing the proposal: "without adding a table", "in the package layer", "with no new UI", "by deleting something". Each returns a competing approach, its trade-offs, and — required — the condition under which it beats the current design; an alternative without such a condition is discarded. A final pass reports only genuinely distinct approaches. No verify pass; distinctness filtering does that job.
+
+*On a design this is a routine step. On a PR it is a deliberate escalation*, because the code already exists and a better alternative now costs throwing work away — so the bias against acting is strong, and a mode whose findings are routinely not acted on trains the reader to skim. Reach for it on a PR when the change is the first instance of a pattern that will be copied, when it touches an `it4web/*` package, or when the PR feels wrong and the reason will not surface.
+
+**`missing`** — what is absent rather than wrong. **Code targets only**; on a design it duplicates `plan`, and running both produces the same findings twice in two ranked lists.
 - Edge cases with no test: empty states, deleted relations, unexpected enum values, concurrent access.
-- A concept written a third time that wants an abstraction (never on the second — the house rule is repeat once, abstract on the third).
-- A convention followed elsewhere **in this repository** but not here, where its absence looks unintentional. Cross-repository comparison is explicitly out of scope: a subagent cannot see the other nineteen repos, and asking for it invites invented "portfolio patterns".
-- Error paths with no handling, and failures that would be silent in production.
+- Error paths with no handling; failures that would be silent in production.
+- A concept written a **third** time that wants an abstraction (never the second — repeat once, abstract on the third). *Requires a repo search for prior instances; the first two are outside the diff by definition. Without that search this line is theatre and must be cut.*
+- A convention followed elsewhere **in this repository** but not here. *Same requirement.* Cross-repository comparison is out of scope: an agent cannot see the other nineteen repos and will invent "portfolio patterns" if asked.
 
-### Backwards compatibility (conditional concern)
+### Compatibility (standing concern in `pr` mode)
 
-**Trigger** — the original path-glob (`packages/it4web-*`) was wrong: package repos are their own git repositories, so their diffs are `src/...`, and in project repos `vendor/` is gitignored so package code never appears in a diff at all. It would have fired nowhere, least of all in the package repos where the risk is highest. Correct detection:
+Always on, because compatibility breaks most often in ordinary application code:
 
-1. The repository's own `composer.json` has a `name` matching `it4web/*` → every review in that repo gets this concern.
-2. A project's diff changes an `it4web/*` constraint in `composer.json` / `composer.lock` → the concern is added, targeted at the version delta.
+- **Migrations and deploy operations.** A schema migration dropping a column that an operation not yet run in production still reads; a schema change and its backfill in the same migration; an index or column rename that older running code still references mid-deploy.
+- **Queued jobs and events.** A changed job constructor or payload shape while queued jobs from the previous release are still draining; renamed or removed events with existing listeners.
+- **Contracts inside the app.** Config keys, `.env` keys, cached config; Blade components and their slots/attributes used across many views; traits and base classes; route names referenced elsewhere.
+- **Outward-facing surfaces.** API endpoints and webhook payloads consumed by third parties.
 
-**What it reviews:**
-- Changed or removed public method signatures, and constructor signatures of anything instantiable by consumers.
-- Blade component slots, attributes, and published view paths.
-- Config keys, published assets, and migration expectations.
-- Behaviour changes consumers depend on even though the signature is unchanged.
-
-Its output names the risk to *other* apps explicitly, because those consumers are not in the diff and therefore not in any reviewer's context.
-
-### Engine
-
-1. **Resolve target** — spec path, `gh pr diff <n>`, or `git diff origin/main...HEAD`. Abort with a clear message if the target is empty.
-2. **Fan out** — one subagent per concern, in parallel, each with only its own rubric.
-3. **Dedup** — merge findings pointing at the same cause *before* verification. Verifying first would waste skeptic runs on duplicates and, worse, a stochastic skeptic can refute one copy of a duplicated finding while passing the other, leaving the merged finding in a contradictory state.
-4. **Verify — strictness depends on the mode.** This is the correction to the biggest flaw found in review: a single refute-by-default skeptic is right for defect claims and destroys absence claims.
-   - `pr`, and the backwards-compatibility concern: **refute-by-default.** The finding asserts a defect at a location, so it can be checked against the code; when the skeptic is uncertain, the finding dies. This is the noise filter.
-   - `plan` and `missing`: **actionability check, not refutation.** These findings assert that something is *absent* or *unverified*, which by construction has no positive evidence to defend. The skeptic instead asks: is the claim true as stated, is it already handled elsewhere in the target, and is it worth the reader's attention? Uncertainty does not kill it; irrelevance does.
-   - `alternatives`: **no verify pass.** The distinctness pass in the mode definition does this job; running a skeptic over design proposals would refute them all.
-5. **Report in chat** — ranked by severity, each with `file:line` where one exists, a one-sentence claim, and a concrete failure scenario. A finding without a nameable failure scenario is dropped before reporting.
-6. **Triage** — each finding is offered a disposition: **fix now** (do it in this session), **rework the plan** (back to the spec), **file an issue** (hand off to `work-on` later), **drop** (with the reason stated once). Nothing is filed or posted without the human choosing it.
-
-**If a run is too slow**, concerns are cut in this order — stated here so the trade is explicit rather than silent: `missing`'s abstraction check first, then the portfolio-convention check, then `pr`'s changelog/vendor-hack checks (both cheaply verifiable by hand). The house-rule and backwards-compatibility concerns are never cut.
-
-### Model
-
-Subagent model is **configurable, defaulting to Fable** for every stage — reviewers, skeptics, and axis agents alike. Fable is the default because it is the model already used for these reviews by hand, and because the divergent-thinking bias that suits `alternatives` does no harm to the other modes.
-
-Reasoning **effort is session-level**, not per-dispatch: there is no per-subagent effort override, so the spec makes no promises about it. The session's effort applies to whatever the skill spawns.
-
-**Cost note:** a `pr` run dispatches roughly 6–10 subagents plus one skeptic per surviving finding. That is real spend on every PR. If cost proves out of line with value, the lever is fewer concerns per mode, not a cheaper model — a weak reviewer produces plausible noise that the skeptic then has to clean up.
+**In an `it4web/*` package repo** (detected by `composer.json` having a `name` matching `it4web/*`, not by directory path — package repos are separate git repos and project `vendor/` is gitignored, so no path glob matches) this concern is weighted highest and adds: changed or removed public and constructor signatures, published view paths and component attributes, published config keys, and behaviour changes consumers depend on despite unchanged signatures. Its output names the risk to *other* apps explicitly, since those consumers appear in no diff. The same weighting applies to a project PR that bumps an `it4web/*` constraint in `composer.json` / `composer.lock`.
 
 ### Files
 
 ```
 skills/critique/
-├── SKILL.md              # entry point: arg parsing, mode inference, engine, triage
+├── SKILL.md              # arg parsing, mode inference, target assembly, pipeline, triage
 └── references/
-    └── rubrics.md        # the four rubrics + the backwards-compatibility concern
+    └── rubrics.md        # the four rubrics + the compatibility concern
 ```
 
-Global skill, symlinked into `~/.claude/skills/critique` like the rest, so it works in every repo without per-project config.
+Global skill, symlinked into `~/.claude/skills/critique`; no per-project config.
 
 ## Validation strategy
 
-- [ ] **Architecture A/B.** Run one `pr` target twice: once through the per-concern fan-out, once with a single reviewer given the whole rubric. Success = the fan-out finds materially more real defects. If it does not, the engine is latency and cost for nothing and the skill collapses to four saved prompts. This tests the design's central unproven belief.
-- [ ] Run `/critique pr` against 2–3 **already-merged** PRs where the outcome is known. Success = it surfaces the issues found in review at the time, with no more than one or two false positives per run.
-- [ ] **Audit the skeptic, not just the survivors.** During validation runs, have the verify pass emit what it refused and why. Success = no absence/judgment finding was killed for being unprovable. Without this, the failure mode that motivated the per-mode verify split is invisible by construction.
-- [ ] Run `/critique plan` against an existing spec in `docs/superpowers/specs/`. Success = at least one genuine unverified assumption identified.
-- [ ] Run `/critique missing` on a recent feature branch. Success = at least one real untested edge case, and no invented cross-repository "portfolio pattern".
-- [ ] Run `/critique alternatives` on a design whose alternatives were already discussed. Success = the axes produce approaches that are actually distinct, not restatements.
-- [ ] **Package trigger, both shapes.** Confirm the backwards-compatibility concern fires (a) on a change inside an `it4web/*` package repo, and (b) on a project PR that bumps an `it4web/*` constraint.
-- [ ] Confirm a `pr` run completes in 4–8 minutes; if not, cut concerns in the documented order.
+- [ ] **The A/B is decisive, not informative.** For each mode, run one real target through a single reviewer and through a per-concern fan-out. Fan-out ships for that mode only if it finds materially more real defects. Default stays single-agent otherwise. Record the token cost of both.
+- [ ] Run `/critique pr` against 2–3 **already-merged** PRs with known outcomes. Success = it surfaces what review found at the time, with no more than one or two false positives.
+- [ ] Run `/critique plan` against a design-only spec **and** against a design + plan pair. Success = it states which artifacts it found and does not raise plan-only complaints against a design-only target.
+- [ ] Run `/critique missing` on a recent feature branch. Success = at least one real untested edge case; the repetition and convention lines either performed a repo search or reported nothing — never an unsupported claim.
+- [ ] Run `/critique alternatives` on a design whose alternatives were already discussed. Success = genuinely distinct approaches, not restatements.
+- [ ] **Compatibility fires without a package.** Confirm it flags a migration/operation ordering hazard or a changed job payload in a plain project PR.
+- [ ] Package weighting fires in both shapes: inside a package repo, and on a project PR bumping an `it4web/*` constraint.
 - [ ] Confirm nothing is posted to GitHub in any run.
 
 ## Open questions
 
-- **Name.** `/critique` avoids collision with the built-in `/review` and `/code-review`. Alternatives if it reads oddly: `/second-opinion`, `/scrutiny`.
-- **Default number of axes** in `alternatives` mode — 3 assumed; may want 2 for small plans.
-- **Two modes are on probation.** `missing` may fold into `plan` and `pr`; `alternatives` is the mode most at risk of being built and then unused. Both are kept for now — `missing` because "what is absent" is a genuinely different question from "what is wrong", and `alternatives` because its value appears exactly when the human is *not* present to ask for options. Revisit both after a month of real use.
+- **Name.** `/critique` avoids collision with `/review` and `/code-review`. Alternatives: `/second-opinion`, `/scrutiny`.
+- **Whether `missing` survives** as a mode once it is code-only and its two search-dependent lines are proven. If the repo searches turn out weak, it reduces to two rubric lines and should fold into `pr`.
+- **Whether `alternatives` gets used** on PRs in practice, given the escalation framing. Revisit after a month.
 
 ## Decisions log
 
 | Decision | Rationale |
 |---|---|
-| One skill, four modes | Matches the `handoff [chat\|pr]` idiom already in use; one place to maintain rubrics |
-| Chat output, no ledger file | Re-runs are cheap; a stale ledger is a liability. Dispositions carry the outcome |
-| Claude subagents, not `counselors` | 4–8 minutes vs 10–20; house-rule violations are not a matter of opinion. Diversity in `alternatives` is recovered by assigning axes instead of varying models |
-| Verify strictness varies by mode | Refute-by-default is the noise filter for defect claims and silently destroys absence claims. One skeptic policy cannot serve both |
-| Dedup before verify | Avoids contradictory statuses on duplicated findings and wasted skeptic runs |
-| Package detection by `composer.json` name, not path glob | Package repos are separate git repos (`src/...` diffs) and project `vendor/` is gitignored, so a path glob fires nowhere |
-| Fable by default, model configurable | Already the model used for these reviews by hand; configurable so it can be raised for a hard review |
-| Effort is session-level | No per-subagent effort override exists; the spec promises only what the harness supports |
-| `alternatives` kept despite being probation-worthy | Its value is precisely when the human is not at the keyboard to ask for options; folding it into a brainstorm assumes presence |
-| No generic bug hunting | `/code-review` owns it and improves upstream; duplicating it would age badly |
+| Single reviewer by default | An unaided independent review already produced 9 defensible findings on this spec. Fan-out must beat that measurably or it is cost without benefit |
+| Fan-out split by evidence source, never by topic | Topic splits are throughput theatre; different evidence gathering is a real reason for a second agent |
+| Verify pass demoted to `--verify` | One skeptic per finding was the largest cost driver and the naive review's false-positive rate was already acceptable |
+| Compatibility always on, packages weighted | Migrations, deploy operations and queued jobs break compatibility more often than package APIs |
+| Package detection by `composer.json` name | Package repos are separate git repos; project `vendor/` is gitignored — a path glob matches nothing |
+| `plan` distinguishes design from design+plan | Different artifacts, different questions; plan-only complaints against a design are noise |
+| `missing` restricted to code targets | On a design it duplicates `plan` |
+| `alternatives` kept, framed as PR-escalation | Its value appears when nobody is present to ask for options; on a PR sunk cost biases against acting |
+| Chat output, no ledger file | Re-runs are cheap; a stale ledger is a liability |
+| Fable default, model configurable, effort session-level | Already the model used for these reviews by hand; the spec promises only what the harness supports |
