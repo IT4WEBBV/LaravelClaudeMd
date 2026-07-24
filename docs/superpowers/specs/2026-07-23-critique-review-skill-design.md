@@ -1,7 +1,7 @@
 # `/critique` — one review skill, four modes — design
 
 **Date:** 2026-07-23
-**Status:** revised design (v6) → pending spec sign-off → implementation plan → PR
+**Status:** approved (v6, signed off 2026-07-23) → implementation plan → PR
 **Canonical home:** `IT4WEBBV/LaravelClaudeMd`, `skills/critique/` (the PR target).
 **Related, out of scope:** the "pipeline" skill — issue #14.
 **Previous revisions:** `f7007f0` initial · `6117da4` after independent plan-review · `892f6a5` cut for token efficiency · `fecc0d8` principles + hazard classes · `50c9408` deterministic pre-pass, tiers, verdicts. v6 reviews the whole change rather than commit ranges, and fixes what the v5 review found.
