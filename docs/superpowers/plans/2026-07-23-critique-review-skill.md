@@ -2,51 +2,87 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the `/critique` skill — a four-mode review skill whose deterministic pre-pass runs as tested JS and whose modes/pipeline live in an authored SKILL.md.
+**Goal:** Build the `/critique` skill — a four-mode review skill whose deterministic pre-pass runs as tested PHP and whose modes/pipeline live in an authored SKILL.md.
 
-**Architecture:** Two phases. **Phase A** is the deterministic stage-0 pre-pass: pure functions over a parsed unified diff (plus one filesystem check), TDD with `node:test`, colocated `.test.mjs` files matching the `visual-parity` skill's pattern. **Phase B** is the prose skill — `references/rubrics.md` and `SKILL.md` — authored with `superpowers:writing-skills`, wiring in the Phase A checks and verified by a real dry run.
+**Architecture:** Two phases. **Phase A** is the deterministic stage-0 pre-pass: plain PHP functions over a parsed unified diff (plus one filesystem check), TDD with Pest, in the skill repo's own `composer.json`. **Phase B** is the prose skill — `references/rubrics.md` and `SKILL.md` — authored with `superpowers:writing-skills`, wiring in the Phase A checks and verified by a real dry run.
 
-**Tech Stack:** Node ≥18 (`node:test`, `node:assert/strict`, ES modules) for the checks; Markdown for the skill prose. No new dependencies — everything uses the Node standard library and `git`/`find` subprocesses, matching `skills/visual-parity/`.
+**Tech Stack:** PHP 8.x (pure functions, no framework), Pest for tests. The `LaravelClaudeMd` skill repo gets its own `composer.json` with `pestphp/pest` as a dev dependency; `vendor/` is gitignored. Checks read a unified diff on stdin and shell out to `git`/`find` only for the one filesystem check.
 
 **Spec:** `docs/superpowers/specs/2026-07-23-critique-review-skill-design.md` (v6, approved).
 
 ## Global Constraints
 
-Every task inherits these, copied verbatim from the spec:
+Every task inherits these, copied verbatim from the spec plus the runner decision:
 
-- **Language deviation (decided at plan time):** stage-0 checks are `.mjs` functions, not shell scripts — `bats`/`shellcheck` are absent and the house runner is `node:test`. Checks shell out to `git`/`find` only where the input is the filesystem.
+- **Runner decision (plan-time):** stage-0 checks are **PHP + Pest**, not shell and not Node. They are pure string processing (no Laravel), run **on the host** over host-side `git` output — meta-tooling, not a Laravel application command, so the Docker rule does not apply. If the host lacks PHP the skill degrades to the LLM reviewer; stage 0 is belt-and-suspenders.
 - **The unit of review is the whole change:** `git diff origin/main...HEAD` plus uncommitted working-tree changes; with a PR number, `gh pr diff <n>`. Never commit ranges, never individual commits.
 - **A stage-0 heuristic check must return ≤5 candidates on a normal diff.** One that returns a long list has relocated noise, not removed it, and is cut.
 - **An exact check has no licence to be wrong.** One false positive on a real branch demotes it to heuristic or deletes it.
 - **No findings store.** No ledger, no state between runs, except the drop tally inside `rubrics.md`. Re-review is a fresh run or labels a pasted prior report.
 - **Nothing is posted to GitHub** without an explicit instruction, and nothing ever addresses a person.
 - **Default reviewer model is Fable**, configurable. Reasoning effort is session-level; the skill promises no per-dispatch effort.
-- **Findings cap: 15**, with the remainder listed as category-slug one-liners; Tier-3 dropped and disclosed by category.
+- **Findings cap: 15**, remainder as category-slug one-liners; Tier-3 dropped and disclosed by category.
 - **The verdict column (CONFIRMED/PLAUSIBLE) appears only in `pr` mode.**
 - **Skill home:** `skills/critique/`, symlinked into `~/.claude/skills/critique`; no per-project config.
 
 ---
 
-## Phase A — Deterministic pre-pass (TDD)
+## Phase A — Deterministic pre-pass (TDD, PHP + Pest)
 
-### Task 1: Scaffold + diff parser
+### Task 1: Pest setup + diff parser
 
 **Files:**
-- Create: `skills/critique/checks/diff-parse.mjs`
-- Test: `skills/critique/checks/diff-parse.test.mjs`
+- Create/modify: `composer.json` (repo root — add Pest dev dep)
+- Modify: `.gitignore` (add `/vendor`)
+- Create: `skills/critique/checks/diff_parse.php`
+- Test: `skills/critique/checks/tests/DiffParseTest.php`
+- Create: `skills/critique/checks/tests/Pest.php` (Pest bootstrap for this suite)
 
 **Interfaces:**
-- Produces: `parseDiff(diffText: string) => Array<{ file: string, added: Array<{ line: number, text: string }> }>` — `line` is the new-file line number of each added line; `text` excludes the leading `+`.
+- Produces: `parse_diff(string $diff): array` → list of `['file' => string, 'added' => array<['line' => int, 'text' => string]>]`. `line` is the new-file line number; `text` excludes the leading `+`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Add Pest to the skill repo**
 
-```js
-// skills/critique/checks/diff-parse.test.mjs
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { parseDiff } from './diff-parse.mjs';
+```bash
+cd ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd
+composer require --dev pestphp/pest --with-all-dependencies
+printf '/vendor\n' >> .gitignore
+```
 
-const SAMPLE = `diff --git a/app/Foo.php b/app/Foo.php
+Expected: `vendor/bin/pest` exists; `.gitignore` ignores `/vendor`.
+
+- [ ] **Step 2: Point Pest at the checks suite**
+
+```php
+// skills/critique/checks/tests/Pest.php
+<?php
+// Load the check functions for every test in this directory.
+require_once __DIR__ . '/../diff_parse.php';
+require_once __DIR__ . '/../checks.php';
+require_once __DIR__ . '/../vendor_hacks.php';
+```
+
+Create `skills/critique/checks/phpunit.xml` so `pest` finds the suite:
+
+```xml
+<?xml version="1.0"?>
+<phpunit bootstrap="vendor/autoload.php" colors="true">
+  <testsuites>
+    <testsuite name="critique-checks">
+      <directory>skills/critique/checks/tests</directory>
+    </testsuite>
+  </testsuites>
+</phpunit>
+```
+
+- [ ] **Step 3: Write the failing test**
+
+```php
+// skills/critique/checks/tests/DiffParseTest.php
+<?php
+
+$sample = <<<'DIFF'
+diff --git a/app/Foo.php b/app/Foo.php
 --- a/app/Foo.php
 +++ b/app/Foo.php
 @@ -10,3 +10,4 @@ class Foo
@@ -59,80 +95,90 @@ diff --git a/app/Bar.php b/app/Bar.php
 +++ b/app/Bar.php
 @@ -1,2 +1,3 @@
 +first added
- unchanged`;
+ unchanged
+DIFF;
 
-test('parseDiff groups added lines by file with new-file line numbers', () => {
-  const files = parseDiff(SAMPLE);
-  assert.equal(files.length, 2);
-  assert.equal(files[0].file, 'app/Foo.php');
-  assert.deepEqual(files[0].added, [
-    { line: 11, text: 'new line one' },
-    { line: 12, text: 'new line two' },
-  ]);
-  assert.equal(files[1].file, 'app/Bar.php');
-  assert.deepEqual(files[1].added, [{ line: 1, text: 'first added' }]);
+it('groups added lines by file with new-file line numbers', function () use ($sample) {
+    $files = parse_diff($sample);
+    expect($files)->toHaveCount(2);
+    expect($files[0]['file'])->toBe('app/Foo.php');
+    expect($files[0]['added'])->toBe([
+        ['line' => 11, 'text' => 'new line one'],
+        ['line' => 12, 'text' => 'new line two'],
+    ]);
+    expect($files[1]['file'])->toBe('app/Bar.php');
+    expect($files[1]['added'])->toBe([['line' => 1, 'text' => 'first added']]);
 });
 
-test('parseDiff returns empty array for empty input', () => {
-  assert.deepEqual(parseDiff(''), []);
+it('returns an empty array for empty input', function () {
+    expect(parse_diff(''))->toBe([]);
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 4: Run test to verify it fails**
 
-Run: `node --test skills/critique/checks/diff-parse.test.mjs`
-Expected: FAIL — `Cannot find module './diff-parse.mjs'`.
+Run: `cd ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd && ./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
+Expected: FAIL — `Call to undefined function parse_diff()`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 5: Write minimal implementation**
 
-```js
-// skills/critique/checks/diff-parse.mjs
+```php
+// skills/critique/checks/diff_parse.php
+<?php
 
-// Parse a unified diff into per-file added lines.
-// `line` is the line number in the NEW file; `text` drops the leading '+'.
-export function parseDiff(diffText) {
-  const files = [];
-  let current = null;
-  let newLineNo = 0;
+/**
+ * Parse a unified diff into per-file added lines.
+ * `line` is the line number in the NEW file; `text` drops the leading '+'.
+ *
+ * @return array<int, array{file: string, added: array<int, array{line: int, text: string}>}>
+ */
+function parse_diff(string $diff): array
+{
+    $files = [];
+    $idx = -1;
+    $newLine = 0;
 
-  for (const raw of diffText.split('\n')) {
-    if (raw.startsWith('+++ ')) {
-      const path = raw.slice(4).replace(/^b\//, '').trim();
-      current = { file: path, added: [] };
-      files.push(current);
-      continue;
+    foreach (explode("\n", $diff) as $raw) {
+        if (str_starts_with($raw, '+++ ')) {
+            $path = preg_replace('#^b/#', '', trim(substr($raw, 4)));
+            $files[] = ['file' => $path, 'added' => []];
+            $idx = count($files) - 1;
+            continue;
+        }
+        if (str_starts_with($raw, '--- ')) {
+            continue;
+        }
+        if (str_starts_with($raw, '@@')) {
+            $newLine = preg_match('/\+(\d+)/', $raw, $m) ? (int) $m[1] : 0;
+            continue;
+        }
+        if ($idx < 0) {
+            continue;
+        }
+        if (str_starts_with($raw, '+')) {
+            $files[$idx]['added'][] = ['line' => $newLine, 'text' => substr($raw, 1)];
+            $newLine++;
+        } elseif (str_starts_with($raw, '-')) {
+            // removed line: does not advance the new-file counter
+        } else {
+            $newLine++; // context line
+        }
     }
-    if (raw.startsWith('--- ')) continue;
-    if (raw.startsWith('@@')) {
-      const m = raw.match(/\+(\d+)/);
-      newLineNo = m ? parseInt(m[1], 10) : 0;
-      continue;
-    }
-    if (!current) continue;
 
-    if (raw.startsWith('+')) {
-      current.added.push({ line: newLineNo, text: raw.slice(1) });
-      newLineNo++;
-    } else if (raw.startsWith('-')) {
-      // removed line: does not advance the new-file counter
-    } else {
-      newLineNo++; // context line
-    }
-  }
-  return files;
+    return $files;
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 6: Run test to verify it passes**
 
-Run: `node --test skills/critique/checks/diff-parse.test.mjs`
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
 Expected: PASS (2 tests).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add skills/critique/checks/diff-parse.mjs skills/critique/checks/diff-parse.test.mjs
-git commit -m "feat(critique): unified diff parser for stage-0 checks"
+git add composer.json composer.lock .gitignore skills/critique/checks/
+git commit -m "feat(critique): Pest setup and unified diff parser for stage-0"
 ```
 
 ---
@@ -140,71 +186,76 @@ git commit -m "feat(critique): unified diff parser for stage-0 checks"
 ### Task 2: `@php` in Blade — exact check
 
 **Files:**
-- Create: `skills/critique/checks/checks.mjs`
-- Test: `skills/critique/checks/checks.test.mjs`
+- Create: `skills/critique/checks/checks.php`
+- Test: `skills/critique/checks/tests/ChecksTest.php`
 
 **Interfaces:**
-- Consumes: `parseDiff` output (Task 1).
-- Produces: `checkBladePhp(files) => Array<{ check: 'blade-php', file, line, text }>`.
+- Consumes: `parse_diff` output (Task 1).
+- Produces: `check_blade_php(array $files): array` → `['check' => 'blade-php', 'file' => , 'line' => , 'text' => ]` items.
 
 - [ ] **Step 1: Write the failing test**
 
-```js
-// skills/critique/checks/checks.test.mjs
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { parseDiff } from './diff-parse.mjs';
-import { checkBladePhp } from './checks.mjs';
+```php
+// skills/critique/checks/tests/ChecksTest.php
+<?php
 
-test('checkBladePhp flags @php only in added Blade lines', () => {
-  const diff = `+++ b/resources/views/x.blade.php
+it('flags @php only in added Blade lines', function () {
+    $diff = <<<'DIFF'
++++ b/resources/views/x.blade.php
 @@ -1,0 +1,2 @@
 +@php $x = 1; @endphp
 +<div>ok</div>
 +++ b/app/Y.php
 @@ -1,0 +1,1 @@
-+// @php in a comment in a php file, not blade`;
-  const findings = checkBladePhp(parseDiff(diff));
-  assert.equal(findings.length, 1);
-  assert.equal(findings[0].check, 'blade-php');
-  assert.equal(findings[0].file, 'resources/views/x.blade.php');
-  assert.equal(findings[0].line, 1);
++// @php in a comment in a php file, not blade
+DIFF;
+    $findings = check_blade_php(parse_diff($diff));
+    expect($findings)->toHaveCount(1)
+        ->and($findings[0]['check'])->toBe('blade-php')
+        ->and($findings[0]['file'])->toBe('resources/views/x.blade.php')
+        ->and($findings[0]['line'])->toBe(1);
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test skills/critique/checks/checks.test.mjs`
-Expected: FAIL — `Cannot find module './checks.mjs'`.
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
+Expected: FAIL — `Call to undefined function check_blade_php()`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-```js
-// skills/critique/checks/checks.mjs
+```php
+// skills/critique/checks/checks.php
+<?php
 
-export function checkBladePhp(files) {
-  const findings = [];
-  for (const f of files) {
-    if (!f.file.endsWith('.blade.php')) continue;
-    for (const { line, text } of f.added) {
-      if (/@php\b/.test(text)) {
-        findings.push({ check: 'blade-php', file: f.file, line, text: text.trim() });
-      }
+/** @return array<int, array{check: string, file: string, line: int, text: string}> */
+function check_blade_php(array $files): array
+{
+    $findings = [];
+    foreach ($files as $f) {
+        if (! str_ends_with($f['file'], '.blade.php')) {
+            continue;
+        }
+        foreach ($f['added'] as $a) {
+            if (preg_match('/@php\b/', $a['text'])) {
+                $findings[] = ['check' => 'blade-php', 'file' => $f['file'], 'line' => $a['line'], 'text' => trim($a['text'])];
+            }
+        }
     }
-  }
-  return findings;
+
+    return $findings;
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test skills/critique/checks/checks.test.mjs`
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add skills/critique/checks/checks.mjs skills/critique/checks/checks.test.mjs
+git add skills/critique/checks/checks.php skills/critique/checks/tests/ChecksTest.php
 git commit -m "feat(critique): exact check for @php in Blade"
 ```
 
@@ -213,72 +264,78 @@ git commit -m "feat(critique): exact check for @php in Blade"
 ### Task 3: Null-safety heuristic — `?->` and `??`
 
 **Files:**
-- Modify: `skills/critique/checks/checks.mjs`
-- Modify: `skills/critique/checks/checks.test.mjs`
+- Modify: `skills/critique/checks/checks.php`
+- Modify: `skills/critique/checks/tests/ChecksTest.php`
 
 **Interfaces:**
-- Produces: `checkNullSafety(files) => Array<{ check: 'null-safe-op'|'null-coalesce', file, line, text }>`.
+- Produces: `check_null_safety(array $files): array` → items with `check` of `null-safe-op` or `null-coalesce`.
 
 - [ ] **Step 1: Write the failing test**
 
-```js
-// append to skills/critique/checks/checks.test.mjs
-import { checkNullSafety } from './checks.mjs';
-
-test('checkNullSafety flags ?-> anywhere and ?? outside config only', () => {
-  const diff = `+++ b/app/Service.php
+```php
+// append to skills/critique/checks/tests/ChecksTest.php
+it('flags ?-> anywhere and ?? outside config only', function () {
+    $diff = <<<'DIFF'
++++ b/app/Service.php
 @@ -1,0 +1,2 @@
 +$name = $user?->profile?->name;
 +$fallback = $value ?? 'default';
 +++ b/config/app.php
 @@ -1,0 +1,1 @@
-+'env' => env('APP_ENV') ?? 'production',`;
-  const c = checkNullSafety(parseDiff(diff));
-  const kinds = c.map((x) => `${x.check}@${x.file}`);
-  assert.ok(kinds.includes('null-safe-op@app/Service.php'));
-  assert.ok(kinds.includes('null-coalesce@app/Service.php'));
-  // ?? inside config/ is a legitimate default, not a candidate
-  assert.ok(!kinds.includes('null-coalesce@config/app.php'));
++'env' => env('APP_ENV') ?? 'production',
+DIFF;
+    $kinds = array_map(
+        fn ($c) => "{$c['check']}@{$c['file']}",
+        check_null_safety(parse_diff($diff)),
+    );
+    expect($kinds)->toContain('null-safe-op@app/Service.php')
+        ->and($kinds)->toContain('null-coalesce@app/Service.php')
+        ->and($kinds)->not->toContain('null-coalesce@config/app.php');
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test skills/critique/checks/checks.test.mjs`
-Expected: FAIL — `checkNullSafety is not a function`.
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
+Expected: FAIL — `Call to undefined function check_null_safety()`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-```js
-// append to skills/critique/checks/checks.mjs
+```php
+// append to skills/critique/checks/checks.php
 
-export function checkNullSafety(files) {
-  const candidates = [];
-  for (const f of files) {
-    if (!f.file.endsWith('.php')) continue;
-    const inConfig = f.file.startsWith('config/');
-    for (const { line, text } of f.added) {
-      if (/\?->/.test(text)) {
-        candidates.push({ check: 'null-safe-op', file: f.file, line, text: text.trim() });
-      }
-      if (!inConfig && /\?\?/.test(text)) {
-        candidates.push({ check: 'null-coalesce', file: f.file, line, text: text.trim() });
-      }
+/** @return array<int, array{check: string, file: string, line: int, text: string}> */
+function check_null_safety(array $files): array
+{
+    $candidates = [];
+    foreach ($files as $f) {
+        if (! str_ends_with($f['file'], '.php')) {
+            continue;
+        }
+        $inConfig = str_starts_with($f['file'], 'config/');
+        foreach ($f['added'] as $a) {
+            if (str_contains($a['text'], '?->')) {
+                $candidates[] = ['check' => 'null-safe-op', 'file' => $f['file'], 'line' => $a['line'], 'text' => trim($a['text'])];
+            }
+            if (! $inConfig && str_contains($a['text'], '??')) {
+                $candidates[] = ['check' => 'null-coalesce', 'file' => $f['file'], 'line' => $a['line'], 'text' => trim($a['text'])];
+            }
+        }
     }
-  }
-  return candidates;
+
+    return $candidates;
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test skills/critique/checks/checks.test.mjs`
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add skills/critique/checks/checks.mjs skills/critique/checks/checks.test.mjs
+git add skills/critique/checks/checks.php skills/critique/checks/tests/ChecksTest.php
 git commit -m "feat(critique): null-safety heuristic (?-> and ?? outside config)"
 ```
 
@@ -287,62 +344,66 @@ git commit -m "feat(critique): null-safety heuristic (?-> and ?? outside config)
 ### Task 4: `->each(` on a possible builder — heuristic
 
 **Files:**
-- Modify: `skills/critique/checks/checks.mjs`
-- Modify: `skills/critique/checks/checks.test.mjs`
+- Modify: `skills/critique/checks/checks.php`
+- Modify: `skills/critique/checks/tests/ChecksTest.php`
 
 **Interfaces:**
-- Produces: `checkEachOnBuilder(files) => Array<{ check: 'each-on-builder', file, line, text }>`.
+- Produces: `check_each_on_builder(array $files): array` → `each-on-builder` items.
 
 - [ ] **Step 1: Write the failing test**
 
-```js
-// append to skills/critique/checks/checks.test.mjs
-import { checkEachOnBuilder } from './checks.mjs';
-
-test('checkEachOnBuilder flags ->each( but not ->get()->each(', () => {
-  const diff = `+++ b/app/Report.php
+```php
+// append to skills/critique/checks/tests/ChecksTest.php
+it('flags ->each( but not ->get()->each(', function () {
+    $diff = <<<'DIFF'
++++ b/app/Report.php
 @@ -1,0 +1,2 @@
-+User::query()->where('active', true)->each(fn (\$u) => \$u->touch());
-+User::query()->where('active', true)->get()->each(fn (\$u) => \$u->touch());`;
-  const c = checkEachOnBuilder(parseDiff(diff));
-  assert.equal(c.length, 1);
-  assert.equal(c[0].line, 1);
++User::query()->where('active', true)->each(fn ($u) => $u->touch());
++User::query()->where('active', true)->get()->each(fn ($u) => $u->touch());
+DIFF;
+    $c = check_each_on_builder(parse_diff($diff));
+    expect($c)->toHaveCount(1)->and($c[0]['line'])->toBe(1);
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test skills/critique/checks/checks.test.mjs`
-Expected: FAIL — `checkEachOnBuilder is not a function`.
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
+Expected: FAIL — `Call to undefined function check_each_on_builder()`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-```js
-// append to skills/critique/checks/checks.mjs
+```php
+// append to skills/critique/checks/checks.php
 
-export function checkEachOnBuilder(files) {
-  const candidates = [];
-  for (const f of files) {
-    if (!f.file.endsWith('.php')) continue;
-    for (const { line, text } of f.added) {
-      if (/->each\(/.test(text) && !/->get\(\)\s*->each\(/.test(text)) {
-        candidates.push({ check: 'each-on-builder', file: f.file, line, text: text.trim() });
-      }
+/** @return array<int, array{check: string, file: string, line: int, text: string}> */
+function check_each_on_builder(array $files): array
+{
+    $candidates = [];
+    foreach ($files as $f) {
+        if (! str_ends_with($f['file'], '.php')) {
+            continue;
+        }
+        foreach ($f['added'] as $a) {
+            if (preg_match('/->each\(/', $a['text']) && ! preg_match('/->get\(\)\s*->each\(/', $a['text'])) {
+                $candidates[] = ['check' => 'each-on-builder', 'file' => $f['file'], 'line' => $a['line'], 'text' => trim($a['text'])];
+            }
+        }
     }
-  }
-  return candidates;
+
+    return $candidates;
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test skills/critique/checks/checks.test.mjs`
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add skills/critique/checks/checks.mjs skills/critique/checks/checks.test.mjs
+git add skills/critique/checks/checks.php skills/critique/checks/tests/ChecksTest.php
 git commit -m "feat(critique): each-on-builder heuristic"
 ```
 
@@ -351,68 +412,72 @@ git commit -m "feat(critique): each-on-builder heuristic"
 ### Task 5: Writes inside `database/migrations/` — heuristic
 
 **Files:**
-- Modify: `skills/critique/checks/checks.mjs`
-- Modify: `skills/critique/checks/checks.test.mjs`
+- Modify: `skills/critique/checks/checks.php`
+- Modify: `skills/critique/checks/tests/ChecksTest.php`
 
 **Interfaces:**
-- Produces: `checkMigrationWrites(files) => Array<{ check: 'migration-write', file, line, text }>`.
+- Produces: `check_migration_writes(array $files): array` → `migration-write` items.
 
 - [ ] **Step 1: Write the failing test**
 
-```js
-// append to skills/critique/checks/checks.test.mjs
-import { checkMigrationWrites } from './checks.mjs';
-
-test('checkMigrationWrites flags data writes only under database/migrations', () => {
-  const diff = `+++ b/database/migrations/2026_01_01_000000_x.php
+```php
+// append to skills/critique/checks/tests/ChecksTest.php
+it('flags data writes only under database/migrations', function () {
+    $diff = <<<'DIFF'
++++ b/database/migrations/2026_01_01_000000_x.php
 @@ -1,0 +1,2 @@
-+        Schema::table('orders', fn (Blueprint \$t) => \$t->string('status'));
++        Schema::table('orders', fn (Blueprint $t) => $t->string('status'));
 +        DB::table('orders')->update(['status' => 'active']);
 +++ b/app/Actions/DoThing.php
 @@ -1,0 +1,1 @@
-+        DB::table('orders')->update(['x' => 1]);`;
-  const c = checkMigrationWrites(parseDiff(diff));
-  assert.equal(c.length, 1);
-  assert.equal(c[0].file, 'database/migrations/2026_01_01_000000_x.php');
-  assert.match(c[0].text, /DB::table/);
++        DB::table('orders')->update(['x' => 1]);
+DIFF;
+    $c = check_migration_writes(parse_diff($diff));
+    expect($c)->toHaveCount(1)
+        ->and($c[0]['file'])->toBe('database/migrations/2026_01_01_000000_x.php')
+        ->and($c[0]['text'])->toContain('DB::table');
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test skills/critique/checks/checks.test.mjs`
-Expected: FAIL — `checkMigrationWrites is not a function`.
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
+Expected: FAIL — `Call to undefined function check_migration_writes()`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-```js
-// append to skills/critique/checks/checks.mjs
+```php
+// append to skills/critique/checks/checks.php
 
-const MIGRATION_WRITE = /\bDB::|->insert\(|->update\(|->delete\(|::create\(|::insert\(/;
-
-export function checkMigrationWrites(files) {
-  const candidates = [];
-  for (const f of files) {
-    if (!/^database\/migrations\/.*\.php$/.test(f.file)) continue;
-    for (const { line, text } of f.added) {
-      if (MIGRATION_WRITE.test(text)) {
-        candidates.push({ check: 'migration-write', file: f.file, line, text: text.trim() });
-      }
+/** @return array<int, array{check: string, file: string, line: int, text: string}> */
+function check_migration_writes(array $files): array
+{
+    $writeRe = '/\bDB::|->insert\(|->update\(|->delete\(|::create\(|::insert\(/';
+    $candidates = [];
+    foreach ($files as $f) {
+        if (! preg_match('#^database/migrations/.*\.php$#', $f['file'])) {
+            continue;
+        }
+        foreach ($f['added'] as $a) {
+            if (preg_match($writeRe, $a['text'])) {
+                $candidates[] = ['check' => 'migration-write', 'file' => $f['file'], 'line' => $a['line'], 'text' => trim($a['text'])];
+            }
+        }
     }
-  }
-  return candidates;
+
+    return $candidates;
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test skills/critique/checks/checks.test.mjs`
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add skills/critique/checks/checks.mjs skills/critique/checks/checks.test.mjs
+git add skills/critique/checks/checks.php skills/critique/checks/tests/ChecksTest.php
 git commit -m "feat(critique): migration data-write heuristic"
 ```
 
@@ -421,70 +486,79 @@ git commit -m "feat(critique): migration data-write heuristic"
 ### Task 6: Changelog fragment — heuristic question
 
 **Files:**
-- Modify: `skills/critique/checks/checks.mjs`
-- Modify: `skills/critique/checks/checks.test.mjs`
+- Modify: `skills/critique/checks/checks.php`
+- Modify: `skills/critique/checks/tests/ChecksTest.php`
 
 **Interfaces:**
-- Produces: `checkChangelogFragment(files) => Array<{ check: 'changelog-fragment', question: string }>` — at most one element.
+- Produces: `check_changelog_fragment(array $files): array` → at most one `changelog-fragment` item carrying a `question`.
 
 - [ ] **Step 1: Write the failing test**
 
-```js
-// append to skills/critique/checks/checks.test.mjs
-import { checkChangelogFragment } from './checks.mjs';
-
-test('checkChangelogFragment asks when code changed but no fragment added', () => {
-  const codeOnly = `+++ b/app/Foo.php
+```php
+// append to skills/critique/checks/tests/ChecksTest.php
+it('asks when code changed but no fragment added', function () {
+    $codeOnly = <<<'DIFF'
++++ b/app/Foo.php
 @@ -1,0 +1,1 @@
-+// change`;
-  assert.equal(checkChangelogFragment(parseDiff(codeOnly)).length, 1);
++// change
+DIFF;
+    expect(check_changelog_fragment(parse_diff($codeOnly)))->toHaveCount(1);
 
-  const withFragment = `+++ b/app/Foo.php
+    $withFragment = <<<'DIFF'
++++ b/app/Foo.php
 @@ -1,0 +1,1 @@
 +// change
 +++ b/.changelog/unreleased/feature-x.md
 @@ -1,0 +1,1 @@
-+<details>`;
-  assert.equal(checkChangelogFragment(parseDiff(withFragment)).length, 0);
++<details>
+DIFF;
+    expect(check_changelog_fragment(parse_diff($withFragment)))->toHaveCount(0);
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test skills/critique/checks/checks.test.mjs`
-Expected: FAIL — `checkChangelogFragment is not a function`.
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
+Expected: FAIL — `Call to undefined function check_changelog_fragment()`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-```js
-// append to skills/critique/checks/checks.mjs
+```php
+// append to skills/critique/checks/checks.php
 
-export function checkChangelogFragment(files) {
-  const hasCode = files.some(
-    (f) => /\.(php|js|vue)$/.test(f.file) && f.added.length > 0,
-  );
-  const hasFragment = files.some(
-    (f) => f.file.startsWith('.changelog/unreleased/') && f.file.endsWith('.md'),
-  );
-  if (hasCode && !hasFragment) {
-    return [{
-      check: 'changelog-fragment',
-      question: 'No .changelog/unreleased/ fragment. Is this a user-visible change that needs one?',
-    }];
-  }
-  return [];
+/** @return array<int, array{check: string, question: string}> */
+function check_changelog_fragment(array $files): array
+{
+    $hasCode = false;
+    $hasFragment = false;
+    foreach ($files as $f) {
+        if (preg_match('/\.(php|js|vue)$/', $f['file']) && $f['added'] !== []) {
+            $hasCode = true;
+        }
+        if (str_starts_with($f['file'], '.changelog/unreleased/') && str_ends_with($f['file'], '.md')) {
+            $hasFragment = true;
+        }
+    }
+    if ($hasCode && ! $hasFragment) {
+        return [[
+            'check' => 'changelog-fragment',
+            'question' => 'No .changelog/unreleased/ fragment. Is this a user-visible change that needs one?',
+        ]];
+    }
+
+    return [];
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test skills/critique/checks/checks.test.mjs`
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add skills/critique/checks/checks.mjs skills/critique/checks/checks.test.mjs
+git add skills/critique/checks/checks.php skills/critique/checks/tests/ChecksTest.php
 git commit -m "feat(critique): changelog-fragment heuristic question"
 ```
 
@@ -493,80 +567,88 @@ git commit -m "feat(critique): changelog-fragment heuristic question"
 ### Task 7: Vendor-hack — exact filesystem check
 
 **Files:**
-- Create: `skills/critique/checks/vendor.mjs`
-- Test: `skills/critique/checks/vendor.test.mjs`
+- Create: `skills/critique/checks/vendor_hacks.php`
+- Test: `skills/critique/checks/tests/VendorHacksTest.php`
 
 **Interfaces:**
-- Produces: `checkVendorHacks(repoRoot: string) => Array<{ check: 'vendor-hack', file }>` — files under `vendor/it4web/` newer than `vendor/composer/installed.json`.
+- Produces: `check_vendor_hacks(string $repoRoot): array` → `vendor-hack` items for files under `vendor/it4web/` newer than `vendor/composer/installed.json`.
 
 - [ ] **Step 1: Write the failing test**
 
-```js
-// skills/critique/checks/vendor.test.mjs
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, utimes } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { checkVendorHacks } from './vendor.mjs';
+```php
+// skills/critique/checks/tests/VendorHacksTest.php
+<?php
 
-test('checkVendorHacks finds it4web php files newer than installed.json', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'critique-vendor-'));
-  await mkdir(join(root, 'vendor/composer'), { recursive: true });
-  await mkdir(join(root, 'vendor/it4web/tallui'), { recursive: true });
-  await writeFile(join(root, 'vendor/composer/installed.json'), '{}');
-  const past = new Date(Date.now() - 60_000);
-  await utimes(join(root, 'vendor/composer/installed.json'), past, past);
-  await writeFile(join(root, 'vendor/it4web/tallui/Hacked.php'), '<?php');
+it('finds it4web php files newer than installed.json', function () {
+    $root = sys_get_temp_dir() . '/critique-vendor-' . uniqid();
+    mkdir("$root/vendor/composer", 0777, true);
+    mkdir("$root/vendor/it4web/tallui", 0777, true);
+    file_put_contents("$root/vendor/composer/installed.json", '{}');
+    touch("$root/vendor/composer/installed.json", time() - 60);
+    file_put_contents("$root/vendor/it4web/tallui/Hacked.php", '<?php');
 
-  const findings = checkVendorHacks(root);
-  assert.equal(findings.length, 1);
-  assert.match(findings[0].file, /Hacked\.php$/);
-  assert.equal(findings[0].check, 'vendor-hack');
+    $findings = check_vendor_hacks($root);
+    expect($findings)->toHaveCount(1)
+        ->and($findings[0]['file'])->toContain('Hacked.php')
+        ->and($findings[0]['check'])->toBe('vendor-hack');
 });
 
-test('checkVendorHacks returns empty when vendor/it4web is absent', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'critique-vendor-'));
-  assert.deepEqual(checkVendorHacks(root), []);
+it('returns empty when vendor/it4web is absent', function () {
+    $root = sys_get_temp_dir() . '/critique-vendor-' . uniqid();
+    mkdir($root, 0777, true);
+    expect(check_vendor_hacks($root))->toBe([]);
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test skills/critique/checks/vendor.test.mjs`
-Expected: FAIL — `Cannot find module './vendor.mjs'`.
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
+Expected: FAIL — `Call to undefined function check_vendor_hacks()`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-```js
-// skills/critique/checks/vendor.mjs
-import { execFileSync } from 'node:child_process';
+```php
+// skills/critique/checks/vendor_hacks.php
+<?php
 
-// Files under vendor/it4web/ modified after the last composer install —
-// the CLAUDE.md "vendor hack" check. Filesystem state, not the diff.
-export function checkVendorHacks(repoRoot) {
-  try {
-    const out = execFileSync(
-      'find',
-      ['vendor/it4web/', '-newer', 'vendor/composer/installed.json', '-name', '*.php'],
-      { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+/**
+ * Files under vendor/it4web/ modified after the last composer install —
+ * the CLAUDE.md "vendor hack" check. Filesystem state, not the diff.
+ *
+ * @return array<int, array{check: string, file: string}>
+ */
+function check_vendor_hacks(string $repoRoot): array
+{
+    $marker = "$repoRoot/vendor/composer/installed.json";
+    $dir = "$repoRoot/vendor/it4web";
+    if (! is_file($marker) || ! is_dir($dir)) {
+        return [];
+    }
+    $cmd = sprintf(
+        'find %s -newer %s -name %s',
+        escapeshellarg($dir),
+        escapeshellarg($marker),
+        escapeshellarg('*.php'),
     );
-    return out.split('\n').filter(Boolean).map((file) => ({ check: 'vendor-hack', file }));
-  } catch {
-    return []; // vendor/it4web or installed.json absent → nothing to report
-  }
+    $out = shell_exec($cmd) ?? '';
+    $findings = [];
+    foreach (array_filter(explode("\n", trim($out))) as $file) {
+        $findings[] = ['check' => 'vendor-hack', 'file' => $file];
+    }
+
+    return $findings;
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test skills/critique/checks/vendor.test.mjs`
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
 Expected: PASS (2 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add skills/critique/checks/vendor.mjs skills/critique/checks/vendor.test.mjs
+git add skills/critique/checks/vendor_hacks.php skills/critique/checks/tests/VendorHacksTest.php
 git commit -m "feat(critique): vendor-hack filesystem check"
 ```
 
@@ -575,106 +657,103 @@ git commit -m "feat(critique): vendor-hack filesystem check"
 ### Task 8: Dispatcher + CLI + candidate-cap guard
 
 **Files:**
-- Create: `skills/critique/checks/run-checks.mjs`
-- Test: `skills/critique/checks/run-checks.test.mjs`
+- Create: `skills/critique/checks/run-checks.php`
+- Test: `skills/critique/checks/tests/RunChecksTest.php`
 
 **Interfaces:**
 - Consumes: every check from Tasks 2–7.
-- Produces: `runChecks(diffText, repoRoot) => { exact: [...], heuristic: [...] }`. CLI: reads a diff on stdin, prints the result as JSON.
+- Produces: `run_checks(string $diff, string $repoRoot): array` → `['exact' => [...], 'heuristic' => [...]]`. CLI: reads a diff on stdin, prints JSON.
 
 - [ ] **Step 1: Write the failing test**
 
-```js
-// skills/critique/checks/run-checks.test.mjs
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { runChecks } from './run-checks.mjs';
+```php
+// skills/critique/checks/tests/RunChecksTest.php
+<?php
 
-const COMBINED = `+++ b/resources/views/x.blade.php
+require_once __DIR__ . '/../run-checks.php';
+
+$combined = <<<'DIFF'
++++ b/resources/views/x.blade.php
 @@ -1,0 +1,1 @@
 +@php $x = 1; @endphp
 +++ b/app/Service.php
 @@ -1,0 +1,1 @@
-+$n = $user?->name;`;
++$n = $user?->name;
+DIFF;
 
-test('runChecks routes exact vs heuristic findings', () => {
-  const { exact, heuristic } = runChecks(COMBINED, '/nonexistent-root');
-  assert.ok(exact.some((f) => f.check === 'blade-php'));
-  assert.ok(heuristic.some((f) => f.check === 'null-safe-op'));
-  // changelog question fires: code changed, no fragment
-  assert.ok(heuristic.some((f) => f.check === 'changelog-fragment'));
+it('routes exact vs heuristic findings', function () use ($combined) {
+    $r = run_checks($combined, '/nonexistent-root');
+    $exact = array_column($r['exact'], 'check');
+    $heur = array_column($r['heuristic'], 'check');
+    expect($exact)->toContain('blade-php')
+        ->and($heur)->toContain('null-safe-op')
+        ->and($heur)->toContain('changelog-fragment');
 });
 
-test('no single heuristic check exceeds 5 candidates on this diff', () => {
-  const { heuristic } = runChecks(COMBINED, '/nonexistent-root');
-  const byCheck = {};
-  for (const f of heuristic) byCheck[f.check] = (byCheck[f.check] ?? 0) + 1;
-  for (const [check, n] of Object.entries(byCheck)) {
-    assert.ok(n <= 5, `${check} returned ${n} candidates (>5 relocates noise)`);
-  }
+it('keeps every heuristic check at or below 5 candidates', function () use ($combined) {
+    $r = run_checks($combined, '/nonexistent-root');
+    $byCheck = array_count_values(array_column($r['heuristic'], 'check'));
+    foreach ($byCheck as $check => $n) {
+        expect($n)->toBeLessThanOrEqual(5, "$check returned $n candidates (>5 relocates noise)");
+    }
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test skills/critique/checks/run-checks.test.mjs`
-Expected: FAIL — `Cannot find module './run-checks.mjs'`.
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
+Expected: FAIL — `Call to undefined function run_checks()`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-```js
-// skills/critique/checks/run-checks.mjs
-import { parseDiff } from './diff-parse.mjs';
-import {
-  checkBladePhp,
-  checkNullSafety,
-  checkEachOnBuilder,
-  checkMigrationWrites,
-  checkChangelogFragment,
-} from './checks.mjs';
-import { checkVendorHacks } from './vendor.mjs';
+```php
+// skills/critique/checks/run-checks.php
+<?php
 
-export function runChecks(diffText, repoRoot) {
-  const files = parseDiff(diffText);
-  const exact = [
-    ...checkBladePhp(files),
-    ...checkVendorHacks(repoRoot),
-  ];
-  const heuristic = [
-    ...checkChangelogFragment(files),
-    ...checkNullSafety(files),
-    ...checkEachOnBuilder(files),
-    ...checkMigrationWrites(files),
-  ];
-  return { exact, heuristic };
+require_once __DIR__ . '/diff_parse.php';
+require_once __DIR__ . '/checks.php';
+require_once __DIR__ . '/vendor_hacks.php';
+
+/** @return array{exact: array, heuristic: array} */
+function run_checks(string $diff, string $repoRoot): array
+{
+    $files = parse_diff($diff);
+
+    return [
+        'exact' => [
+            ...check_blade_php($files),
+            ...check_vendor_hacks($repoRoot),
+        ],
+        'heuristic' => [
+            ...check_changelog_fragment($files),
+            ...check_null_safety($files),
+            ...check_each_on_builder($files),
+            ...check_migration_writes($files),
+        ],
+    ];
 }
 
-// CLI: `git diff origin/main...HEAD | node run-checks.mjs`
-if (import.meta.url === `file://${process.argv[1]}`) {
-  let input = '';
-  process.stdin.setEncoding('utf8');
-  process.stdin.on('data', (c) => { input += c; });
-  process.stdin.on('end', () => {
-    const result = runChecks(input, process.cwd());
-    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
-  });
+// CLI: `git diff origin/main...HEAD | php run-checks.php`
+if (PHP_SAPI === 'cli' && isset($argv[0]) && realpath($argv[0]) === __FILE__) {
+    $diff = stream_get_contents(STDIN) ?: '';
+    echo json_encode(run_checks($diff, getcwd()), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test skills/critique/checks/run-checks.test.mjs`
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
 Expected: PASS (2 tests).
 
 - [ ] **Step 5: Run the whole Phase A suite**
 
-Run: `node --test skills/critique/checks/`
-Expected: PASS — all check tests green.
+Run: `./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
+Expected: PASS — every check test green.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add skills/critique/checks/run-checks.mjs skills/critique/checks/run-checks.test.mjs
+git add skills/critique/checks/run-checks.php skills/critique/checks/tests/RunChecksTest.php
 git commit -m "feat(critique): stage-0 dispatcher, CLI, and candidate-cap guard"
 ```
 
@@ -702,7 +781,7 @@ Announce and invoke `superpowers:writing-skills`. It governs the format of this 
   - `alternatives` axis assignment and the distinctness pass.
   - Principles layer as a **pointer** to `~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/CLAUDE.md`, not a copy.
   - Tier definitions: **Tier 3 = subjective preference with no named consequence**; a house-rule violation with a consequence is Tier 2.
-  - A `## Drop tally` block: a table of `category-slug | drops`, with the rule "at 3 drops in a slug, propose a scoping amendment; approval required; never auto-apply".
+  - A `## Drop tally` block: a `category-slug | drops` table, with the rule "at 3 drops in a slug, propose a scoping amendment; approval required; never auto-apply".
 
 - [ ] **Step 3: Commit**
 
@@ -719,7 +798,7 @@ git commit -m "feat(critique): rubrics reference — modes, tiers, drop tally"
 - Create: `skills/critique/SKILL.md`
 
 **Interfaces:**
-- Consumes: `checks/run-checks.mjs` (Task 8), `references/rubrics.md` (Task 9).
+- Consumes: `checks/run-checks.php` (Task 8), `references/rubrics.md` (Task 9).
 - Produces: the skill entry point.
 
 - [ ] **Step 1: Write the frontmatter and triggers** (via `writing-skills`)
@@ -736,7 +815,7 @@ description: Use when reviewing a design/plan before implementation or a change 
 - [ ] **Step 3: Write the reviewer contract** — crafted context (never session history) and read-only (never move `HEAD`; `git worktree add` for other revisions).
 
 - [ ] **Step 4: Write the six-stage pipeline**, wiring the pieces:
-  - **Stage 0:** assemble the target diff (`git diff origin/main...HEAD` + uncommitted, or `gh pr diff <n>`), pipe it to `node skills/critique/checks/run-checks.mjs`, and fold `exact` findings straight into the report and `heuristic` candidates into the Stage-2 prompt. State the assembled target ("N files, M uncommitted").
+  - **Stage 0:** assemble the target diff (`git diff origin/main...HEAD` + uncommitted, or `gh pr diff <n>`), pipe it to `php skills/critique/checks/run-checks.php`, fold `exact` into the report and `heuristic` candidates into the Stage-2 prompt. State the assembled target ("N files, M uncommitted").
   - **Stages 1–5** as specified: assemble context, single Fable reviewer (model configurable) over the mode rubric, filter (drop no-scenario + Tier 3, cap 15, disclose remainder by slug), report table (claim ≤60 chars, tier, verdict *pr-only*, category, location, failure scenario) + overall verdict, triage dispositions pointing at `receiving-code-review`.
   - **Stage 6:** on a drop, increment the `rubrics.md` tally; at 3 in a slug, propose an amendment (approval required).
 
@@ -755,7 +834,6 @@ git commit -m "feat(critique): SKILL.md — pipeline, modes, reviewer contract"
 
 **Files:**
 - Create: symlink `~/.claude/skills/critique` → `skills/critique/`
-- Verify: no new file.
 
 - [ ] **Step 1: Symlink the skill** (matches the multi-repo setup in CLAUDE.md)
 
@@ -768,7 +846,7 @@ Expected: symlink resolves to the repo skill dir.
 
 - [ ] **Step 2: Verify the full Phase A suite still passes**
 
-Run: `node --test skills/critique/checks/`
+Run: `cd ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd && ./vendor/bin/pest -c skills/critique/checks/phpunit.xml`
 Expected: PASS — every check test green.
 
 - [ ] **Step 3: `writing-skills` trigger check** — confirm the description/triggers fire on the intended phrasings and not on unrelated ones, per the `writing-skills` verification guidance.
@@ -781,10 +859,10 @@ Expected: it announces `plan` mode, states which artifacts it found (design only
 - [ ] **Step 5: Smoke-test the stage-0 CLI on a real diff**
 
 ```bash
-git diff origin/main...HEAD | node skills/critique/checks/run-checks.mjs
+git diff origin/main...HEAD | php skills/critique/checks/run-checks.php
 ```
 
-Expected: valid JSON `{ exact, heuristic }`; no heuristic check exceeds 5 candidates.
+Expected: valid JSON `{ "exact": [...], "heuristic": [...] }`; no heuristic check exceeds 5 candidates.
 
 - [ ] **Step 6: Commit any fixes** surfaced by verification, then stop for review.
 
@@ -801,11 +879,11 @@ git add -A && git commit -m "chore(critique): wire up skill and record smoke-tes
 - Modes, hazard classes, tiers, drop tally → Task 9.
 - Invocation, inference, pipeline stages 1–6, reviewer contract, verdict format → Task 10.
 - Whole-change target incl. uncommitted → Task 10 Stage 0 + Task 11 Step 5.
-- Validation items → Task 11 (trigger check, plan smoke-test, candidate-cap in Task 8 test). Items needing several real targets (signal ratio over ten runs, fan-out A/B, already-merged-PR runs) are **post-merge validation**, not build tasks — flagged here so they are not forgotten.
+- Validation items → Task 11 (trigger check, plan smoke-test) + Task 8 (candidate-cap test). Items needing several real targets (signal ratio over ten runs, fan-out A/B, already-merged-PR runs) are **post-merge validation**, not build tasks — flagged so they are not forgotten.
 - `--verify`, package weighting, `alternatives`/`missing` details → prose in Tasks 9–10; no executable component, so no dedicated task.
 
-**2. Placeholder scan.** No "TBD"/"handle appropriately". Phase A steps carry complete code; Phase B steps are prose authored via `writing-skills` and enumerate their required content rather than deferring it.
+**2. Placeholder scan.** No "TBD"/"handle appropriately". Phase A steps carry complete PHP; Phase B steps are prose authored via `writing-skills` and enumerate their required content rather than deferring it.
 
-**3. Type consistency.** Every check returns `{ check, file?, line?, text?|question? }`; `runChecks` returns `{ exact, heuristic }`; `parseDiff` returns `[{ file, added:[{line,text}] }]`. Names are identical across Tasks 1–8 and referenced unchanged in Task 10.
+**3. Type consistency.** Every check returns `['check' => , 'file'? => , 'line'? => , 'text'?|'question'? => ]`; `run_checks` returns `['exact' => , 'heuristic' => ]`; `parse_diff` returns `[['file' => , 'added' => [['line' => , 'text' => ]]]]`. Names are identical across Tasks 1–8 and referenced unchanged in Task 10.
 
 **Known limitation carried forward:** the signal-ratio, fan-out-A/B, and merged-PR-replay validations require real review runs and live in the spec's validation section as post-merge acceptance, not in this build plan.
