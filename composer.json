@@ -1,0 +1,17 @@
+{
+    "name": "it4web/laravel-claude-md",
+    "description": "Claude Code config, instructions, and personal skills. Hosts the /critique skill's stage-0 checks (PHP + Pest meta-tooling).",
+    "type": "project",
+    "license": "proprietary",
+    "require-dev": {
+        "pestphp/pest": "^4.7"
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "scripts": {
+        "test": "pest -c skills/critique/checks/phpunit.xml --test-directory=skills/critique/checks/tests"
+    }
+}
