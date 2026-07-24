@@ -49,7 +49,7 @@ Anything not justifiable against those four does not ship.
 ## Goals
 
 - One entry point that walks the chain, invoking the existing station skills — never reimplementing them.
-- Two modes (`interactive`/`auto`) over an explicit, inspectable per-gate policy; `auto` is the default working mode.
+- Two modes (`interactive`/`auto`) over an explicit, inspectable per-gate policy; `interactive` is the default, `auto` is opt-in for unattended runs.
 - **No path reaches a non-draft PR unless `review-plan` and `review-pr` each ran against the recorded artifact.** (The central falsifiable promise — see Validation.)
 - Resume after any death or `/clear` without restarting from station one.
 - Works unchanged across the many Laravel project repos these global skills run in.
@@ -111,8 +111,8 @@ There are two kinds of gate.
 
 | Mode | Behaviour |
 |---|---|
-| **`interactive`** | you are present; runs one leg, shows you, waits. Advance by just saying so (§7). (A "propose the command but don't run it" is a `--dry-run` flag, not a mode.) |
-| **`auto`** *(default)* | runs the autonomous legs unattended and **parks at plan approval and PR review** with a report you verdict whenever you return; hard-stops at the content gates below and on failure. |
+| **`interactive`** *(default)* | you are present; runs one leg, shows you, waits. Advance by just saying so (§7). (A "propose the command but don't run it" is a `--dry-run` flag, not a mode.) |
+| **`auto`** | runs the autonomous legs unattended and **parks at plan approval and PR review** with a report you verdict whenever you return; hard-stops at the content gates below and on failure. |
 
 `auto` never blows through a review gate silently — it parks with a packaged parcel and waits. Flipping a specific gate to report-only (the old "run straight to an open PR" behaviour) is the one-line table override noted above.
 
@@ -167,11 +167,11 @@ The pipeline **introduces no slot mechanism and claims no slot.** The entire run
 ### §7 Invocation and navigation
 
 ```
-/pipeline [interactive|auto] <idea | spec-path | pr#>   # start a run (mode defaults to auto)
+/pipeline [interactive|auto] <idea | spec-path | pr#>   # start a run (mode defaults to interactive)
 /pipeline                                               # resume the current branch's run
 ```
 
-**One slash entry point.** `/pipeline` starts a run, or — when a manifest, or reconstructable PR/branch state, for the current branch already exists — **resumes** it after the invariant checks. Mode defaults to **`auto`**.
+**One slash entry point.** `/pipeline` starts a run, or — when a manifest, or reconstructable PR/branch state, for the current branch already exists — **resumes** it after the invariant checks. Mode defaults to **`interactive`**.
 
 **Navigation is natural language, not more commands.** Once the engine is loaded in a session it holds the manifest cursor, so you drive it by saying so — *"next step"*, *"go to step X"*, *"re-run review-plan"*, *"skip ahead to handoff"*. A slash command is only a guaranteed trigger to load the skill in a cold session; there is no separate `/next`.
 
@@ -192,7 +192,7 @@ The standalone-skill choice (rather than folding the spine into `handoff`) is de
 - [ ] **Stack readiness:** an `auto` run with the stack down brings it up before the implement leg; tests and verify-ui then run against it.
 - [ ] **Failure policy:** a hard failure halts with no retry; a Tier-1 at review-plan loops back (does not build the implementation); a Tier-1 later demotes and packages to a PR; a Tier-2 logs and continues.
 - [ ] **One-worktree invariant:** across a full `auto` run, no new slot is claimed and the manifest/lease never move worktrees.
-- [ ] **`auto` (default)** stops at exactly the two gates and nowhere else on a clean run.
+- [ ] **`auto`** stops at exactly the two gates and nowhere else on a clean run.
 - [ ] **Navigation guardrail:** "go to step X" backward re-runs a station; forward past an un-run gate is refused.
 
 ## Known limitations (accepted)
@@ -227,3 +227,4 @@ The standalone-skill choice (rather than folding the spine into `handoff`) is de
 | One slash entry point (`/pipeline`); navigation is natural language | A slash command only guarantees a cold-session trigger; once loaded, "next step" / "go to step X" drive the engine directly — a dedicated `/next` was surface without capability (user's call) |
 | Forward-past-an-unrun-gate navigation refused; backward free | Arbitrary "go to step X" must not become a way to skip a mandated review; the invariant checks already enforce it |
 | Dev-stack readiness is pipeline-owned | `implement` (tests) and `verify-ui` (browser) both need the stack; making the pipeline bring it up once beats each leg re-solving it |
+| Default mode is `interactive`, not `auto` | A fresh `/pipeline <idea>` must not run unattended by surprise; opting into `auto` is a deliberate act (user's call) |
