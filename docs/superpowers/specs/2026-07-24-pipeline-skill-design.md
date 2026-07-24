@@ -16,7 +16,7 @@ A `pipeline` skill that walks the full feature chain — **design → review-pla
 3. **Auto-continuation spans only autonomous legs.** A subagent leg returns to the loop; an interactive leg is a natural stop-and-re-invoke boundary. Nothing relies on regaining control mid-session.
 4. **Two modes — `interactive` and `auto` — over a per-gate policy table.** The mode is the one choice you make; the table (rarely touched) holds the finer per-gate stop/report settings, so "run past the plan gate straight to a PR" is *data*, not a new mode.
 5. **The manifest is a disposable local cursor.** Durable truth is git + gh + the committed spec/plan + the PR. A missing manifest is reconstructed, never fatal.
-6. **The whole run stays in one worktree.** The pipeline claims no slot and tears none down.
+6. **The whole run stays in one worktree** — the pipeline creates one at kickoff (if the current checkout isn't already it) and owns it for the run, but tears none down.
 
 ## The chain today
 
@@ -58,7 +58,7 @@ Anything not justifiable against those four does not ship.
 
 - **Replacing any station's judgment.** The pipeline sequences skills; it does not out-think them.
 - **New review logic.** That is `/critique`. **New bug-hunting.** That is `/code-review`.
-- **Claiming or tearing down worktree slots.** The pipeline runs in the worktree it was launched in (see §6).
+- **Tearing down worktree slots.** The pipeline creates one worktree for the run (§6) but never removes it — teardown is destructive and stays the human's call.
 - **Posting to GitHub beyond what `handoff`/`work-on` already do**, and nothing it writes ever addresses a person.
 - **A findings store or any persistent state that is not reconstructable** from git + gh.
 
@@ -87,6 +87,7 @@ A local, gitignored file — `.claude/pipeline/<branch>.json` — that is a **di
 | Field | Purpose |
 |---|---|
 | `branch` / `pipeline_id` | identity |
+| `worktree` | absolute path of the run's worktree (where every leg operates) |
 | `mode` | `interactive` or `auto` |
 | `gate_policy` | the resolved per-gate table (§3) |
 | `cursor` | current leg + status |
@@ -143,7 +144,7 @@ The scary case — a Tier-1 on migrations, authorization, or a shared package �
 
 The pipeline **invokes** the existing skills; it does not reimplement them.
 
-**Dev-stack readiness is the pipeline's job, not each leg's.** Several legs need the worktree's stack running — `implement` runs the test suite (`docker exec <slot>_web php artisan test`) after each step, and `verify-ui` drives a real browser. Before the first such leg the pipeline **ensures the stack is up** (starting it with the project's `restart.sh` if it isn't) and leaves it running afterwards; teardown stays the human's call, like the slot itself (§6). `work-on` deliberately leaves stack timing to its caller — under the pipeline, the pipeline *is* that caller.
+**Dev-stack readiness is the pipeline's job, not each leg's.** Several legs need the worktree's stack running — `implement` runs the test suite (`docker exec <slot>_web php artisan test`) after each step, and `verify-ui` drives a real browser. Before the first such leg the pipeline **brings the stack up itself, without asking** (`restart.sh`; it is non-destructive) and leaves it running afterwards; teardown stays the human's call, like the slot itself (§6). Starting the stack is a **routine owned action, never a "shall I start docker?" prompt** — `work-on` deliberately leaves stack *timing* to its caller, and under the pipeline the pipeline *is* that caller. If the stack genuinely cannot start, that is a hard failure (§4), not a reason to hesitate.
 
 - **Design station (compound).** `brainstorming` and `writing-plans` are **one leg**, because brainstorming already ends by invoking writing-plans. Modelling them as two legs with a cursor between would run writing-plans a second time. The design leg produces spec **and** plan and returns (or, interactively, hands off to the human-driven brainstorm which chains into writing-plans; the human re-invokes `/pipeline` to continue).
   - **`interactive`**: the human drives the brainstorm dialogue.
@@ -154,15 +155,19 @@ The pipeline **invokes** the existing skills; it does not reimplement them.
 - **verify-ui** *(conditional — the one leg the pipeline adds beyond the hand-driven chain)* → when the diff touches UI (`*.blade.php`, Livewire components, `resources/css|js`, Alpine/Tailwind), a leg runs `browser-verification` for annotated screenshot proof and **attaches it to the PR**. **Non-skippable once the trigger fires** — the chain cannot reach review-pr without proof (the house rule made structural). Needs the stack up plus Playwright and the visual companion. Autonomous-capable; the skill's interactive *"show me"* hand-off is an `interactive`-mode nicety. Failure handling in §4.
 - **review-pr** → `/critique pr`. Autonomous-capable. Feeds the PR-review gate.
 
-### §6 Slots / worktree ownership
+### §6 Worktree / slot ownership
 
-The pipeline **introduces no slot mechanism and claims no slot.** The entire run — pre-PR stations, implementation, and post-PR review — executes **in the worktree `/pipeline` was launched in.** Consequences:
+The whole run needs a **dedicated worktree for its branch** — the manifest, the lease, the stack, and every leg live there. The pipeline **ensures one exists, creating it if the current checkout isn't already it:**
 
-- The manifest and lease stay valid for the whole run (one worktree, one lease). No cross-worktree boundary for the local manifest to fail to cross, and no second driver on the same branch.
-- No per-run slot is claimed, so **nothing leaks** and there is nothing to tear down.
-- **Autonomous work mutates wherever it runs**, so **launch `/pipeline` from a feature-branch worktree you have already claimed** (via `slots` / `worktree.sh`), never the primary checkout. This is the one operational rule the pipeline pushes onto the caller.
+- **From an idea** (no branch yet) → derive a branch name from the idea (slugified, as `work-on` does for issue titles) and create the worktree for it (`scripts/worktree.sh create <branch>` on slot-enabled projects; a plain feature branch in place otherwise; headless with no such machinery and no consent → stop and report rather than mutate the primary).
+- **From a spec-path or `pr#`** → the branch is known (the spec's branch; the PR's head ref) → create the worktree for it, or use the current checkout if you are already on it.
+- **Already launched inside a claimed feature worktree** → use it; create nothing.
 
-`work-on`'s slot-claiming remains available for the **human** picking up a PR cold in parallel — it is simply not part of the pipeline's autonomous path.
+**One worktree for the entire run.** Whatever the pipeline lands in, *everything* runs there — including `implement`, which reuses `work-on`'s logic but **not** its slot claim, so no *second* slot is ever created mid-chain. That is what keeps the manifest and lease valid end-to-end and dissolves the cross-slot boundary, the cross-worktree lease-blindness, and the slot leak (the #7–#10 cluster): the danger was never *a* slot, it was a *second* one appearing under the run.
+
+**Worktree now, stack later.** Creating the worktree is cheap (git); the docker stack is started lazily, only before `implement` (§5) — no stack is spun up merely to brainstorm.
+
+**Created, never torn down.** Teardown is destructive and stays the **human's** call (matching `slots` and `work-on`) — one slot per feature, removed when you are done with it. The pipeline records the `worktree` path in the manifest so every leg and every resume operates in the right place; a resume locates the run's worktree via `git worktree list` for the branch. `work-on`'s slot-claiming remains available for the human picking up a PR cold in parallel — it is simply not part of the pipeline's own path.
 
 ### §7 Invocation and navigation
 
@@ -191,7 +196,7 @@ The standalone-skill choice (rather than folding the spine into `handoff`) is de
 - [ ] **verify-ui fires and blocks:** a UI-touching diff triggers `browser-verification`, the chain cannot reach review-pr without attached proof, and a broken-UI verify loops back to implement.
 - [ ] **Stack readiness:** an `auto` run with the stack down brings it up before the implement leg; tests and verify-ui then run against it.
 - [ ] **Failure policy:** a hard failure halts with no retry; a Tier-1 at review-plan loops back (does not build the implementation); a Tier-1 later demotes and packages to a PR; a Tier-2 logs and continues.
-- [ ] **One-worktree invariant:** across a full `auto` run, no new slot is claimed and the manifest/lease never move worktrees.
+- [ ] **One-worktree invariant:** the pipeline creates exactly one worktree at kickoff and no *second* slot is claimed mid-chain (`work-on` does not claim its own); the manifest/lease never move worktrees across the run.
 - [ ] **`auto`** stops at exactly the two gates and nowhere else on a clean run.
 - [ ] **Navigation guardrail:** "go to step X" backward re-runs a station; forward past an un-run gate is refused.
 
@@ -199,7 +204,7 @@ The standalone-skill choice (rather than folding the spine into `handoff`) is de
 
 - **Migration gate is detective, not pre-emptive.** grep sees a migration once it is written. The gate fires at review-plan (on the plan text) and review-pr (on the diff), not before `work-on` writes it. Accepted: a written-but-unmerged migration on a draft PR is still caught before merge, which is the point that matters.
 - **`auto` brainstorm can build the wrong thing.** Turning a brief into a spec unattended invents requirements the user never confirmed, and no content gate catches "wrong feature." Mitigated — not eliminated — by writing the assumed answers into the spec for `/critique plan` to audit. Unattended design is for well-specified, low-risk work by definition; this is the price of that ambition.
-- **Autonomous runs need the worktree's dev stack up.** `implement` (tests) and `verify-ui` (browser) both require it, so an `auto` run starts the stack (`restart.sh`) and leaves it running — extra resource use, and it assumes the worktree can bring its stack up unattended. Teardown stays manual.
+- **Runs leave the dev stack (and worktree) running.** `implement` (tests) and `verify-ui` (browser) need the stack, so the pipeline starts it (`restart.sh`, no confirmation) and leaves it up; teardown is the human's call, so a slot's stack persists after the run. Assumes docker is available and the slot's ports are free — if the stack genuinely cannot start, that is a hard failure (§4), not a skip.
 
 ## Open questions
 
@@ -219,7 +224,7 @@ The standalone-skill choice (rather than folding the spine into `handoff`) is de
 | Two modes (`interactive`/`auto`) over a per-gate policy table | The scale did two jobs — present-or-not, and per-gate stop-or-report; the table already owns the second, so the mode need only own the first. "Run to a PR" becomes a one-line table override, not a level (Fable's table + user's collapse) |
 | Content gates split into deterministic vs judgment triggers | "Reuse `/critique`'s detection" covered only migrations + package; auth needed a new grep and project-vs-package is irreducibly a judgment (review findings #1, #4) |
 | Halt on hard failure; demote on blocking finding; loop-back on plan-rework (Fable-confirmed) | A hard failure means the machinery broke (unknown state → halt); a blocking finding means it worked (healthy signal → package and hand a parcel to the human). Building on a rework-verdict plan is never right (review finding #3) |
-| In-place autonomous implementation; pipeline claims no slot | Dissolves the cross-slot manifest boundary, the cross-worktree lease blindness, and the slot leak in one move (review findings #7, #8, #9, #10). `work-on`'s slot claim is a human affordance |
+| Pipeline creates ONE worktree at kickoff and runs the whole chain in it; `work-on` claims no second slot | Makes from-idea kickoff practical (no branch exists yet) while still dissolving the cross-slot boundary, lease-blindness, and leak (#7–#10) — the hazard was a *second* slot mid-chain, not the first. Teardown stays the human's call |
 | `auto` may brainstorm a tight brief unattended, with an assumptions-audit guardrail | Preserves the issue's "runs from a raw idea" ambition; the residual wrong-feature risk is documented and accepted (review finding #9) |
 | Standalone skill, not folded into `handoff` | `handoff` owns one boundary; the pipeline owns all of them plus the autonomy policy and the manifest. The PR comment stays a projection, not rival state (review finding #12) |
 | `/critique` is a live dependency hardened in place, not a blocker | Per the product owner: use it now, improve it as the pipeline exercises it |
@@ -228,3 +233,4 @@ The standalone-skill choice (rather than folding the spine into `handoff`) is de
 | Forward-past-an-unrun-gate navigation refused; backward free | Arbitrary "go to step X" must not become a way to skip a mandated review; the invariant checks already enforce it |
 | Dev-stack readiness is pipeline-owned | `implement` (tests) and `verify-ui` (browser) both need the stack; making the pipeline bring it up once beats each leg re-solving it |
 | Default mode is `interactive`, not `auto` | A fresh `/pipeline <idea>` must not run unattended by surprise; opting into `auto` is a deliberate act (user's call) |
+| Pipeline starts the dev stack autonomously, no confirmation | The stack is a routine dependency for tests + browser; `restart.sh` is non-destructive and asking each time is friction the owner explicitly does not want (user preference) |
