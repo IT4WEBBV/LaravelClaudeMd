@@ -39,3 +39,21 @@ function check_null_safety(array $files): array
 
     return $candidates;
 }
+
+/** @return array<int, array{check: string, file: string, line: int, text: string}> */
+function check_each_on_builder(array $files): array
+{
+    $candidates = [];
+    foreach ($files as $f) {
+        if (! str_ends_with($f['file'], '.php')) {
+            continue;
+        }
+        foreach ($f['added'] as $a) {
+            if (preg_match('/->each\(/', $a['text']) && ! preg_match('/->get\(\)\s*->each\(/', $a['text'])) {
+                $candidates[] = ['check' => 'each-on-builder', 'file' => $f['file'], 'line' => $a['line'], 'text' => trim($a['text'])];
+            }
+        }
+    }
+
+    return $candidates;
+}
