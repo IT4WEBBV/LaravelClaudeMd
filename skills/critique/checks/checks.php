@@ -57,3 +57,22 @@ function check_each_on_builder(array $files): array
 
     return $candidates;
 }
+
+/** @return array<int, array{check: string, file: string, line: int, text: string}> */
+function check_migration_writes(array $files): array
+{
+    $writeRe = '/\bDB::|->insert\(|->update\(|->delete\(|::create\(|::insert\(/';
+    $candidates = [];
+    foreach ($files as $f) {
+        if (! preg_match('#^database/migrations/.*\.php$#', $f['file'])) {
+            continue;
+        }
+        foreach ($f['added'] as $a) {
+            if (preg_match($writeRe, $a['text'])) {
+                $candidates[] = ['check' => 'migration-write', 'file' => $f['file'], 'line' => $a['line'], 'text' => trim($a['text'])];
+            }
+        }
+    }
+
+    return $candidates;
+}

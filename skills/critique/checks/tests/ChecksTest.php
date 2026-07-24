@@ -46,3 +46,19 @@ DIFF;
     $c = check_each_on_builder(parse_diff($diff));
     expect($c)->toHaveCount(1)->and($c[0]['line'])->toBe(1);
 });
+
+it('flags data writes only under database/migrations', function () {
+    $diff = <<<'DIFF'
++++ b/database/migrations/2026_01_01_000000_x.php
+@@ -1,0 +1,2 @@
++        Schema::table('orders', fn (Blueprint $t) => $t->string('status'));
++        DB::table('orders')->update(['status' => 'active']);
++++ b/app/Actions/DoThing.php
+@@ -1,0 +1,1 @@
++        DB::table('orders')->update(['x' => 1]);
+DIFF;
+    $c = check_migration_writes(parse_diff($diff));
+    expect($c)->toHaveCount(1)
+        ->and($c[0]['file'])->toBe('database/migrations/2026_01_01_000000_x.php')
+        ->and($c[0]['text'])->toContain('DB::table');
+});
