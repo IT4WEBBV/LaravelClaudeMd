@@ -76,3 +76,26 @@ function check_migration_writes(array $files): array
 
     return $candidates;
 }
+
+/** @return array<int, array{check: string, question: string}> */
+function check_changelog_fragment(array $files): array
+{
+    $hasCode = false;
+    $hasFragment = false;
+    foreach ($files as $f) {
+        if (preg_match('/\.(php|js|vue)$/', $f['file']) && $f['added'] !== []) {
+            $hasCode = true;
+        }
+        if (str_starts_with($f['file'], '.changelog/unreleased/') && str_ends_with($f['file'], '.md')) {
+            $hasFragment = true;
+        }
+    }
+    if ($hasCode && ! $hasFragment) {
+        return [[
+            'check' => 'changelog-fragment',
+            'question' => 'No .changelog/unreleased/ fragment. Is this a user-visible change that needs one?',
+        ]];
+    }
+
+    return [];
+}

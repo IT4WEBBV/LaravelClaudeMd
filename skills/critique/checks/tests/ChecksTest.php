@@ -62,3 +62,22 @@ DIFF;
         ->and($c[0]['file'])->toBe('database/migrations/2026_01_01_000000_x.php')
         ->and($c[0]['text'])->toContain('DB::table');
 });
+
+it('asks when code changed but no fragment added', function () {
+    $codeOnly = <<<'DIFF'
++++ b/app/Foo.php
+@@ -1,0 +1,1 @@
++// change
+DIFF;
+    expect(check_changelog_fragment(parse_diff($codeOnly)))->toHaveCount(1);
+
+    $withFragment = <<<'DIFF'
++++ b/app/Foo.php
+@@ -1,0 +1,1 @@
++// change
++++ b/.changelog/unreleased/feature-x.md
+@@ -1,0 +1,1 @@
++<details>
+DIFF;
+    expect(check_changelog_fragment(parse_diff($withFragment)))->toHaveCount(0);
+});
