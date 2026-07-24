@@ -160,16 +160,10 @@ countable. Stage-0 slugs (emitted by `checks/run-checks.php`):
 Reviewer findings use their own descriptive slugs (e.g. `hardcoded-url`,
 `missing-edge-case`, `plan-drift`, `contract-break`).
 
-## Drop tally
+## Amending this rubric
 
-A drop with a reason is a labelled false positive. One drop is an anecdote; **three
-drops in the same slug** means the rubric is mis-scoped there. Increment on each drop:
-
-| Category slug | Drops |
-|---|---|
-| _(none yet)_ | 0 |
-
-**At 3 drops in a slug**, propose a scoping amendment to this file. **Amendments
-require approval and are never applied automatically** — a reviewer that silently
-learns to suppress is a reviewer that quietly stops working. This tally is the only
-state `/critique` keeps between runs; there is no findings store.
+There is **no persistent drop tally and no state between runs.** When the same category
+is dropped repeatedly — within a session, or against a pasted prior report — that is a
+signal the rubric is mis-scoped there. Propose a **deliberate, hand-authored amendment**
+to this file; it requires approval and is never applied automatically. A reviewer that
+silently learns to suppress is a reviewer that quietly stops working.

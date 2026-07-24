@@ -6,6 +6,11 @@
 **Related, out of scope:** the "pipeline" skill — issue #14.
 **Previous revisions:** `f7007f0` initial · `6117da4` after independent plan-review · `892f6a5` cut for token efficiency · `fecc0d8` principles + hazard classes · `50c9408` deterministic pre-pass, tiers, verdicts. v6 reviews the whole change rather than commit ranges, and fixes what the v5 review found.
 
+**Post-sign-off refinements** (made while building `skills/critique/`, kept out of the frozen v6 text below):
+1. The `pr` diff resolves the repo's **default branch** (`origin/HEAD`), not a hardcoded `origin/main` — the v6 command was `master`-blind and broke the "works unchanged in project repos" goal.
+2. **No persistent drop tally.** Stage 6 surfaces repeat-drop patterns in chat and proposes a hand-authored rubric amendment; the tally block in `rubrics.md` is gone — it was mutable state in a `--ff-only`-pulled config repo. This removes the one exception to "no findings store."
+3. **Dropping is the consumer's job, not the reviewer's.** The reviewer scores every candidate (tier, scenario, category) and never deletes; the consumer applies the drop policy and discloses the remainder, so a mis-drop stays visible.
+
 ## Summary
 
 One skill, four modes, encoding the two review steps currently done from memory: reviewing a design/plan before implementation, and reviewing a PR before merge.

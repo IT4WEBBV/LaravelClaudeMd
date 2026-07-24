@@ -28,14 +28,16 @@ on demand**, when nobody is present to ask for options.
 /critique pr --verify              # upgrade pass: promote/refute code-defect findings
 ```
 
-**The default `pr` target is the whole change:** `git diff origin/main...HEAD`
-**plus uncommitted working-tree changes**, so work in progress is reviewable without
-committing first. With a number, it is `gh pr diff <n>`.
+**The default `pr` target is the whole change:** the branch diffed against its
+**base** (resolve it — see Stage 0 — do **not** assume `main`) **plus uncommitted
+working-tree changes**, so work in progress is reviewable without committing first.
+With a number, it is `gh pr diff <n>`.
 
 **Mode inference** for the bare form, in order:
 1. an uncommitted or newer-than-HEAD spec in `docs/superpowers/specs/` → `plan`
    (a brainstorm ends with an uncommitted spec, so this precedes rule 2);
-2. otherwise any change against `origin/main`, committed or not → `pr`;
+2. otherwise any change against the base branch (resolved as in Stage 0), committed
+   or not → `pr`;
 3. otherwise ask.
 
 **Always announce the chosen mode first.**
@@ -57,12 +59,18 @@ committing first. With a number, it is `gh pr diff <n>`.
 
 ### Stage 0 — deterministic pre-pass (no model tokens)
 
-Assemble the target diff and run the tested PHP checks over it. For the whole current
-change, that is the committed diff plus the uncommitted one:
+Assemble the target diff and run the tested PHP checks over it. **Resolve the base
+branch first — never assume `main`** (an older repo may be `master`; a stacked branch
+diffs against its parent):
 
 ```bash
-{ git diff origin/main...HEAD; git diff HEAD; } | php skills/critique/checks/run-checks.php
-gh pr diff <n>                                  | php skills/critique/checks/run-checks.php
+BASE=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')
+BASE=${BASE:-$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null)}
+BASE=${BASE:-main}   # last-resort default; on a stacked branch, set BASE to the parent
+
+# whole current change = committed diff against base + uncommitted working tree:
+{ git diff "origin/$BASE...HEAD"; git diff HEAD; } | php skills/critique/checks/run-checks.php
+gh pr diff <n>                                     | php skills/critique/checks/run-checks.php
 ```
 
 The script prints `{ "exact": [...], "heuristic": [...] }`:
@@ -93,12 +101,16 @@ Abort clearly if the target is empty.
 candidates from stage 0. Model configurable, **Fable by default**. Reasoning effort is
 session-level — there is no per-dispatch override.
 
-### Stage 3 — filter and shape
+### Stage 3 — filter and shape (the consumer's job, not the reviewer's)
 
-Drop anything without a nameable failure scenario. Drop Tier 3. Merge duplicates. Rank
-by tier, then severity. **Cap at 15**; beyond that, report the top 15 and list the
-rest as category-slug one-liners. State how many were dropped as Tier 3, by category,
-so a mis-ranked Tier 2 stays spottable.
+The reviewer returns **every candidate scored** — tier, failure scenario, category —
+and merges only its own obvious duplicates. It does **not** delete or hide anything: a
+reviewer that silently drops its own findings is the self-grading trap (it can bury an
+inconvenient Tier 2 as Tier 3 and you never see it). **You, the consumer, apply the
+drop policy, visibly:** drop anything without a nameable failure scenario, drop Tier 3,
+rank by tier then severity, **cap at 15** (report the top 15, the rest as category-slug
+one-liners), and state how many were dropped as Tier 3 by category — free to do here
+because you hold the full scored list, and it keeps a mis-ranked Tier 2 spottable.
 
 ### Stage 4 — report in chat
 
@@ -110,18 +122,21 @@ one sentence of reasoning. Tier and verdict definitions live in `references/rubr
 
 ### Stage 5 — triage
 
-Each finding gets a disposition: **fix now** / **rework the plan** / **file an issue**
-(hands off to `work-on`) / **drop**. Nothing is filed or posted unless chosen. *How*
-to evaluate findings — verify before implementing, no performative agreement, push
-back with reasoning, stop if items are unclear — is `superpowers:receiving-code-review`'s
+Each **surviving** finding gets a disposition: **fix now** / **rework the plan** /
+**file an issue** (hands off to `work-on`) / **drop** — a decision *not to act*,
+distinct from the Stage 3 quality filter. Nothing is filed or posted unless chosen.
+*How* to evaluate findings — verify before implementing, no performative agreement,
+push back with reasoning, stop if items are unclear — is `superpowers:receiving-code-review`'s
 job; this skill points at it rather than restating it.
 
 ### Stage 6 — feed the rubric, on a pattern
 
-On a **drop**, increment that slug's count in the `## Drop tally` of
-`references/rubrics.md`. At **three drops in one slug**, propose a scoping amendment to
-that file. **Amendments require approval and are never applied automatically** — a
-reviewer that silently learns to suppress is a reviewer that quietly stops working.
+**No persistent tally, no state between runs.** When you notice the same category
+dropped repeatedly — within a session, or against a pasted prior report — surface the
+pattern and **propose a deliberate amendment** to `references/rubrics.md`. Amendments
+are hand-authored edits requiring approval, never automatic — a reviewer that silently
+learns to suppress is a reviewer that quietly stops working. Nothing is written to the
+rubric behind your back.
 
 ## `--verify`
 
