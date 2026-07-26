@@ -57,11 +57,23 @@ function pipeline_can_navigate(string $from, string $to, array $doneLegs, array 
     return true;
 }
 
-/** @return array{auto_continue: bool, gates: array{plan-approval: string, pr-review: string}} */
+/**
+ * Gate policy for a mode.
+ *
+ * `interactive` stops at every gate — the human is present, so the gate is their turn.
+ * `auto` adjudicates: the reviews still run, but their findings are proposals the engine
+ * resolves itself, escalating only what an independent check confirms
+ * (`pipeline_should_escalate`). An unrecognised mode gets the stricter policy.
+ * See `../references/gates.md`.
+ *
+ * @return array{auto_continue: bool, gates: array{plan-approval: string, pr-review: string}}
+ */
 function pipeline_resolve_policy(string $mode): array
 {
+    $gate = $mode === 'auto' ? 'adjudicate' : 'stop';
+
     return [
         'auto_continue' => $mode === 'auto',
-        'gates' => ['plan-approval' => 'stop', 'pr-review' => 'stop'],
+        'gates' => ['plan-approval' => $gate, 'pr-review' => $gate],
     ];
 }
