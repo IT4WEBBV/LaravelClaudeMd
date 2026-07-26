@@ -182,6 +182,14 @@ Under `adjudicate` these are the only stops; everything else continues, with a r
   `gate_ledger` entries whose `outcome` is **`looped-back`** (`manifest.md`) — not its entries in
   total, which also include escalations and human-ordered re-reviews and would over-count into a
   spurious interrupt — and never from an in-memory counter.
+  - **A count that cannot be read is not a count of zero.** The ledger lives in the disposable
+    manifest, and no durable probe can rebuild it: git and gh record *that* a review happened, not
+    how many times the engine looped. So a run whose manifest was **reconstructed** (`manifest.md`
+    §reconstruction) carries an **unknown** cycle count, and unknown permits **no** loop-back — the
+    next confirmed `rework` or `verify-ui` failure escalates immediately. Without this, a manifest
+    lost mid-loop silently grants two fresh cycles, and one lost repeatedly grants them forever:
+    the bound would stop bounding at exactly the moment it is load-bearing. A fresh run writes its
+    own manifest at kickoff and is never reconstructed, so it is unaffected.
 - **Advisory finding** (a Tier-2, or a refuted Tier-1) → **log to the manifest, continue.**
 - **Playwright genuinely unavailable** → **halt.** No visual claim without proof.
 

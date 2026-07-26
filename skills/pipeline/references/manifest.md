@@ -71,7 +71,7 @@ projected onto the PR.
 | Key | Values |
 |---|---|
 | `gate` | `plan-approval` \| `pr-review` \| `verify-ui` |
-| `cycle` | 1-based — which pass through this gate produced the entry |
+| `cycle` | 1-based — which pass through this gate produced the entry; `"unknown"` after a reconstruction, which permits no further loop-back (§reconstruction) |
 | `policy` | the value resolved at the time — `stop` \| `adjudicate` \| `report` |
 | `verdict` | the reviewer's own, mapped to the verdict block's vocabulary (`engine.md`) — `approve` \| `approve-with-nits` \| `rework` |
 | `verdict_adjudication` | for a `rework` verdict, what the adjudicator said — `none` (not a rework) \| `refuted` \| `confirmed` \| `uncertain`. A confirmed one drove a loop-back, so this is where overruling a `rework` becomes visible |
@@ -144,6 +144,16 @@ design → review-plan → handoff → implement → verify-ui → review-pr →
 Anything recorded only ephemerally (fine-grained `/critique` dispositions — `/critique` stores
 nothing by design) is re-established by re-running that leg. The gitignored file is an
 optimisation over this probing, never a prerequisite for it.
+
+**One field does not reconstruct, and it fails closed.** The `gate_ledger`'s loop-cycle count has
+no durable source — git and gh record *that* a review happened, not how many times the engine
+looped back — and the plan↔review loop runs entirely **before** `handoff`, so there is not even a
+PR to have projected it onto. A reconstructed run therefore treats the count as **unknown**, not
+zero, and an unknown count permits **no** further loop-back: the next confirmed `rework` or
+`verify-ui` failure escalates (`engine.md` §failure policy). Record `"cycle": "unknown"` on the
+entry so the ledger says why. This is the sole exception to *a missing manifest is never fatal* —
+and it is the same instinct as the invariant check above: state that cannot be trusted is not
+guessed at, it is handed back.
 
 Because the whole run stays in **one worktree** (see `engine.md` §worktree), the manifest and
 its `lease` stay valid for the entire chain — there is no second worktree on the same branch
