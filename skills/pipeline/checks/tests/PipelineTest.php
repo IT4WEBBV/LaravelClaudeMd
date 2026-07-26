@@ -60,3 +60,27 @@ it('keeps the un-skippable-review promise out of reach of the gate policy', func
     expect(pipeline_can_navigate('review-plan', 'implement', ['design', 'review-plan'], $uiOff))->toBeTrue();
     expect(pipeline_can_navigate('review-pr', 'design', [], $uiOn))->toBeTrue();
 });
+
+it('escalates only a finding that is blocking *and* confirmed', function () {
+    $tier1 = ['tier' => 1, 'claim' => 'the plan drops the closing-issue link'];
+    $tier2 = ['tier' => 2, 'claim' => 'wording nit in step 4'];
+    $arch  = ['kind' => 'architecture', 'claim' => 'this belongs in it4web/tallui, not the project'];
+
+    // Tier-2s never reach adjudication; 'none' is their disposition and they continue.
+    expect(pipeline_should_escalate($tier2, 'none'))->toBeFalse();
+
+    // Tier-1 goes to adjudication, and only a confirmation stops the run.
+    expect(pipeline_should_escalate($tier1, 'refuted'))->toBeFalse();
+    expect(pipeline_should_escalate($tier1, 'uncertain'))->toBeFalse();
+    expect(pipeline_should_escalate($tier1, 'confirmed'))->toBeTrue();
+
+    // An architecture judgment escalates on the same terms, carrying no tier of its own.
+    expect(pipeline_should_escalate($arch, 'refuted'))->toBeFalse();
+    expect(pipeline_should_escalate($arch, 'uncertain'))->toBeFalse();
+    expect(pipeline_should_escalate($arch, 'confirmed'))->toBeTrue();
+
+    // Total over the triage: a Tier-2 that somehow arrives confirmed is still not blocking,
+    // and a shapeless finding defaults to advisory rather than to an interrupt.
+    expect(pipeline_should_escalate($tier2, 'confirmed'))->toBeFalse();
+    expect(pipeline_should_escalate(['claim' => 'no tier, no kind'], 'confirmed'))->toBeFalse();
+});

@@ -77,3 +77,26 @@ function pipeline_resolve_policy(string $mode): array
         'gates' => ['plan-approval' => $gate, 'pr-review' => $gate],
     ];
 }
+
+/**
+ * Does this finding stop an `auto` run?
+ *
+ * Total over every finding the triage in `../references/engine.md` produces: the findings that
+ * never went to adjudication — every Tier-2 — arrive with $adjudication === 'none'. Only a
+ * *confirmed* blocking finding escalates; `refuted` and `uncertain` both continue, because
+ * ambiguity buys a line in the PR body, not an interrupt. A malformed reviewer block is a
+ * machinery failure handled by the engine's retry-then-halt rule, never routed through here.
+ *
+ * @param  array{tier?: int|string, kind?: string}  $finding  a `findings[]` entry, or the
+ *         synthesised `['kind' => 'architecture', …]` entry for a non-`none` architecture_judgment
+ * @param  string  $adjudication  'none' | 'refuted' | 'confirmed' | 'uncertain'
+ */
+function pipeline_should_escalate(array $finding, string $adjudication): bool
+{
+    if ($adjudication !== 'confirmed') {
+        return false;
+    }
+
+    return ($finding['kind'] ?? null) === 'architecture'
+        || (int) ($finding['tier'] ?? 2) === 1;
+}
