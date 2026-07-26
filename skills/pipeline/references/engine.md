@@ -72,29 +72,134 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 | Leg | Invokes | Interactive form | Autonomous form | Manifest I/O |
 |---|---|---|---|---|
 | **design** *(compound)* | `superpowers:brainstorming` → `superpowers:writing-plans` (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it) | human drives the brainstorm dialogue, which chains into writing-plans; re-invoke `/pipeline` to continue | a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions | writes spec + plan pointers |
-| **review-plan** | `/critique plan` | reviewer scores the plan; you verdict | read-only reviewer subagent | feeds the plan-approval gate **and** the project-vs-package judgment gate |
+| **review-plan** | `/critique plan` | reviewer scores the plan; you verdict | read-only reviewer subagent returning the **verdict block** (below) | feeds the plan-approval gate **and** the project-vs-package judgment |
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth | writes the PR# pointer |
 | **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite after each step**, set closing-issue links, mark ready | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, **attaches annotated proof to the PR** | records `verifyUi`; **non-skippable once triggered** |
-| **review-pr** | `/critique pr` | reviewer scores the whole change; you verdict | read-only reviewer subagent | feeds the PR-review gate |
+| **review-pr** | `/critique pr` | reviewer scores the whole change; you verdict | read-only reviewer subagent returning the **verdict block** (below) | feeds the PR-review gate |
 
-## Failure policy — halt, or demote-and-package
+## The verdict block — a review leg's return contract
+
+`review-plan` and `review-pr` return a structured block. This is a **contract**, not a per-run
+prompt convention: every decision below reads it.
+
+| Field | Value | Where it comes from |
+|---|---|---|
+| `verdict` | `approve` \| `approve-with-nits` \| `rework` | `/critique`'s overall verdict, **mapped**: *ship* → `approve`, *ship with fixes* → `approve-with-nits`, *rework* → `rework` |
+| `findings[]` | each `{tier: 1\|2, claim, evidence, suggested_action}` | `/critique`'s surviving findings — its `location` is `evidence`; `suggested_action` is the fix it names, or `none` |
+| `architecture_judgment` | `none`, or the project-vs-package (or comparable) concern | **not in `/critique`'s default output** — the leg brief must ask for it explicitly |
+
+**The pipeline owns the translation, not `/critique`.** `/critique` reports *ship / ship with
+fixes / rework* and does not emit `architecture_judgment` or a per-finding `suggested_action`
+(`../../critique/SKILL.md`). So the leg brief must **request the two missing fields and state the
+verdict mapping** when it dispatches the reviewer. Skip that and the block comes back in
+`/critique`'s own vocabulary, is judged malformed, and the run halts at the first review — the
+adapter is what stops a mode difference from reading as broken tooling.
+
+**A malformed or missing block is a machinery failure, not a finding.** Retry the reviewer
+**once**; if it is still malformed, **halt**. Fail-closed is retained exactly where it belongs —
+broken tooling — without being spent on findings.
+
+## Gate policy `adjudicate` — reviews are proposals, not verdicts
+
+`pipeline_resolve_policy('auto')` resolves both gates to `adjudicate`; `interactive` keeps `stop`
+and none of this section runs (`gates.md`). Under `adjudicate` the reviews still run, unchanged —
+what changes is who resolves their findings. **The engine continues by default and escalates only
+what an independent check confirms.** The risk position behind that: the pipeline never merges, so
+every output is a PR read before merge and the worst case is a discarded branch, while a needless
+interrupt costs the one thing `auto` exists to protect.
+
+**Triage — the verdict first, then the findings.** These are two different objects and they take
+two different routes; running them together is how a `rework` gets silently dropped.
+
+1. **The overall `verdict`.** Only `rework` needs anything: adjudicate it like a finding, and if
+   the adjudication **confirms** it, take the **loop-back route** in §failure policy — bounded,
+   autonomous, *not* an escalation. **Do not pass a verdict to `pipeline_should_escalate`**: that
+   predicate answers a question about one finding, it has no cycle count, and a confirmed `rework`
+   is not answerable without one. Record the adjudication as the entry's `verdict_adjudication`
+   (`manifest.md`), so overruling a `rework` is as visible as overruling a finding. A `rework`
+   whose adjudication is `refuted` or `uncertain` does not loop back — log it and read the
+   findings on their own merits.
+2. **Each finding**, routed exactly once:
+
+| Finding | Route |
+|---|---|
+| Tier-2 | integrate directly; no adjudication (record `adjudication: none`) |
+| Tier-1, or a non-`none` `architecture_judgment` | adjudicate |
+
+**Adjudicate** — dispatch a **fresh subagent that never saw the design leg**, give it the finding
+plus the code, and ask it to **refute** the claim, citing `file:line`. Independence is the point:
+at `review-plan` the engine would otherwise be adjudicating a critique of a plan it just wrote —
+the self-review bias `/critique` exists as a separate agent to avoid. Synthesise a non-`none`
+`architecture_judgment` into a finding of its own (`{kind: 'architecture', claim: …}`) so it
+travels the same path.
+
+| Adjudication | Disposition |
+|---|---|
+| **refuted** (with cited evidence) | downgrade to advisory, log, continue |
+| **confirmed** | **escalate** — package, then stop (§failure policy) |
+| **uncertain** | continue; carry the finding **verbatim** into the PR body as an open question |
+
+`pipeline_should_escalate($finding, $adjudication)` in `../checks/pipeline.php` is that table made
+mechanical, and is total over every **finding** the triage produces — the overall verdict is not
+one of its inputs (see the precedence rule above). `uncertain` continuing is a deliberate choice of
+the owner's risk position over the reviewer's caution: ambiguity does not buy an interrupt, it buys
+a line in the PR.
+
+**Integrate** — apply actionable Tier-2s and refuted Tier-1s to the spec/plan and commit.
+Non-actionable ones (already-mitigated observations, notes for posterity) are recorded without an
+edit.
+
+**Log** — every finding, its adjudication, the cited evidence and the disposition go to the
+manifest's `gate_ledger` (`manifest.md`) and are projected onto the PR. *Overruling a reviewer is
+fine; overruling one invisibly is what turns a gate into decoration.*
+
+## Failure policy — what still stops
+
+Under `adjudicate` these are the only stops; everything else continues, with a record.
 
 - **Hard failure** (a station errors: tests won't go green, a tool dies, the stack won't start,
-  `work-on` hits a blocker) → **halt.** Write the failure to the manifest; a human resumes.
-  **No silent retry** — a retry hides the failure and the machinery may be in an unknown state.
-- **Blocking review finding** (`/critique` returns a Tier-1, or an overall *rework*) → **re-arm
-  the next gate as a human stop** (a one-line `gate_policy` edit) and continue to a **packaged
-  parcel** (branch pushed, PR open, review posted) so the human reads-and-verdicts.
-  - **Exception — a *rework* verdict on the *plan* loops back to `design`** to revise the plan
-    (or halts); it never builds the implementation on a plan already judged unshippable.
-- **Advisory finding** (Tier-2) → **log to the manifest, continue.**
-- **`verify-ui` failure** is a hard failure of that leg: a **broken UI loops back to `implement`**;
-  Playwright genuinely unavailable **halts** (no visual claim without proof).
+  `work-on` hits a blocker, or a verdict block is still malformed after its one retry) → **halt.**
+  Write the failure to the manifest; a human resumes. **No silent retry** beyond the single
+  documented reviewer retry — a retry hides the failure and the machinery may be in an unknown
+  state.
+- **A confirmed Tier-1 or architecture concern** (`pipeline_should_escalate` → `true`) →
+  **escalate: package, then stop.** A bare halt hands the human a branch and no reason.
+  - Flip **this** gate — not the next — to `stop` in the manifest's `gate_policy` (a one-line,
+    visible edit), so the resume asks the human instead of re-adjudicating the same finding into
+    the same loop. At `review-pr` there *is* no next gate, which is why it is this one.
+  - Package before stopping. At **`review-plan`** that means running **`handoff` only**: branch
+    pushed, **draft** PR opened, review and adjudication posted. **`implement` does not run** — the
+    plan carries a confirmed blocking finding, and building on it is the thing this gate exists to
+    prevent. At **`review-pr`** the parcel already exists: post the adjudication and leave the PR
+    **draft**.
+  - Record `outcome: escalated`.
+- **Bound exhaustion.** A confirmed `rework` on the *plan* loops back to `design` **autonomously**
+  — it never builds an implementation on a plan judged unshippable — and a `verify-ui` failure
+  loops back to `implement`. Each loop is bounded to **2 cycles**; on what would be the third,
+  **escalate** instead (same packaging as above). The bound is what keeps an autonomous loop from
+  churning indefinitely without ever surfacing. Count the cycles as the number of that gate's
+  `gate_ledger` entries whose `outcome` is **`looped-back`** (`manifest.md`) — not its entries in
+  total, which also include escalations and human-ordered re-reviews and would over-count into a
+  spurious interrupt — and never from an in-memory counter.
+  - **A count that cannot be read is not a count of zero.** The ledger lives in the disposable
+    manifest, and no durable probe can rebuild it: git and gh record *that* a review happened, not
+    how many times the engine looped. So a run whose manifest was **reconstructed** (`manifest.md`
+    §reconstruction) carries an **unknown** cycle count, and unknown permits **no** loop-back — the
+    next confirmed `rework` or `verify-ui` failure escalates immediately. Without this, a manifest
+    lost mid-loop silently grants two fresh cycles, and one lost repeatedly grants them forever:
+    the bound would stop bounding at exactly the moment it is load-bearing. A fresh run writes its
+    own manifest at kickoff and is never reconstructed, so it is unaffected.
+- **Advisory finding** (a Tier-2, or a refuted Tier-1) → **log to the manifest, continue.**
+- **Playwright genuinely unavailable** → **halt.** No visual claim without proof.
 
-The scary Tier-1s — migrations, authorization, a shared package — are already covered: those are
-non-skippable content gates (`gates.md`), so the chain has **already stopped** there in both
-modes, and re-arming decides nothing.
+In `interactive` mode both gates are `stop`, so every finding reaches the present human and none
+of this triage runs.
+
+The scary content facts — a migration, an authorization change, a shared package — **no longer
+stop the chain**: they are facts, not findings, so they become loud mandatory annotations on the
+PR and in the ledger (`gates.md` §content triggers). `verify-ui` is untouched by that and stays
+mandatory whenever the `ui` trigger fires.
 
 ## Navigation
 
