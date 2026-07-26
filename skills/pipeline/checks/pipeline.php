@@ -87,6 +87,11 @@ function pipeline_resolve_policy(string $mode): array
  * ambiguity buys a line in the PR body, not an interrupt. A malformed reviewer block is a
  * machinery failure handled by the engine's retry-then-halt rule, never routed through here.
  *
+ * A *finding*, never a verdict. An overall `rework` is a property of the whole review, and a
+ * confirmed one loops back rather than escalating — a decision that needs the cycle count this
+ * function does not take. Passing a verdict here reads as "do not escalate" and silently drops
+ * it; the engine's precedence rule routes it instead.
+ *
  * @param  array{tier?: int|string, kind?: string}  $finding  a `findings[]` entry, or the
  *         synthesised `['kind' => 'architecture', …]` entry for a non-`none` architecture_judgment
  * @param  string  $adjudication  'none' | 'refuted' | 'confirmed' | 'uncertain'

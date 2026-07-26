@@ -83,11 +83,18 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 `review-plan` and `review-pr` return a structured block. This is a **contract**, not a per-run
 prompt convention: every decision below reads it.
 
-| Field | Value |
-|---|---|
-| `verdict` | `approve` \| `approve-with-nits` \| `rework` |
-| `findings[]` | each `{tier: 1\|2, claim, evidence, suggested_action}` |
-| `architecture_judgment` | `none`, or the project-vs-package (or comparable) concern |
+| Field | Value | Where it comes from |
+|---|---|---|
+| `verdict` | `approve` \| `approve-with-nits` \| `rework` | `/critique`'s overall verdict, **mapped**: *ship* → `approve`, *ship with fixes* → `approve-with-nits`, *rework* → `rework` |
+| `findings[]` | each `{tier: 1\|2, claim, evidence, suggested_action}` | `/critique`'s surviving findings — its `location` is `evidence`; `suggested_action` is the fix it names, or `none` |
+| `architecture_judgment` | `none`, or the project-vs-package (or comparable) concern | **not in `/critique`'s default output** — the leg brief must ask for it explicitly |
+
+**The pipeline owns the translation, not `/critique`.** `/critique` reports *ship / ship with
+fixes / rework* and does not emit `architecture_judgment` or a per-finding `suggested_action`
+(`../../critique/SKILL.md`). So the leg brief must **request the two missing fields and state the
+verdict mapping** when it dispatches the reviewer. Skip that and the block comes back in
+`/critique`'s own vocabulary, is judged malformed, and the run halts at the first review — the
+adapter is what stops a mode difference from reading as broken tooling.
 
 **A malformed or missing block is a machinery failure, not a finding.** Retry the reviewer
 **once**; if it is still malformed, **halt**. Fail-closed is retained exactly where it belongs —
@@ -102,12 +109,23 @@ what an independent check confirms.** The risk position behind that: the pipelin
 every output is a PR read before merge and the worst case is a discarded branch, while a needless
 interrupt costs the one thing `auto` exists to protect.
 
-**Triage** — route each finding exactly once:
+**Triage — the verdict first, then the findings.** These are two different objects and they take
+two different routes; running them together is how a `rework` gets silently dropped.
+
+1. **The overall `verdict`.** Only `rework` needs anything: adjudicate it like a finding, and if
+   the adjudication **confirms** it, take the **loop-back route** in §failure policy — bounded,
+   autonomous, *not* an escalation. **Do not pass a verdict to `pipeline_should_escalate`**: that
+   predicate answers a question about one finding, it has no cycle count, and a confirmed `rework`
+   is not answerable without one. Record the adjudication as the entry's `verdict_adjudication`
+   (`manifest.md`), so overruling a `rework` is as visible as overruling a finding. A `rework`
+   whose adjudication is `refuted` or `uncertain` does not loop back — log it and read the
+   findings on their own merits.
+2. **Each finding**, routed exactly once:
 
 | Finding | Route |
 |---|---|
 | Tier-2 | integrate directly; no adjudication (record `adjudication: none`) |
-| Tier-1, an overall `rework`, or a non-`none` `architecture_judgment` | adjudicate |
+| Tier-1, or a non-`none` `architecture_judgment` | adjudicate |
 
 **Adjudicate** — dispatch a **fresh subagent that never saw the design leg**, give it the finding
 plus the code, and ask it to **refute** the claim, citing `file:line`. Independence is the point:
@@ -119,13 +137,14 @@ travels the same path.
 | Adjudication | Disposition |
 |---|---|
 | **refuted** (with cited evidence) | downgrade to advisory, log, continue |
-| **confirmed** | **escalate** — stop with a packaged parcel |
+| **confirmed** | **escalate** — package, then stop (§failure policy) |
 | **uncertain** | continue; carry the finding **verbatim** into the PR body as an open question |
 
 `pipeline_should_escalate($finding, $adjudication)` in `../checks/pipeline.php` is that table made
-mechanical, and is total over every finding the triage produces. `uncertain` continuing is a
-deliberate choice of the owner's risk position over the reviewer's caution: ambiguity does not buy
-an interrupt, it buys a line in the PR.
+mechanical, and is total over every **finding** the triage produces — the overall verdict is not
+one of its inputs (see the precedence rule above). `uncertain` continuing is a deliberate choice of
+the owner's risk position over the reviewer's caution: ambiguity does not buy an interrupt, it buys
+a line in the PR.
 
 **Integrate** — apply actionable Tier-2s and refuted Tier-1s to the spec/plan and commit.
 Non-actionable ones (already-mitigated observations, notes for posterity) are recorded without an
@@ -144,15 +163,25 @@ Under `adjudicate` these are the only stops; everything else continues, with a r
   Write the failure to the manifest; a human resumes. **No silent retry** beyond the single
   documented reviewer retry — a retry hides the failure and the machinery may be in an unknown
   state.
-- **A confirmed Tier-1 or architecture concern** (`pipeline_should_escalate` → `true`) → **re-arm
-  the next gate as a human stop** (a one-line `gate_policy` edit) and continue to a **packaged
-  parcel** (branch pushed, PR open, review posted) so the human reads-and-verdicts.
+- **A confirmed Tier-1 or architecture concern** (`pipeline_should_escalate` → `true`) →
+  **escalate: package, then stop.** A bare halt hands the human a branch and no reason.
+  - Flip **this** gate — not the next — to `stop` in the manifest's `gate_policy` (a one-line,
+    visible edit), so the resume asks the human instead of re-adjudicating the same finding into
+    the same loop. At `review-pr` there *is* no next gate, which is why it is this one.
+  - Package before stopping. At **`review-plan`** that means running **`handoff` only**: branch
+    pushed, **draft** PR opened, review and adjudication posted. **`implement` does not run** — the
+    plan carries a confirmed blocking finding, and building on it is the thing this gate exists to
+    prevent. At **`review-pr`** the parcel already exists: post the adjudication and leave the PR
+    **draft**.
+  - Record `outcome: escalated`.
 - **Bound exhaustion.** A confirmed `rework` on the *plan* loops back to `design` **autonomously**
   — it never builds an implementation on a plan judged unshippable — and a `verify-ui` failure
   loops back to `implement`. Each loop is bounded to **2 cycles**; on what would be the third,
-  **escalate** instead. The bound is what keeps an autonomous loop from churning indefinitely
-  without ever surfacing. Count the cycles from that gate's `gate_ledger` entries
-  (`manifest.md`), never from an in-memory counter.
+  **escalate** instead (same packaging as above). The bound is what keeps an autonomous loop from
+  churning indefinitely without ever surfacing. Count the cycles as the number of that gate's
+  `gate_ledger` entries whose `outcome` is **`looped-back`** (`manifest.md`) — not its entries in
+  total, which also include escalations and human-ordered re-reviews and would over-count into a
+  spurious interrupt — and never from an in-memory counter.
 - **Advisory finding** (a Tier-2, or a refuted Tier-1) → **log to the manifest, continue.**
 - **Playwright genuinely unavailable** → **halt.** No visual claim without proof.
 

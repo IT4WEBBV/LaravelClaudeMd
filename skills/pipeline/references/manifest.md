@@ -50,6 +50,7 @@ projected onto the PR.
   "at": "2026-07-26T11:04:22Z",
   "policy": "adjudicate",
   "verdict": "approve-with-nits",
+  "verdict_adjudication": "none",
   "annotations": ["migration", "auth"],
   "findings": [
     {
@@ -69,10 +70,11 @@ projected onto the PR.
 
 | Key | Values |
 |---|---|
-| `gate` | `plan-approval` \| `pr-review` |
+| `gate` | `plan-approval` \| `pr-review` \| `verify-ui` |
 | `cycle` | 1-based — which pass through this gate produced the entry |
 | `policy` | the value resolved at the time — `stop` \| `adjudicate` \| `report` |
-| `verdict` | the reviewer's own — `approve` \| `approve-with-nits` \| `rework` |
+| `verdict` | the reviewer's own, mapped to the verdict block's vocabulary (`engine.md`) — `approve` \| `approve-with-nits` \| `rework` |
+| `verdict_adjudication` | for a `rework` verdict, what the adjudicator said — `none` (not a rework) \| `refuted` \| `confirmed` \| `uncertain`. A confirmed one drove a loop-back, so this is where overruling a `rework` becomes visible |
 | `annotations` | the content triggers that fired (`package`, `migration`, `auth`) — facts, not findings |
 | `findings[].kind` | `finding`, or `architecture` for a synthesised `architecture_judgment` |
 | `findings[].adjudication` | `none` (never adjudicated — every Tier-2) \| `refuted` \| `confirmed` \| `uncertain` |
@@ -82,11 +84,19 @@ projected onto the PR.
 `disposition: escalated` is exactly the set for which
 `pipeline_should_escalate($finding, $adjudication)` returns `true`.
 
+**A `verify-ui` entry is the thin shape**: `gate`, `cycle`, `at`, `outcome`, and nothing else —
+no `verdict`, no `findings`, because nothing reviews it. It exists for two reasons, and both are
+load-bearing: it carries the `implement`↔`verify-ui` loop bound, and it is how a *completed*
+`verify-ui` reaches `pipeline_can_navigate`'s `$doneLegs` (`gates.md`). Omit it and a triggered
+`verify-ui` can never be recorded as run, so every later forward jump is refused.
+
 **The loop bound is read from here, never from memory.** A confirmed `rework` may loop back twice
-before it must escalate (`engine.md` §failure policy); the engine counts this gate's existing
-entries to know which cycle it is on. That is the one place the ledger is *read* rather than
-appended to, and it does not violate the recomputable-fields rule above: the cycle count is a fact
-about history, not a cached derivation of current state.
+before it must escalate (`engine.md` §failure policy). Count **this gate's entries whose `outcome`
+is `looped-back`** — not its entries in total: a gate's history also holds escalations and
+human-ordered re-reviews, and counting those turns a single real loop-back into the forbidden
+third cycle, escalating for no reason. That count is the one place the ledger is *read* rather
+than appended to, and it does not violate the recomputable-fields rule above: it is a fact about
+history, not a cached derivation of current state.
 
 An entry with `"policy": "stop"` is the `interactive` shape — `annotations` and `verdict` still
 recorded, every `findings[].adjudication` is `none`, and the human's decision is the `outcome`.
