@@ -72,29 +72,97 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 | Leg | Invokes | Interactive form | Autonomous form | Manifest I/O |
 |---|---|---|---|---|
 | **design** *(compound)* | `superpowers:brainstorming` → `superpowers:writing-plans` (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it) | human drives the brainstorm dialogue, which chains into writing-plans; re-invoke `/pipeline` to continue | a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions | writes spec + plan pointers |
-| **review-plan** | `/critique plan` | reviewer scores the plan; you verdict | read-only reviewer subagent | feeds the plan-approval gate **and** the project-vs-package judgment gate |
+| **review-plan** | `/critique plan` | reviewer scores the plan; you verdict | read-only reviewer subagent returning the **verdict block** (below) | feeds the plan-approval gate **and** the project-vs-package judgment |
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth | writes the PR# pointer |
 | **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite after each step**, set closing-issue links, mark ready | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, **attaches annotated proof to the PR** | records `verifyUi`; **non-skippable once triggered** |
-| **review-pr** | `/critique pr` | reviewer scores the whole change; you verdict | read-only reviewer subagent | feeds the PR-review gate |
+| **review-pr** | `/critique pr` | reviewer scores the whole change; you verdict | read-only reviewer subagent returning the **verdict block** (below) | feeds the PR-review gate |
 
-## Failure policy — halt, or demote-and-package
+## The verdict block — a review leg's return contract
+
+`review-plan` and `review-pr` return a structured block. This is a **contract**, not a per-run
+prompt convention: every decision below reads it.
+
+| Field | Value |
+|---|---|
+| `verdict` | `approve` \| `approve-with-nits` \| `rework` |
+| `findings[]` | each `{tier: 1\|2, claim, evidence, suggested_action}` |
+| `architecture_judgment` | `none`, or the project-vs-package (or comparable) concern |
+
+**A malformed or missing block is a machinery failure, not a finding.** Retry the reviewer
+**once**; if it is still malformed, **halt**. Fail-closed is retained exactly where it belongs —
+broken tooling — without being spent on findings.
+
+## Gate policy `adjudicate` — reviews are proposals, not verdicts
+
+`pipeline_resolve_policy('auto')` resolves both gates to `adjudicate`; `interactive` keeps `stop`
+and none of this section runs (`gates.md`). Under `adjudicate` the reviews still run, unchanged —
+what changes is who resolves their findings. **The engine continues by default and escalates only
+what an independent check confirms.** The risk position behind that: the pipeline never merges, so
+every output is a PR read before merge and the worst case is a discarded branch, while a needless
+interrupt costs the one thing `auto` exists to protect.
+
+**Triage** — route each finding exactly once:
+
+| Finding | Route |
+|---|---|
+| Tier-2 | integrate directly; no adjudication (record `adjudication: none`) |
+| Tier-1, an overall `rework`, or a non-`none` `architecture_judgment` | adjudicate |
+
+**Adjudicate** — dispatch a **fresh subagent that never saw the design leg**, give it the finding
+plus the code, and ask it to **refute** the claim, citing `file:line`. Independence is the point:
+at `review-plan` the engine would otherwise be adjudicating a critique of a plan it just wrote —
+the self-review bias `/critique` exists as a separate agent to avoid. Synthesise a non-`none`
+`architecture_judgment` into a finding of its own (`{kind: 'architecture', claim: …}`) so it
+travels the same path.
+
+| Adjudication | Disposition |
+|---|---|
+| **refuted** (with cited evidence) | downgrade to advisory, log, continue |
+| **confirmed** | **escalate** — stop with a packaged parcel |
+| **uncertain** | continue; carry the finding **verbatim** into the PR body as an open question |
+
+`pipeline_should_escalate($finding, $adjudication)` in `../checks/pipeline.php` is that table made
+mechanical, and is total over every finding the triage produces. `uncertain` continuing is a
+deliberate choice of the owner's risk position over the reviewer's caution: ambiguity does not buy
+an interrupt, it buys a line in the PR.
+
+**Integrate** — apply actionable Tier-2s and refuted Tier-1s to the spec/plan and commit.
+Non-actionable ones (already-mitigated observations, notes for posterity) are recorded without an
+edit.
+
+**Log** — every finding, its adjudication, the cited evidence and the disposition go to the
+manifest's `gate_ledger` (`manifest.md`) and are projected onto the PR. *Overruling a reviewer is
+fine; overruling one invisibly is what turns a gate into decoration.*
+
+## Failure policy — what still stops
+
+Under `adjudicate` these are the only stops; everything else continues, with a record.
 
 - **Hard failure** (a station errors: tests won't go green, a tool dies, the stack won't start,
-  `work-on` hits a blocker) → **halt.** Write the failure to the manifest; a human resumes.
-  **No silent retry** — a retry hides the failure and the machinery may be in an unknown state.
-- **Blocking review finding** (`/critique` returns a Tier-1, or an overall *rework*) → **re-arm
+  `work-on` hits a blocker, or a verdict block is still malformed after its one retry) → **halt.**
+  Write the failure to the manifest; a human resumes. **No silent retry** beyond the single
+  documented reviewer retry — a retry hides the failure and the machinery may be in an unknown
+  state.
+- **A confirmed Tier-1 or architecture concern** (`pipeline_should_escalate` → `true`) → **re-arm
   the next gate as a human stop** (a one-line `gate_policy` edit) and continue to a **packaged
   parcel** (branch pushed, PR open, review posted) so the human reads-and-verdicts.
-  - **Exception — a *rework* verdict on the *plan* loops back to `design`** to revise the plan
-    (or halts); it never builds the implementation on a plan already judged unshippable.
-- **Advisory finding** (Tier-2) → **log to the manifest, continue.**
-- **`verify-ui` failure** is a hard failure of that leg: a **broken UI loops back to `implement`**;
-  Playwright genuinely unavailable **halts** (no visual claim without proof).
+- **Bound exhaustion.** A confirmed `rework` on the *plan* loops back to `design` **autonomously**
+  — it never builds an implementation on a plan judged unshippable — and a `verify-ui` failure
+  loops back to `implement`. Each loop is bounded to **2 cycles**; on what would be the third,
+  **escalate** instead. The bound is what keeps an autonomous loop from churning indefinitely
+  without ever surfacing. Count the cycles from that gate's `gate_ledger` entries
+  (`manifest.md`), never from an in-memory counter.
+- **Advisory finding** (a Tier-2, or a refuted Tier-1) → **log to the manifest, continue.**
+- **Playwright genuinely unavailable** → **halt.** No visual claim without proof.
 
-The scary Tier-1s — migrations, authorization, a shared package — are already covered: those are
-non-skippable content gates (`gates.md`), so the chain has **already stopped** there in both
-modes, and re-arming decides nothing.
+In `interactive` mode both gates are `stop`, so every finding reaches the present human and none
+of this triage runs.
+
+The scary content facts — a migration, an authorization change, a shared package — **no longer
+stop the chain**: they are facts, not findings, so they become loud mandatory annotations on the
+PR and in the ledger (`gates.md` §content triggers). `verify-ui` is untouched by that and stays
+mandatory whenever the `ui` trigger fires.
 
 ## Navigation
 
