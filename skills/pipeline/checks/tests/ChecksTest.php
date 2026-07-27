@@ -97,3 +97,30 @@ it('ignores comment lines and strips trailing comments from commands', function 
     expect($result['state'])->toBe('valid');
     expect($result['commands'])->toBe(['static-analysis' => 'docker exec app_web ./vendor/bin/phpstan analyse']);
 });
+
+it('expands the slot token to nothing on the primary stack', function () {
+    $command = 'docker exec deploy<N>_web ./vendor/bin/phpstan analyse';
+
+    expect(pipeline_expand_slot($command, ''))
+        ->toBe('docker exec deploy_web ./vendor/bin/phpstan analyse');
+});
+
+it('expands the slot token to the suffix in a slot', function () {
+    $command = 'docker exec deploy<N>_web ./vendor/bin/phpstan analyse';
+
+    expect(pipeline_expand_slot($command, '-2'))
+        ->toBe('docker exec deploy-2_web ./vendor/bin/phpstan analyse');
+});
+
+it('leaves a command without the token untouched', function () {
+    $command = 'docker exec deploy_web ./vendor/bin/pint';
+
+    expect(pipeline_expand_slot($command, '-3'))->toBe($command);
+});
+
+it('expands every occurrence of the token', function () {
+    $command = 'docker exec app<N>_web sh -c "cat /srv/app<N>.conf"';
+
+    expect(pipeline_expand_slot($command, '-2'))
+        ->toBe('docker exec app-2_web sh -c "cat /srv/app-2.conf"');
+});

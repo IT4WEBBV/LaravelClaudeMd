@@ -74,3 +74,19 @@ function pipeline_repo_checks(string $configMarkdown): array
 
     return ['state' => 'valid', 'commands' => $commands, 'error' => null];
 }
+
+/**
+ * Expand the `<N>` slot token in a declared check command.
+ *
+ * `<N>` is the run's slot *suffix*, not its number: an empty string on the primary
+ * stack, `-2` / `-3` … in a slot. That is how the slot machinery names containers
+ * (`scripts/slot-env.sh`: `SUFFIX="-${SLOT}"`), and it mirrors the `<N>` convention
+ * `work-on.config.template.md` already uses for `slot-path` and `dev-url`.
+ *
+ * Without this, a hardcoded container name execs the primary stack, analyses the
+ * primary checkout instead of the run's worktree, finds nothing, and passes green.
+ */
+function pipeline_expand_slot(string $command, string $slotSuffix): string
+{
+    return str_replace('<N>', $slotSuffix, $command);
+}
