@@ -62,6 +62,31 @@ relations without `: MorphMany` / `: BelongsTo`. There are 117 such untyped meth
 5. `nullsafe.neverNull` ×3 — the CLAUDE.md rule *"avoid `?->` unless there is a good reason"* is
    currently enforced only by whoever happens to be reviewing. PHPStan makes it mechanical.
 
+### Cross-check against issue #384
+
+**Four of those five also appear in Deploy's issue #384**, the 2026-06-11 architecture audit: the
+`ServiceTypeEnum` `CUSTOM` arm (Finding 16), `RouterMiddleware` and the ghost `EventServiceProvider`
+listeners (Finding 5), the undeclared-property reads (Finding 3), and the never-assigned `$password`
+in `UserForm` (Finding 17).
+
+**That overlap does not weaken the case; it is coincidental in the way that matters.** #384 was a
+one-off, deliberately commissioned full-sweep audit — not a step in the routine chain. The routine
+chain, the test suite plus `/critique` reading a diff, caught **none** of these. An LLM sweeping 233
+files surfaces what it happens to notice on that pass, and is not reproducible at the same coverage;
+#384 consolidated **18 findings**, where PHPStan reports **~141 real signals** at level 5. The great
+majority of what the analyser sees appears nowhere in the audit.
+
+So the insight gap is real. What #384 establishes is that defects of this shape are **worth
+catching** — an independent reader judged them file-worthy — and that when they are caught by a
+periodic audit they sit **open for weeks**, because an advisory finding has no enforcement behind
+it. PHPStan reports the same class on **every run in ~11 seconds** and fails the check when a new
+one is introduced.
+
+The overlap validates the boundary this spec draws from the other direction, too: #384 additionally
+found committed production secrets, feature envy, blocking work on queue workers, and hardcoded
+tenant strings. **PHPStan can never see any of those.** The two instruments are complements, and
+neither substitutes for the other.
+
 Pint, separately: `233 files, 191 style issues`. Essentially the whole codebase is unformatted.
 
 ## The problem
@@ -115,11 +140,10 @@ static-analysis command and the binary is missing or the command errors, `implem
 existing hard-failure policy. Silently skipping would leave the run believing it has coverage it
 does not have — the one outcome worse than no tooling.
 
-### 2. Per-repo invocation, declared where invocations already live
+### 2. Per-repo declaration, and two distinct adoption profiles
 
-The command differs per repo (`docker exec deploy_web ./vendor/bin/phpstan …` vs
-`docker compose run --rm test vendor/bin/phpstan …`). `.claude/work-on.config.md` already carries
-exactly this kind of thing (`restart: make test`), so the declaration goes there:
+The invocation genuinely differs per repo, and `.claude/work-on.config.md` already carries exactly
+this kind of thing (`restart: make test`), so the declaration goes there:
 
 ```markdown
 ## Checks
@@ -129,7 +153,32 @@ exactly this kind of thing (`restart: make test`), so the declaration goes there
 
 Both keys are optional and independent. `static-analysis` is invoked with a file list appended for
 the per-step run, and with no arguments for the whole-app backstop; `format` is invoked with
-`--dirty`.
+`--dirty`. Checks always run **in an already-running container** — spinning one up per check is not
+a cost this design tries to optimise around.
+
+**Projects and packages are different adoption profiles, not one policy with two command strings:**
+
+| | Projects | it4web packages |
+|---|---|---|
+| Examples | Deploy, Retenium, viewiemedia | tallformbuilder, tallui, talldatatable, deployclient |
+| Container | long-running `{project}_web` → `docker exec` | no long-running service in the package compose today; either mount into a project stack (`restart.sh -p`) or add one |
+| Laravel app | a real app — Larastan boots natively (**proven** on Deploy) | no app; testbench supplies one — Larastan bootstrapping is **unverified** |
+| Analysed paths | `app` | `src` |
+| Level | 5 | 5 as a floor, higher permitted |
+| Baseline | required, and large (299 on Deploy) | target **zero** — small enough to fix outright rather than suppress |
+| Pint blanket commit | required (191 of 233 files) | required, but cheap |
+| CI enforcement | no lint CI today; out of scope here | `run-tests.yml` already exists, so enforcement there is nearly free |
+| Blast radius of a defect | one application | **every consuming project** |
+
+The last row drives the split. A package defect propagates to every project that installs it, so
+packages get the **stricter** target — a zero baseline, and permission to run above level 5 —
+despite being the smaller codebases. Size alone would suggest the opposite; blast radius outranks
+it.
+
+The unverified cell is load-bearing: **Larastan in a testbench-only package is not yet proven.** If
+it cannot bootstrap, packages fall back to plain `phpstan/phpstan` without Laravel awareness, which
+is a materially weaker tool. That must be established before the package profile is committed to
+(see *Rollout*).
 
 ### 3. `implement` gains mechanical checks
 
@@ -209,6 +258,23 @@ suppression can never enter the codebase without a reviewer being pointed at it.
 `pipeline_legs()`, `pipeline_gate_legs()`, `pipeline_can_navigate()`, `pipeline_resolve_policy()`
 and `pipeline_triggers()` are **not touched**.
 
+**Per-repo adoption artifacts.** The skill changes above are inert until a repo adopts. Each
+adopting repo separately needs:
+
+| Artifact | Projects | Packages |
+|---|---|---|
+| Dev deps | `composer require --dev larastan/larastan laravel/pint` (larastan pulls phpstan transitively) | same, pending the Larastan-in-testbench verification |
+| `phpstan.neon` | `paths: [app]`, level 5, larastan extension + baseline include, writable `tmpDir` | `paths: [src]` |
+| `phpstan-baseline.neon` | required | target: none |
+| `pint.json` | explicit `laravel` preset | same |
+| `.git-blame-ignore-revs` | after the blanket format commit | same |
+| `## Checks` block | in `.claude/work-on.config.md` | same |
+
+The `tmpDir` note is not incidental: the spike failed on Deploy until it was pointed away from
+`storage/framework/`, which the container user could not write.
+
+Adoption is tracked per repo in that repo's own issues — Deploy is `IT4WEBBV/Deploy#389`.
+
 ### 10. What does not change
 
 The leg list, the two gates, the `ui` trigger, the adjudication model, the escalation rules, the
@@ -226,6 +292,8 @@ loop-back bounds, and the reconstruction story. This spec adds a step inside one
 | Declared-but-broken = hard failure | Believing you are covered when you are not is worse than not being covered | Silent skip |
 | Pint fixes, never gates | Gating on something the tool can auto-fix is ceremony | `pint --test` as a blocking check |
 | Blanket format per repo, backlog-timed | One-time noise in an isolated, blame-ignored commit beats permanent per-file noise | `--dirty` only; or a synchronised flag day across all repos |
+| Packages and projects are separate profiles | A package defect reaches every consuming project, so blast radius outranks codebase size: packages target a zero baseline and may exceed level 5 | One policy applied uniformly, differing only in the command string |
+| Checks run in an already-running container | The stack is up during `implement` regardless; optimising around container startup is not a real constraint | Designing the loop around ephemeral `docker compose run` overhead |
 | No campaign skill yet | The campaign is "PRs that shrink the baseline or bump the level", and `/pipeline` already runs work through | Build a `static-analysis-campaign` skill up front |
 
 ## Testing strategy
@@ -235,8 +303,9 @@ loop-back bounds, and the reconstruction story. This spec adds a step inside one
   malformed line; commented-out line; a key whose value is empty (must not silently read as
   "configured"). The silent-parse-failure case is the one that matters — it is the failure mode
   that would disable the check while the run believes it is covered.
-- **End-to-end validation by adoption**: TallFormbuilder is the first adopter, and a real
-  `/pipeline` run on it is the acceptance test for the engine wiring.
+- **End-to-end validation by adoption**: Deploy is the first adopter, and a real `/pipeline` run
+  against it is the acceptance test for the engine wiring — chosen because the toolchain is already
+  proven there, so a failure implicates the skill rather than the environment.
 - The existing pipeline check suite must stay green, proving the untouched pure functions were
   in fact untouched.
 
@@ -272,9 +341,23 @@ loop-back bounds, and the reconstruction story. This spec adds a step inside one
 
 ## Rollout
 
-1. **TallFormbuilder** — small, active, has CI and a Makefile, near-zero baseline. First adopter and
-   the end-to-end acceptance test.
+**Projects track**
+
+1. **Deploy** (`IT4WEBBV/Deploy#389`) — first adopter and the end-to-end acceptance test, because
+   the toolchain is already proven there. Its issue sequences the work so the defects #384 tracks
+   and the 117 untyped relation methods are fixed *before* the baseline is generated — otherwise
+   the baseline would freeze known-open bugs out of view.
 2. **LaravelTemplate** — so every new project is born with the tooling.
-3. **Existing projects, one at a time**, baseline-first, each taking its Pint blanket commit when
+3. **Remaining projects, one at a time**, baseline-first, each taking its Pint blanket commit when
    its own branch backlog is low. Measure PHPStan runtime on the largest (Retenium) before
    committing to it.
+
+**Packages track — research first, and it runs independently**
+
+4. **Establish whether Larastan bootstraps in a testbench-only package** before any package adopts.
+   This is an open research question, not an implementation step, and it gates the whole package
+   profile: if the answer is no, packages get plain `phpstan/phpstan` and a materially weaker
+   guarantee. Tracked in `IT4WEBBV/TallFormbuilder`.
+5. **TallFormbuilder** as the first package adopter once that resolves, then the remaining three.
+
+The two tracks share the skill-side machinery and nothing else. Neither blocks the other.
