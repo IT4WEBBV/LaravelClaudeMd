@@ -74,9 +74,68 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 | **design** *(compound)* | `superpowers:brainstorming` → `superpowers:writing-plans` (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it) | human drives the brainstorm dialogue, which chains into writing-plans; re-invoke `/pipeline` to continue | a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions | writes spec + plan pointers |
 | **review-plan** | `/critique plan` | reviewer scores the plan; you verdict | read-only reviewer subagent returning the **verdict block** (below) | feeds the plan-approval gate **and** the project-vs-package judgment |
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth | writes the PR# pointer |
-| **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite after each step**, set closing-issue links, mark ready | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
+| **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links, mark ready | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, **attaches annotated proof to the PR** | records `verifyUi`; **non-skippable once triggered** |
 | **review-pr** | `/critique pr` | reviewer scores the whole change; you verdict | read-only reviewer subagent returning the **verdict block** (below) | feeds the PR-review gate |
+
+## Mechanical checks — the deterministic layer inside `implement`
+
+Opt-in per repo. A repo declares its checks in a **committed** `## Checks` block in
+`.claude/work-on.config.md`; `pipeline_repo_checks()` (`../checks/checks.php`) parses it and returns
+one of three states. The block must be committed because the run's worktree is built from git — a
+config written only in the primary checkout is invisible to every run, and deleting the block is a
+de-adoption that `review-pr` should see.
+
+| State | Meaning | Behaviour |
+|---|---|---|
+| `absent` | no `## Checks` section, and no check-shaped keys anywhere | not adopted — `implement` behaves exactly as it did before, with no mention of checks |
+| `valid` | section present, every declared key parses to a non-empty command | run the checks |
+| `invalid` | malformed: heading typo, unknown or mis-cased key, empty value, empty section | **machinery failure — halt.** `error` carries the reason |
+
+`absent` and `invalid` are deliberately different states. Collapsing them would let a typo'd heading
+disable the checks permanently while the run believed it was covered.
+
+**Invocation.** Each command is passed through `pipeline_expand_slot($command, $slotSuffix)` before
+running. `<N>` is the run's slot **suffix** — empty on the primary stack, `-2` / `-3` … in a slot —
+taken from the slot already resolved for the worktree at kickoff. A hardcoded container name execs
+the *primary* stack and analyses the *primary* checkout, reporting no findings and passing green on
+code the run never touched.
+
+**What runs, and when.** After each step: the test suite, then `static-analysis` over the whole
+declared scope, then `format` over the whole tree. **No file lists and no diff-scoping** — measured
+on Deploy, scoping to two files costs 4.7s against 11.1s for all of `app/` because the analyser's
+bootstrap is a fixed ~4.5s floor, and paying that 6.4s removes host→container path mapping,
+touched-file tracking, and any need for a pre-ready backstop.
+
+The formatter runs over the whole tree because `--dirty` needs a git repository inside the analysed
+tree, which the container does not have. That only behaves well once the repo has taken its one-off
+blanket format commit, so **that commit is a prerequisite for declaring `format`**.
+
+**Two failure kinds, and only one of them is this file's "hard failure":**
+
+| Kind | Trigger | Response |
+|---|---|---|
+| **Check failure** | the checks report a finding **in a file this change touched** | the **step is not done**. Fix and re-run, bounded to 2 attempts; escalate on the third. Exactly how a failing test behaves — *not* a halt |
+| **Machinery failure** | probe returns `invalid`, the container is missing, the command errors, the tool is not installed | **halt**, per §Failure policy |
+
+A reported finding in a file the change did **not** touch is an annotation on the PR, not a blocker:
+other write paths (plain `work-on`, direct commits, a colleague's merge) reach the same repo without
+running checks, and hard-failing a run for someone else's finding leaves it no legal move.
+
+**Suppression is bounded.** Where a finding genuinely cannot be resolved, `implement` may add
+`@phpstan-ignore <identifier>` — never the bare form, which suppresses every error on the next line
+including future real ones — with a justification comment. **More than two suppressions in one run
+escalates**, because the agent whose step is blocked is otherwise judging its own excuse.
+
+**The result is recomputed at leg start, never stored.** Both the check result (a re-runnable
+command) and the suppression count (grep-able from the diff) are recomputable, and `manifest.md` is
+explicit that storing a recomputable field is a latent drift bug. Nothing about checks enters the
+manifest.
+
+**Into `review-pr`.** The brief states the result **qualified by the analysed scope** — "0 new
+findings over `app/`", never an unqualified "0 new findings", since the declared scope does not cover
+`database/`, `routes/`, `config/` or `tests/`. Any suppressions added during the run are listed and
+marked **unadjudicated**, so one cannot enter reading as already resolved.
 
 ## The verdict block — a review leg's return contract
 
