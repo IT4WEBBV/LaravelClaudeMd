@@ -20,6 +20,9 @@ driving a run — the enforcement lives there, not in this summary:
   briefs, failure policy, navigation. **Read this first.**
 - **`references/gates.md`** — modes, content triggers, and the forward-navigation guardrail.
 - **`references/manifest.md`** — the disposable-cursor state file and its reconstruction.
+- **Mechanical checks** — `implement` also runs a repo's PHPStan/Pint checks after each step when
+  the repo declares them in a committed `## Checks` block (`references/engine.md`
+  §Mechanical checks). Opt-in: repos that have not declared them are unaffected.
 
 The deterministic guardrails are tested PHP in `checks/` (run
 `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`).
