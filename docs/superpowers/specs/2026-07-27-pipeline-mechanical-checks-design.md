@@ -357,7 +357,7 @@ loop-back bounds, and the reconstruction story. This spec adds a step inside one
 4. **Establish whether Larastan bootstraps in a testbench-only package** before any package adopts.
    This is an open research question, not an implementation step, and it gates the whole package
    profile: if the answer is no, packages get plain `phpstan/phpstan` and a materially weaker
-   guarantee. Tracked in `IT4WEBBV/TallFormbuilder`.
+   guarantee. Tracked in `IT4WEBBV/TallFormbuilder#39`.
 5. **TallFormbuilder** as the first package adopter once that resolves, then the remaining three.
 
 The two tracks share the skill-side machinery and nothing else. Neither blocks the other.
