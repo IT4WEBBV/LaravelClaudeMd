@@ -80,12 +80,11 @@ and the heuristic candidates from stage 0. It writes the review.
 
 **No output contract.** There is no table, no severity tier, no score, no required section, no cap
 on how much or how little it says. If the useful thing is one paragraph about a single flaw, that
-is the review. Two pieces of guidance, not format:
+is the review. **What is worth reporting, and how much of it, is the reviewer's call** — this skill
+does not second-guess it.
 
-- Cite `file:line` when pointing at something specific.
-- When claiming something is a problem, say what breaks and when — inputs or circumstances leading
-  to a bad outcome. If that cannot be said, it is taste; voice it as taste rather than dressing it
-  as a defect.
+One courtesy, not a format: cite `file:line` when pointing at something specific, so a claim can be
+checked without a search.
 
 End with a plain bottom line: ready, ready with fixes, or needs rework, and why in a sentence.
 
@@ -175,29 +174,17 @@ Hazard classes over the whole change plus the stage-0 candidates. Production sta
 from a diff
 ```
 
-- [ ] **Step 11: Delete the Tiers and Verdicts sections**
+- [ ] **Step 11: Delete the Tiers and Verdicts sections, with no replacement**
 
-Delete `## Tiers` (heading through the "whatever it looks like" paragraph) and `## Verdicts (\`pr\` mode only)` (heading through "trained into the reader as ignorable"). In their place, put a single section:
+Delete `## Tiers` in full — heading, the three tier bullets, the "Tier 2 / Tier 3 boundary" paragraph, **and** the `Every finding — any tier, any mode — must name a concrete **failure scenario**…` paragraph that closes it. Delete `## Verdicts (\`pr\` mode only)` in full — heading through "trained into the reader as ignorable".
 
-```markdown
-## What is worth reporting
+**Nothing replaces them.** Do not add a "what is worth reporting" section, a severity standard, or any general rule about which findings deserve to be raised. The rubric says what to look *for*; deciding what is worth saying is the reviewer's job (spec §Decisions 12). Resist the urge to leave "just a sentence" — that sentence is the drop filter growing back.
 
-A finding is worth reporting when you can say what breaks and under what circumstances — inputs or
-state leading to a wrong output, a crash, corrupted data, a contract someone else depends on.
+The file goes straight from its intro to `## Mode: \`pr\``.
 
-If you cannot say what breaks, it is taste. That is still worth voicing when it matters; say so
-plainly rather than dressing it as a defect. What is not acceptable is a claim shaped like a defect
-with no consequence behind it.
-```
+- [ ] **Step 12: Delete the principles-layer closer**
 
-- [ ] **Step 12: Reword the principles-layer closer**
-
-At the end of `## Principles (pointer, not a copy)`, replace `Findings in the principles layer must still name a concrete failure scenario — that is what stops taste from becoming a Tier 3 preference.` with:
-
-```markdown
-The principles layer is where taste is most likely to masquerade as a defect, so it is where the
-§What is worth reporting standard matters most: say what breaks, or say it is taste.
-```
+At the end of `## Principles (pointer, not a copy)`, delete the sentence `Findings in the principles layer must still name a concrete failure scenario — that is what stops taste from becoming a Tier 3 preference.` entirely. The section ends on the five recurring house rules. Same reasoning as Step 11 — no replacement sentence.
 
 - [ ] **Step 13: Trim the category-slug section**
 
@@ -250,8 +237,9 @@ CONFIRMED/PLAUSIBLE labels and the consumer-side drop policy. Stage 2
 now hands over the target and the rubric and asks for a review; Stage 3
 relays it unchanged.
 
-The evidence standard survives as a standard rather than a filter: say
-what breaks, or say it is taste."
+Nothing replaces the taxonomy: what is worth reporting is the reviewer's
+call. The two mode-specific evidence standards stay, because they make
+the mode's answer true rather than its reporting tidy."
 ```
 
 ---
@@ -753,7 +741,7 @@ gh pr create --draft \
 
 **What changed**
 
-- `/critique` receives the target and the rubric and writes prose. The tier taxonomy, the CONFIRMED/PLAUSIBLE labels, the finding table, the 15-row cap and the consumer-side drop policy are gone. The evidence standard survives as a standard rather than a filter: say what breaks, or say it is taste.
+- `/critique` receives the target and the rubric and writes prose. The tier taxonomy, the CONFIRMED/PLAUSIBLE labels, the finding table, the 15-row cap and the consumer-side drop policy are gone, with nothing replacing them — what is worth reporting is the reviewer's call. The two mode-specific evidence standards stay (`missing` cites ≥2 real paths, `alternatives` states when it wins), because those make the mode's answer true rather than its reporting tidy.
 - The pipeline stops asking for a verdict block. In `auto` it reads the review and acts; in `interactive` the human reads it. Nothing escalates on a finding — the only autonomous response to a bad review is a bounded loop-back.
 - Bound exhaustion halts in-session and is gate-specific: no PR before `handoff`, leave the PR draft after it. The mechanical-checks layer's two remaining `escalate` rules are remapped onto that halt.
 - `pipeline_should_escalate()` and `pipeline_resolve_policy()` are deleted. `gates.md` absorbs the not-`auto`-is-`interactive` fallback the latter used to assert mechanically.

@@ -73,8 +73,9 @@ Stage 2's reviewer instruction drops "return every candidate scored" and becomes
 target, here is the rubric, review it.
 
 - **Stage 3 (filter and shape) — deleted.** The reviewer decides what is worth saying.
-- **Stage 4 (report)** becomes guidance, not contract: cite `file:line` where there is one, say what
-  breaks and when, end with a plain bottom line. In its own words.
+- **Stage 4 (report)** becomes guidance, not contract: cite `file:line` where there is one, and end
+  with a plain bottom line. In its own words. **What is worth reporting is the reviewer's call**
+  (§Decisions 12).
 - **Stage 5 (triage)** shrinks to one sentence plus the `superpowers:receiving-code-review` pointer;
   the four-way disposition vocabulary goes.
 - **Stage 6 (rubric feedback)** reframes off the drop tally, which no longer exists, onto "the same
@@ -208,7 +209,7 @@ lands wherever the prose happens to leave it, and the safe default is lost with 
 | File | Change |
 |---|---|
 | `critique/SKILL.md` | stages 2–6, `--verify`; the "what this skill is for" paragraph gains an explicit *does not shape the review's prose* |
-| `critique/references/rubrics.md` | delete **Tiers** and **Verdicts** sections; drop the per-class verdict requirement at **`:10-11`** and **`:41-42`** (*not* in §Verdicts — that section is CONFIRMED/PLAUSIBLE) while keeping the hazard classes as coverage; reframe the failure-scenario rule from filter to standard (*if you cannot say what breaks, it is taste — say so plainly rather than dressing it as a defect*); trim the reviewer-slug line. **Keep** both evidence standards: `missing` needs ≥2 cited real paths, `alternatives` needs the condition-under-which-it-wins |
+| `critique/references/rubrics.md` | delete **Tiers** and **Verdicts** outright, **with no replacement standard** (§Decisions 12); delete the failure-scenario sentence in §Principles rather than rewording it; drop the per-class verdict requirement at **`:10-11`** and **`:41-42`** (*not* in §Verdicts — that section is CONFIRMED/PLAUSIBLE) while keeping the hazard classes as coverage; trim the reviewer-slug line. **Keep** both mode-specific evidence standards — `missing` needs ≥2 cited real paths, `alternatives` needs the condition-under-which-it-wins — which are not exceptions to §Decisions 12: they guard against a documented failure of their own question (invented cross-repo patterns; an alternative that never says when it wins), not against a reporting style |
 | `pipeline/references/engine.md` | delete §The verdict block; rewrite §Gate policy `adjudicate` and §Failure policy (restoring the loop-back destinations per §3); **and §Mechanical checks** — its two `escalate` rules (`:139`, `:149`) remap onto the bound-exhaustion halt per §5; update the `review-plan` / `review-pr` station rows |
 | `pipeline/references/gates.md` | more than the modes table: the §Modes framing (`:3-4`), the `auto` row (`:20`), "both gates always resolve to the same value" (`:22-23`), the **report-only override** (`:25-31`, see §Decisions 8), the project-vs-package row (`:44`), and the Phase-A function list (`:107`). Absorbs mode semantics from the deleted `pipeline_resolve_policy`, including the not-`auto`-is-`interactive` default (§7) |
 | `pipeline/references/manifest.md` | `gate_ledger` shape per §6; drop `gate_policy`; **amend the "Pointers, never content" rule** (`:31-32`) with the named `review` exception rather than leaving the file self-contradictory |
@@ -251,6 +252,14 @@ mechanism gaps now closed in §3, §5, §6 and §7.*
 11. **Keep `gate`, `cycle`, `at` on ledger entries?** → *Yes.* `cycle` is load-bearing (it carries
     `"unknown"` after reconstruction, without which the loop-back bound stops bounding); `at` is the
     audit trail's only ordering. Dropping them was an oversight, not a simplification.
+12. **Does the rubric keep a general standard for what is worth reporting?** → *No* (owner's
+    decision, reversing this spec's first draft, which replaced the tier taxonomy with a
+    "say what breaks, or call it taste" rule). The line is: **the rubric says what to look for; it
+    does not say what to say.** That rule was the drop filter in another hat — a general reviewing
+    principle any competent reviewer already holds, and the owner's pre-skill experience of plain
+    "have Fable review X" is the evidence it is not needed. The two surviving evidence standards
+    are not exceptions to this: they make the mode's *answer true* rather than its *reporting
+    tidy*.
 
 ## Testing strategy
 
