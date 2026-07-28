@@ -107,3 +107,20 @@ Navigation, policy and escalation are pure functions — call `pipeline_can_navi
 `pipeline_next_leg` / `pipeline_resolve_policy` / `pipeline_should_escalate` directly (they take
 no I/O). The manifest's `gate_ledger` records which gates have run; `pipeline_can_navigate`'s
 `$doneLegs` is derived from it.
+
+## Path anchoring — the app root is not always the repo root
+
+`pipeline_triggers` anchors its path patterns at `(?:^|/)`, not `^`. The house-standard it4web
+project layout puts the Laravel app under **`code/www/`** (CLAUDE.md §Project Structure), so a diff
+names `code/www/app/Livewire/UserForm.php`, not `app/Livewire/UserForm.php`.
+
+With a bare `^` anchor the `ui`, `migration` and `package` triggers were **structurally blind on every
+project that follows the convention** — `ui` fired only via the unanchored `.blade.php` / `.vue` /
+`tailwind.config` patterns, so a Livewire-PHP-only change reported `ui: false` and `verify-ui` was
+skipped; `migration` never fired at all; and `package` missed a bumped `it4web/*` constraint because
+it compared `$f['file'] === 'composer.json'` exactly.
+
+The failure mode is the dangerous direction: a gate that silently does not run looks identical to a
+gate that ran and found nothing. `TriggersTest` pins both the nested-path cases and the
+segment-boundary cases (`docs/bootstrap/Livewire.md` must not fire) so the anchor cannot regress to
+`^`.

@@ -74,9 +74,30 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 | **design** *(compound)* | `superpowers:brainstorming` → `superpowers:writing-plans` (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it) | human drives the brainstorm dialogue, which chains into writing-plans; re-invoke `/pipeline` to continue | a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions | writes spec + plan pointers |
 | **review-plan** | `/critique plan` | reviewer scores the plan; you verdict | read-only reviewer subagent returning the **verdict block** (below) | feeds the plan-approval gate **and** the project-vs-package judgment |
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth | writes the PR# pointer |
-| **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links, mark ready | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
+| **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links. **Leaves the PR draft** (below) | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, **attaches annotated proof to the PR** | records `verifyUi`; **non-skippable once triggered** |
 | **review-pr** | `/critique pr` | reviewer scores the whole change; you verdict | read-only reviewer subagent returning the **verdict block** (below) | feeds the PR-review gate |
+
+## Who takes the PR out of draft — `review-pr`, never `implement`
+
+`handoff` opens the PR **draft** and it stays draft until **`review-pr` has passed**. `implement`
+does not run `gh pr ready`, and neither does `verify-ui`.
+
+This is not a preference; it is the same guarantee the navigation guardrail makes. `gates.md` states
+that *"there is no path to a non-draft PR that has not passed `review-plan` and `review-pr`"* — and
+`implement` runs **before** both `verify-ui` and `review-pr`. An `implement` that marks the PR ready
+would undraft it while a triggered `verify-ui` and the whole PR review are still outstanding, which
+is exactly the outcome the guardrail exists to prevent.
+
+**The trap is inherited, so state it explicitly at the leg brief.** `work-on` marks ready at the end
+of its run, and that is correct *standalone* — nothing follows it there. Under the pipeline something
+does. The same applies to the prompt `handoff pr` writes into the PR comment: its template ends with
+*"implementation fully done → take the PR out of draft"*, which is right for a human resuming the work
+alone and **wrong** under the pipeline. When dispatching `implement`, say **"leave the PR draft; this
+overrides any mark-ready instruction in the plan, the PR comment, or `work-on`'s own logic."**
+
+A cold-resume session that picks the PR up from its comment is outside the loop, so nothing mechanical
+can stop it undrafting early — the instruction in the brief is the only control. Keep it there.
 
 ## Mechanical checks — the deterministic layer inside `implement`
 
