@@ -19,9 +19,8 @@ ordered **most severe first** (attention decays down a prompt):
 ## Mode: `pr`
 
 Hazard classes over the whole change plus the stage-0 candidates. Production state is
-not knowable from a diff, so hazards are
-reported as **conditional** — "if operation X has not run in production, this drops a
-column it reads" — never as certainties.
+not knowable from a diff, so hazards are reported as **conditional** — "if operation X
+has not run in production, this drops a column it reads" — never as certainties.
 
 ### Compatibility hazard classes
 

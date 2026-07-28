@@ -135,8 +135,8 @@ restating it. Nothing is filed or posted unless chosen.
 ### Stage 5 — feed the rubric, on a pattern
 
 **No state between runs.** When the same issue keeps recurring across reviews — within
-a session, or against a pasted prior report — surface the
-pattern and **propose a deliberate amendment** to `references/rubrics.md`. Amendments
+a session, or against a pasted prior report — surface the pattern and **propose a
+deliberate amendment** to `references/rubrics.md`. Amendments
 are hand-authored edits requiring approval, never automatic — a reviewer that silently
 learns to suppress is a reviewer that quietly stops working. Nothing is written to the
 rubric behind your back.
