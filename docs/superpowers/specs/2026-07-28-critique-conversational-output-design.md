@@ -101,9 +101,16 @@ project-vs-package call made explicitly?"* — it just arrives as a paragraph ra
 Run `/critique`, read the review, then:
 
 - **Act.** Fix what is worth fixing and commit it; record what is not worth fixing without an edit.
-- **Loop back** when the plan or change is fundamentally wrong — bounded to **2 cycles** per gate,
-  counted from `outcome: looped-back` entries in the ledger, never an in-memory counter. A
-  reconstructed manifest carries an unknown count and permits **no** loop-back.
+- **Loop back** when the review says the work is fundamentally wrong — bounded to **2 cycles** per
+  gate, counted from `outcome: looped-back` entries in the ledger, never an in-memory counter. A
+  reconstructed manifest carries an unknown count and permits **no** loop-back, recorded as
+  `"cycle": "unknown"` on the entry (§6) — the rule needs a durable marker, because "the engine
+  remembers it reconstructed" is exactly the in-memory state this counting rule forbids.
+
+  **Loop-back destinations**, restated here because §8 rewrites the section that currently holds
+  them: `review-plan` → `design`; `verify-ui` → `implement`; `review-pr` → `implement`. A
+  `verify-ui` failure is a failed browser check rather than a review, and loops back on the same
+  bound.
 - **Never interrupt on a finding.** Unresolved concerns go loud into the PR body. The only stops
   are in §5, and neither is finding-driven.
 - **Log** the review, the actions and the outcome to `gate_ledger`, projected onto the PR.
@@ -114,8 +121,10 @@ Run `/critique`, read the review, then:
 doubt a finding and acting on it is expensive, get an independent read from a fresh subagent"*
 remains available judgment. It is no longer a mandatory routing step with a three-value outcome.
 
-The old "a confirmed Tier-1 at `review-plan` blocks `implement`" protection survives in better
-form: the engine loops back to `design` autonomously instead of stopping to ask.
+The old "a confirmed Tier-1 at `review-plan` blocks `implement`" protection has a successor, but a
+weaker one, and the difference is the point: the old block was **mechanical** — it fired on a
+confirmed Tier-1 regardless of the engine's opinion. The new loop-back is the engine's own
+judgment, exercised at `review-plan` by the author of the plan under review. See §Risks.
 
 ### 4. `interactive` mode
 
@@ -127,9 +136,19 @@ the human never sees. The ledger records the review and what was decided.
 - **Machinery failure** — a station errors, tests will not go green, a tool dies, Playwright is
   genuinely unavailable → **halt**, write the failure to the manifest. No silent retry.
 - **Bound exhaustion** — on what would be the third cycle at a gate → **halt in-session**. The work
-  stays in the worktree and the human reviews it live. **No branch push, no draft PR** — twice-
-  rejected work is not worth a PR round-trip (owner's decision; this is strictly simpler than the
-  escalate-and-package path it replaces).
+  stays in the worktree and the human reviews it live (owner's decision; strictly simpler than the
+  escalate-and-package path it replaces). What "halt" means depends on where the gate sits relative
+  to `handoff`:
+  - at **`review-plan`** (before `handoff`) → **no branch push, no draft PR.** Twice-rejected work
+    is not worth a PR round-trip.
+  - at **`verify-ui`** and **`review-pr`** (after `handoff`) → the draft PR already exists, so there
+    is nothing to not-push. Leave it **draft**, write the reason to the PR body, stop.
+- **Mechanical-check exhaustion** — the `## Checks` layer (`engine.md` §Mechanical checks) currently
+  says a check failure "escalate[s] on the third" attempt and that more than two `@phpstan-ignore`
+  suppressions in one run escalates. Escalation no longer exists, so **both map onto the
+  bound-exhaustion halt above.** This is the one place where a spec that is *not* superseded here —
+  `2026-07-27-pipeline-mechanical-checks-design.md`, which explicitly assumed the escalation rules
+  would stay — collides with this one, and it must be resolved rather than left to the grep pass.
 
 That is the whole list. No finding stops a run.
 
@@ -139,7 +158,9 @@ That is the whole list. No finding stops a run.
 
 ```json
 {
-  "leg": "review-plan",
+  "gate": "review-plan",
+  "cycle": 1,
+  "at": "2026-07-28T11:04:00Z",
   "review": "<the reviewer's text>",
   "annotations": ["package", "migration"],
   "actions": [
@@ -149,12 +170,19 @@ That is the whole list. No finding stops a run.
 }
 ```
 
+- **`gate`, `cycle` and `at` are retained deliberately.** `cycle` is load-bearing: it is where
+  `"unknown"` lives after a reconstruction, and without it §3's no-loop-back-after-reconstruction
+  rule has no durable home and silently degrades into granting two fresh cycles every time a
+  manifest is lost. `at` is the audit trail's only ordering.
 - `policy` per entry is dropped along with `gate_policy`; `mode` is already top-level.
 - `verdict`, `verdict_adjudication`, `findings[].tier`, `findings[].kind`,
   `findings[].adjudication` and `outcome: escalated` are gone.
-- `review` is stored because it is the one genuinely unreconstructable artifact — `/critique` stores
-  nothing, and before `handoff` runs there is no PR body to recover it from.
 - `outcome: looped-back` keeps its exact meaning; the cycle count reads it unchanged.
+- **`review` stores content, reversing a stated invariant.** `manifest.md`'s honesty rules say
+  *"Pointers, never content. Store the spec path, not the spec; the PR number, not the review."*
+  The review is the one genuinely unreconstructable artifact — `/critique` stores nothing, and
+  before `handoff` there is no PR body to recover it from — so the rule gets an **explicit,
+  named exception** in `manifest.md`, not a silent violation.
 
 ### 7. Code surface
 
@@ -169,15 +197,21 @@ That is the whole list. No finding stops a run.
 `critique/checks/*.php` — **no change.** Verified tier-free: they emit `{exact, heuristic}` with
 category slugs and never rank.
 
+**One behaviour must survive the deletion of `pipeline_resolve_policy`.** It maps an *unrecognised*
+mode to the stricter policy, and `manifest_validate` checks key presence rather than value — so a
+manifest with a mangled `mode` currently fails safe. The absorbed prose in `gates.md` must state it
+outright: **anything that is not `auto` behaves as `interactive`.** Otherwise a corrupted `mode`
+lands wherever the prose happens to leave it, and the safe default is lost with its test.
+
 ### 8. Documentation surface
 
 | File | Change |
 |---|---|
 | `critique/SKILL.md` | stages 2–6, `--verify`; the "what this skill is for" paragraph gains an explicit *does not shape the review's prose* |
-| `critique/references/rubrics.md` | delete **Tiers** and **Verdicts** sections; reframe the failure-scenario rule from filter to standard (*if you cannot say what breaks, it is taste — say so plainly rather than dressing it as a defect*); trim the reviewer-slug line. **Keep** both evidence standards: `missing` needs ≥2 cited real paths, `alternatives` needs the condition-under-which-it-wins |
-| `pipeline/references/engine.md` | delete §The verdict block; rewrite §Gate policy `adjudicate` and §Failure policy; update the `review-plan` / `review-pr` station rows |
-| `pipeline/references/gates.md` | 2 lines (:19 interactive row, :44 project-vs-package row); mode semantics absorbed from the deleted `pipeline_resolve_policy` |
-| `pipeline/references/manifest.md` | `gate_ledger` shape per §6; drop `gate_policy` |
+| `critique/references/rubrics.md` | delete **Tiers** and **Verdicts** sections; drop the per-class verdict requirement at **`:10-11`** and **`:41-42`** (*not* in §Verdicts — that section is CONFIRMED/PLAUSIBLE) while keeping the hazard classes as coverage; reframe the failure-scenario rule from filter to standard (*if you cannot say what breaks, it is taste — say so plainly rather than dressing it as a defect*); trim the reviewer-slug line. **Keep** both evidence standards: `missing` needs ≥2 cited real paths, `alternatives` needs the condition-under-which-it-wins |
+| `pipeline/references/engine.md` | delete §The verdict block; rewrite §Gate policy `adjudicate` and §Failure policy (restoring the loop-back destinations per §3); **and §Mechanical checks** — its two `escalate` rules (`:139`, `:149`) remap onto the bound-exhaustion halt per §5; update the `review-plan` / `review-pr` station rows |
+| `pipeline/references/gates.md` | more than the modes table: the §Modes framing (`:3-4`), the `auto` row (`:20`), "both gates always resolve to the same value" (`:22-23`), the **report-only override** (`:25-31`, see §Decisions 8), the project-vs-package row (`:44`), and the Phase-A function list (`:107`). Absorbs mode semantics from the deleted `pipeline_resolve_policy`, including the not-`auto`-is-`interactive` default (§7) |
+| `pipeline/references/manifest.md` | `gate_ledger` shape per §6; drop `gate_policy`; **amend the "Pointers, never content" rule** (`:31-32`) with the named `review` exception rather than leaving the file self-contradictory |
 
 ## Decisions log
 
@@ -199,6 +233,25 @@ category slugs and never rank.
 7. **Scope — one change or two?** → *One.* Tiers span both skills; splitting leaves an intermediate
    state where the pipeline requests a vocabulary `/critique` no longer emits.
 
+*The following came out of an independent review of this spec (2026-07-28), which found the
+mechanism gaps now closed in §3, §5, §6 and §7.*
+
+8. **The report-only override (`gates.md:25-31`) — keep or drop?** → **OPEN, owner's call.** It is
+   `auto` with `plan-approval` flipped to `report` in `gate_policy`: "record the findings,
+   adjudicate nothing, escalate nothing." Two of those three are now the default, so the override's
+   only remaining effect is **suppressing the loop-back** — "review the plan, log it, but do not
+   send me back to `design`." That is still a real knob, but it needs a new home since `gate_policy`
+   is being deleted. Resolve before implementing.
+9. **Store the review text, against `manifest.md`'s "Pointers, never content"?** → *Yes, as a named
+   exception.* It is the only unreconstructable artifact in the ledger. The rule gets amended
+   explicitly (§8) — the repo's precedent is that a reversal is replaced consciously, not silently.
+10. **`engine.md` §Mechanical checks still says "escalate".** → *Remap both rules onto the
+    bound-exhaustion halt* (§5). The alternative — leaving them to the grep pass — decides nothing;
+    an unattended run hitting a third failed check attempt would have no defined move.
+11. **Keep `gate`, `cycle`, `at` on ledger entries?** → *Yes.* `cycle` is load-bearing (it carries
+    `"unknown"` after reconstruction, without which the loop-back bound stops bounding); `at` is the
+    audit trail's only ordering. Dropping them was an oversight, not a simplification.
+
 ## Testing strategy
 
 `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`
@@ -219,13 +272,22 @@ was wrong.
 Prose-level verification, since most of this change is documentation:
 
 - Grep both skills for `tier`, `Tier`, `cap at 15`, `CONFIRMED`, `PLAUSIBLE`, `verdict block`,
-  `architecture_judgment`, `escalate` — every surviving hit must be deliberate.
+  `architecture_judgment`, `escalate`, `adjudicat`, `gate_policy`, `cycle` — every surviving hit
+  must be deliberate. `adjudicat` and `cycle` are expected to hit (both survive, §3/§6), which is
+  precisely why they belong in the pass rather than outside it.
 - Live: run `/critique plan` on a real spec and confirm it reads like a review rather than a form.
 - Live: run a pipeline `review-plan` leg in each mode and confirm `gate_ledger` fills in the §6
   shape and that `interactive` shows the prose.
 
 ## Risks accepted
 
+- **At `review-plan` the engine judges a critique of a plan it just wrote.** This is a structural
+  conflict of interest, not random error: the party with the bias is also the party that decides
+  whether to invoke the now-optional independent read (§3). Both prior specs treated exactly this
+  as the reason adjudication was *mandatory* (`engine.md:210-212`). Accepted deliberately — the
+  mandatory version cost an interrupt at every gate, which is the thing `auto` exists to prevent —
+  but it is the sharpest edge in this design, and the reason the loop-back bound and the PR
+  backstop both matter more than they did before.
 - **A defect the engine misjudges on its first read ships to a PR.** Repeated rejection is caught by
   the loop-back bound, which halts in-session (§5); what is not caught is a real problem the engine
   reads once, resolves wrongly, and never revisits. Accepted — the PR is the backstop and it is
