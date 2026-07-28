@@ -12,9 +12,16 @@ function pipeline_triggers(string $diff, ?string $repoPackageName = null): array
 {
     $files = parse_diff($diff);
 
-    $uiPathRe   = '#(\.blade\.php$|^app/(Http/)?Livewire/|^resources/(views|css|js)/|\.vue$|tailwind\.config)#';
-    $migrationRe = '#^database/migrations/.*\.php$#';
-    $authRe     = '/\bauthorize\(|\bGate::|\bPolicy\b|[\'"]can:|->can\(|middleware\([\'"]can:/';
+    // Anchor at the repo root OR at a nested app root. The house-standard it4web
+    // project layout puts the Laravel app under `code/www/` (CLAUDE.md §Project
+    // Structure), so a bare `^` matches only repos whose app sits at the top level —
+    // and silently reports `false` for every project that follows the convention.
+    $appRoot = '(?:^|/)';
+
+    $uiPathRe    = "#(\.blade\.php$|{$appRoot}app/(Http/)?Livewire/|{$appRoot}resources/(views|css|js)/|\.vue$|tailwind\.config)#";
+    $migrationRe = "#{$appRoot}database/migrations/.*\.php$#";
+    $composerRe  = "#{$appRoot}composer\.json$#";
+    $authRe      = '/\bauthorize\(|\bGate::|\bPolicy\b|[\'"]can:|->can\(|middleware\([\'"]can:/';
 
     $ui = $migration = $auth = false;
     $package = $repoPackageName !== null && str_starts_with($repoPackageName, 'it4web/');
@@ -26,7 +33,7 @@ function pipeline_triggers(string $diff, ?string $repoPackageName = null): array
         if (preg_match($migrationRe, $f['file'])) {
             $migration = true;
         }
-        $isComposer = $f['file'] === 'composer.json';
+        $isComposer = (bool) preg_match($composerRe, $f['file']);
         foreach ($f['added'] as $a) {
             if (preg_match($authRe, $a['text'])) {
                 $auth = true;
