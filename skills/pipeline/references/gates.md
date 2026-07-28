@@ -1,33 +1,33 @@
 # Gates — modes, content triggers, and the navigation guardrail
 
-Two kinds of thing shape the chain: **mode-driven station gates** (a human turn, or an
-adjudication) and **content triggers** (facts about the diff). The forward-navigation guardrail is
+Two kinds of thing shape the chain: **mode-driven station gates** (a human turn, or the engine
+resolving a review itself) and **content triggers** (facts about the diff). The forward-navigation guardrail is
 a third, separate mechanism — it makes the review *legs* un-skippable *by construction*, not by
-memory, and it reads neither the mode nor the gate policy.
+memory, and it reads neither the mode nor anything a review said.
 
 All three are backed by tested Phase A functions in `../checks/pipeline.php` and
 `../checks/triggers.php`. This doc mirrors those functions; keep them in lock-step.
 
-## Modes — one choice, resolved to a policy table
+## Modes — one choice, two behaviours
 
-`pipeline_resolve_policy($mode)` returns `['auto_continue' => bool, 'gates' => ['plan-approval'
-=> …, 'pr-review' => …]]`. The mode sets **both** `auto_continue` and the two station-boundary
-gates; an unrecognised mode falls back to the stricter `interactive` policy.
+`mode` is the only knob, and **anything that is not `auto` behaves as `interactive`** — the
+stricter of the two. That fallback used to be asserted mechanically by `pipeline_resolve_policy()`;
+the function is gone (its two gates were always identical to each other and a pure function of
+mode), so the rule lives here and has to stay explicit: `manifest_validate` checks key *presence*,
+not value, so a manifest with a mangled `mode` must still fail safe.
 
-| Mode | `auto_continue` | Gates | Behaviour |
-|---|---|---|---|
-| **`interactive`** *(default)* | `false` | `stop` | you are present; run one leg, show you, wait. Every finding is yours to verdict. Advance by saying so (see navigation). |
-| **`auto`** | `true` | `adjudicate` | run the autonomous legs unattended. The reviews still run, but the engine resolves their findings itself and escalates only what an independent check confirms (`engine.md` §gate policy `adjudicate`). Hard failures and bound exhaustion still stop. |
+| Mode | Behaviour |
+|---|---|
+| **`interactive`** *(default)* | you are present; run one leg, show you the review, wait. Every point in it is yours to judge. Advance by saying so (see navigation). |
+| **`auto`** | run the autonomous legs unattended. The reviews still run; the engine reads them and acts, looping back where the work is wrong and never interrupting on a finding (`engine.md` §`auto`). Hard failures and bound exhaustion still stop. |
 
-Both gates always resolve to the **same** value — there is no mode in which one review is
-adjudicated and the other parked.
+There is no third mode and no per-gate override — both gates behave the same way within a mode.
+The **report-only override** that once existed (`auto` with `plan-approval` flipped to `report` in
+a stored `gate_policy`) is **deleted by decision, not oversight**: two of its three documented
+effects — adjudicate nothing, escalate nothing — are now the default everywhere, which left only
+"do not loop me back to `design`", and that did not justify a stored per-gate field of its own.
 
-**Report-only override.** "Run past the plan gate straight to a PR" is not a third mode — it is
-`auto` with the `plan-approval` gate flipped to `report` in the manifest's `gate_policy`: record
-the findings, adjudicate nothing, escalate nothing. That is a **one-line, visible edit to stored
-data**, for well-specified work; `pipeline_resolve_policy` itself never returns `report`. What no
-mode and no override can do is stop a review *leg* from running — that is the navigation
-guardrail below.
+What no mode can do is stop a review *leg* from running — that is the navigation guardrail below.
 
 ## Content triggers — three annotate, one gates a leg
 
@@ -41,10 +41,10 @@ first three is what this section revises.
 | touches an `it4web/*` package | `$repoPackageName` starts `it4web/` (the change is *in* a package repo), **or** an added `composer.json` line names an `it4web/*` constraint | annotation |
 | writes a DB migration | an added/changed file path matches `database/migrations/…\.php` | annotation |
 | touches authorization | an added line matches `authorize(` / `Gate::` / `Policy` / `can:` / `->can(` / `middleware('can:` | annotation |
-| the project-vs-package call | **none mechanical** — a `/critique plan` judgment, returned as the verdict block's `architecture_judgment` | adjudicated like a Tier-1 (`engine.md`) |
+| the project-vs-package call | **none mechanical** — a `/critique plan` judgment, made in prose (the `plan` rubric asks for it) | the engine acts on it like any other part of the review (`engine.md` §`auto`) |
 
 **The three annotating triggers no longer stop the chain.** They are **facts** — a path matched —
-not findings to be refuted, so "adjudicating" them is incoherent; the only real question is
+not findings to be refuted, so "resolving" them is incoherent; the only real question is
 whether the fact warrants a human, and under the governing principle (the pipeline never merges;
 a bad PR is trashable) it does not. Each fires a **mandatory, prominent annotation** — "this PR
 contains a migration", "this PR touches authorization" — in the PR body and in the manifest's
@@ -103,10 +103,9 @@ php -r 'require "skills/pipeline/checks/triggers.php";
 # → {"package":…,"migration":…,"auth":…,"ui":…}
 ```
 
-Navigation, policy and escalation are pure functions — call `pipeline_can_navigate` /
-`pipeline_next_leg` / `pipeline_resolve_policy` / `pipeline_should_escalate` directly (they take
-no I/O). The manifest's `gate_ledger` records which gates have run; `pipeline_can_navigate`'s
-`$doneLegs` is derived from it.
+Navigation is pure functions — call `pipeline_can_navigate` / `pipeline_next_leg` /
+`pipeline_gate_legs` directly (they take no I/O). The manifest's `gate_ledger` records which gates
+have run; `pipeline_can_navigate`'s `$doneLegs` is derived from it.
 
 ## Path anchoring — the app root is not always the repo root
 
