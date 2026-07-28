@@ -72,11 +72,11 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 | Leg | Invokes | Interactive form | Autonomous form | Manifest I/O |
 |---|---|---|---|---|
 | **design** *(compound)* | `superpowers:brainstorming` → `superpowers:writing-plans` (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it) | human drives the brainstorm dialogue, which chains into writing-plans; re-invoke `/pipeline` to continue | a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions | writes spec + plan pointers |
-| **review-plan** | `/critique plan` | reviewer scores the plan; you verdict | read-only reviewer subagent returning the **verdict block** (below) | feeds the plan-approval gate **and** the project-vs-package judgment |
+| **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | read-only reviewer subagent writes a review; the engine reads it and acts (§`auto`) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth | writes the PR# pointer |
 | **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links. **Leaves the PR draft** (below) | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, **attaches annotated proof to the PR** | records `verifyUi`; **non-skippable once triggered** |
-| **review-pr** | `/critique pr` | reviewer scores the whole change; you verdict | read-only reviewer subagent returning the **verdict block** (below) | feeds the PR-review gate |
+| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | read-only reviewer subagent writes a review; the engine reads it and acts (§`auto`) | feeds the PR-review gate |
 
 ## Who takes the PR out of draft — `review-pr`, never `implement`
 
@@ -136,7 +136,7 @@ blanket format commit, so **that commit is a prerequisite for declaring `format`
 
 | Kind | Trigger | Response |
 |---|---|---|
-| **Check failure** | the checks report a finding **in a file this change touched** | the **step is not done**. Fix and re-run, bounded to 2 attempts; escalate on the third. Exactly how a failing test behaves — *not* a halt |
+| **Check failure** | the checks report a finding **in a file this change touched** | the **step is not done**. Fix and re-run, bounded to 2 attempts; on the third, the bound-exhaustion halt (§Failure policy). A finding on its own is not a halt — it is exactly how a failing test behaves |
 | **Machinery failure** | probe returns `invalid`, the container is missing, the command errors, the tool is not installed | **halt**, per §Failure policy |
 
 A reported finding in a file the change did **not** touch is an annotation on the PR, not a blocker:
@@ -146,7 +146,8 @@ running checks, and hard-failing a run for someone else's finding leaves it no l
 **Suppression is bounded.** Where a finding genuinely cannot be resolved, `implement` may add
 `@phpstan-ignore <identifier>` — never the bare form, which suppresses every error on the next line
 including future real ones — with a justification comment. **More than two suppressions in one run
-escalates**, because the agent whose step is blocked is otherwise judging its own excuse.
+triggers the bound-exhaustion halt** (§Failure policy), because the agent whose step is blocked is
+otherwise judging its own excuse.
 
 **The result is recomputed at leg start, never stored.** Both the check result (a re-runnable
 command) and the suppression count (grep-able from the diff) are recomputable, and `manifest.md` is
@@ -156,130 +157,77 @@ manifest.
 **Into `review-pr`.** The brief states the result **qualified by the analysed scope** — "0 new
 findings over `app/`", never an unqualified "0 new findings", since the declared scope does not cover
 `database/`, `routes/`, `config/` or `tests/`. Any suppressions added during the run are listed and
-marked **unadjudicated**, so one cannot enter reading as already resolved.
+flagged as **not yet judged**, so one cannot enter reading as already resolved.
 
-## The verdict block — a review leg's return contract
+## `auto` — the engine resolves the review itself
 
-`review-plan` and `review-pr` return a structured block. This is a **contract**, not a per-run
-prompt convention: every decision below reads it.
+`interactive` stops at every gate: the human reads the review and decides, and none of this section
+runs. Everything below is the `auto` path.
 
-| Field | Value | Where it comes from |
-|---|---|---|
-| `verdict` | `approve` \| `approve-with-nits` \| `rework` | `/critique`'s overall verdict, **mapped**: *ship* → `approve`, *ship with fixes* → `approve-with-nits`, *rework* → `rework` |
-| `findings[]` | each `{tier: 1\|2, claim, evidence, suggested_action}` | `/critique`'s surviving findings — its `location` is `evidence`; `suggested_action` is the fix it names, or `none` |
-| `architecture_judgment` | `none`, or the project-vs-package (or comparable) concern | **not in `/critique`'s default output** — the leg brief must ask for it explicitly |
+**A review is prose, not a verdict.** `/critique` returns the review it wrote — no severity
+ranking, no verdict enum, no structured block (`../../critique/SKILL.md`). The engine reads it the
+way a person would and acts on its own judgment. The risk position behind that: the pipeline never
+merges, so every output is a PR read before merge and the worst case is a discarded branch, while a
+needless interrupt costs the one thing `auto` exists to protect.
 
-**The pipeline owns the translation, not `/critique`.** `/critique` reports *ship / ship with
-fixes / rework* and does not emit `architecture_judgment` or a per-finding `suggested_action`
-(`../../critique/SKILL.md`). So the leg brief must **request the two missing fields and state the
-verdict mapping** when it dispatches the reviewer. Skip that and the block comes back in
-`/critique`'s own vocabulary, is judged malformed, and the run halts at the first review — the
-adapter is what stops a mode difference from reading as broken tooling.
+**What the engine does with a review:**
 
-**A malformed or missing block is a machinery failure, not a finding.** Retry the reviewer
-**once**; if it is still malformed, **halt**. Fail-closed is retained exactly where it belongs —
-broken tooling — without being spent on findings.
+- **Act on what is worth acting on.** Apply the fixes to the spec, the plan or the code and commit
+  them. Record the rest — already-mitigated observations, notes for posterity — without an edit.
+- **Loop back** where the review says the work is fundamentally wrong: `review-plan` → `design`,
+  `verify-ui` → `implement`, `review-pr` → `implement`. Bounded (§Failure policy).
+- **Never interrupt on a finding.** Anything unresolved goes into the PR body as an open question,
+  carried **verbatim**. Ambiguity buys a line in the PR, not an interrupt.
+- **Log** the review, the actions taken and the outcome to the manifest's `gate_ledger`
+  (`manifest.md`), projected onto the PR. *Overruling a reviewer is fine; overruling one invisibly
+  is what turns a gate into decoration.*
 
-## Gate policy `adjudicate` — reviews are proposals, not verdicts
-
-`pipeline_resolve_policy('auto')` resolves both gates to `adjudicate`; `interactive` keeps `stop`
-and none of this section runs (`gates.md`). Under `adjudicate` the reviews still run, unchanged —
-what changes is who resolves their findings. **The engine continues by default and escalates only
-what an independent check confirms.** The risk position behind that: the pipeline never merges, so
-every output is a PR read before merge and the worst case is a discarded branch, while a needless
-interrupt costs the one thing `auto` exists to protect.
-
-**Triage — the verdict first, then the findings.** These are two different objects and they take
-two different routes; running them together is how a `rework` gets silently dropped.
-
-1. **The overall `verdict`.** Only `rework` needs anything: adjudicate it like a finding, and if
-   the adjudication **confirms** it, take the **loop-back route** in §failure policy — bounded,
-   autonomous, *not* an escalation. **Do not pass a verdict to `pipeline_should_escalate`**: that
-   predicate answers a question about one finding, it has no cycle count, and a confirmed `rework`
-   is not answerable without one. Record the adjudication as the entry's `verdict_adjudication`
-   (`manifest.md`), so overruling a `rework` is as visible as overruling a finding. A `rework`
-   whose adjudication is `refuted` or `uncertain` does not loop back — log it and read the
-   findings on their own merits.
-2. **Each finding**, routed exactly once:
-
-| Finding | Route |
-|---|---|
-| Tier-2 | integrate directly; no adjudication (record `adjudication: none`) |
-| Tier-1, or a non-`none` `architecture_judgment` | adjudicate |
-
-**Adjudicate** — dispatch a **fresh subagent that never saw the design leg**, give it the finding
-plus the code, and ask it to **refute** the claim, citing `file:line`. Independence is the point:
-at `review-plan` the engine would otherwise be adjudicating a critique of a plan it just wrote —
-the self-review bias `/critique` exists as a separate agent to avoid. Synthesise a non-`none`
-`architecture_judgment` into a finding of its own (`{kind: 'architecture', claim: …}`) so it
-travels the same path.
-
-| Adjudication | Disposition |
-|---|---|
-| **refuted** (with cited evidence) | downgrade to advisory, log, continue |
-| **confirmed** | **escalate** — package, then stop (§failure policy) |
-| **uncertain** | continue; carry the finding **verbatim** into the PR body as an open question |
-
-`pipeline_should_escalate($finding, $adjudication)` in `../checks/pipeline.php` is that table made
-mechanical, and is total over every **finding** the triage produces — the overall verdict is not
-one of its inputs (see the precedence rule above). `uncertain` continuing is a deliberate choice of
-the owner's risk position over the reviewer's caution: ambiguity does not buy an interrupt, it buys
-a line in the PR.
-
-**Integrate** — apply actionable Tier-2s and refuted Tier-1s to the spec/plan and commit.
-Non-actionable ones (already-mitigated observations, notes for posterity) are recorded without an
-edit.
-
-**Log** — every finding, its adjudication, the cited evidence and the disposition go to the
-manifest's `gate_ledger` (`manifest.md`) and are projected onto the PR. *Overruling a reviewer is
-fine; overruling one invisibly is what turns a gate into decoration.*
+**An independent read is available, and is not a routing rule.** At `review-plan` the engine is
+judging a critique of a plan it just wrote — the self-review bias `/critique` exists as a separate
+agent to avoid. So where acting on a point is expensive and the engine doubts it, dispatch a
+**fresh subagent that never saw the design leg**, give it the point plus the code, and ask it to
+refute the claim citing `file:line`. That is judgment exercised where it pays, not a mandatory step
+with an outcome enum — and it cannot stop the run; it only informs what the engine does next.
 
 ## Failure policy — what still stops
 
-Under `adjudicate` these are the only stops; everything else continues, with a record.
+Under `auto` these are the only stops. **No finding stops a run.**
 
-- **Hard failure** (a station errors: tests won't go green, a tool dies, the stack won't start,
-  `work-on` hits a blocker, or a verdict block is still malformed after its one retry) → **halt.**
-  Write the failure to the manifest; a human resumes. **No silent retry** beyond the single
-  documented reviewer retry — a retry hides the failure and the machinery may be in an unknown
-  state.
-- **A confirmed Tier-1 or architecture concern** (`pipeline_should_escalate` → `true`) →
-  **escalate: package, then stop.** A bare halt hands the human a branch and no reason.
-  - Flip **this** gate — not the next — to `stop` in the manifest's `gate_policy` (a one-line,
-    visible edit), so the resume asks the human instead of re-adjudicating the same finding into
-    the same loop. At `review-pr` there *is* no next gate, which is why it is this one.
-  - Package before stopping. At **`review-plan`** that means running **`handoff` only**: branch
-    pushed, **draft** PR opened, review and adjudication posted. **`implement` does not run** — the
-    plan carries a confirmed blocking finding, and building on it is the thing this gate exists to
-    prevent. At **`review-pr`** the parcel already exists: post the adjudication and leave the PR
-    **draft**.
-  - Record `outcome: escalated`.
-- **Bound exhaustion.** A confirmed `rework` on the *plan* loops back to `design` **autonomously**
-  — it never builds an implementation on a plan judged unshippable — and a `verify-ui` failure
-  loops back to `implement`. Each loop is bounded to **2 cycles**; on what would be the third,
-  **escalate** instead (same packaging as above). The bound is what keeps an autonomous loop from
-  churning indefinitely without ever surfacing. Count the cycles as the number of that gate's
-  `gate_ledger` entries whose `outcome` is **`looped-back`** (`manifest.md`) — not its entries in
-  total, which also include escalations and human-ordered re-reviews and would over-count into a
-  spurious interrupt — and never from an in-memory counter.
+- **Hard failure** — a station errors: tests won't go green, a tool dies, the stack won't start,
+  `work-on` hits a blocker, or the reviewer returns nothing after a single retry. → **halt.** Write
+  the failure to the manifest; a human resumes. **No silent retry** beyond that one — a retry hides
+  the failure and the machinery may be in an unknown state.
+- **Bound exhaustion.** Each loop-back is bounded to **2 cycles** per gate; on what would be the
+  third, **halt in-session** — stop, leave the work in the worktree, and say why. The bound is what
+  keeps an autonomous loop from churning indefinitely without ever surfacing.
+  - **Before `handoff`** (`review-plan`) → **no branch push, no draft PR.** Twice-rejected work is
+    not worth a PR round-trip; the human reads it live.
+  - **After `handoff`** (`verify-ui`, `review-pr`) → the draft PR already exists, so there is
+    nothing to not-push. Leave it **draft**, write the reason into the PR body, stop.
+  - Record `outcome: halted`.
+  - Count the cycles as the number of that gate's `gate_ledger` entries whose `outcome` is
+    **`looped-back`** (`manifest.md`) — not its entries in total, which also include human-ordered
+    re-reviews and would over-count into a spurious stop — and never from an in-memory counter.
   - **A count that cannot be read is not a count of zero.** The ledger lives in the disposable
     manifest, and no durable probe can rebuild it: git and gh record *that* a review happened, not
     how many times the engine looped. So a run whose manifest was **reconstructed** (`manifest.md`
     §reconstruction) carries an **unknown** cycle count, and unknown permits **no** loop-back — the
-    next confirmed `rework` or `verify-ui` failure escalates immediately. Without this, a manifest
-    lost mid-loop silently grants two fresh cycles, and one lost repeatedly grants them forever:
-    the bound would stop bounding at exactly the moment it is load-bearing. A fresh run writes its
-    own manifest at kickoff and is never reconstructed, so it is unaffected.
-- **Advisory finding** (a Tier-2, or a refuted Tier-1) → **log to the manifest, continue.**
+    next one halts immediately. Without this, a manifest lost mid-loop silently grants two fresh
+    cycles, and one lost repeatedly grants them forever: the bound would stop bounding at exactly
+    the moment it is load-bearing. A fresh run writes its own manifest at kickoff and is never
+    reconstructed, so it is unaffected.
+- **Mechanical-check exhaustion** (§Mechanical checks) — a check failure that survives its 2 fix
+  attempts, or more than two `@phpstan-ignore` suppressions in one run → **the same
+  bound-exhaustion halt.**
 - **Playwright genuinely unavailable** → **halt.** No visual claim without proof.
 
-In `interactive` mode both gates are `stop`, so every finding reaches the present human and none
-of this triage runs.
+In `interactive` mode every gate stops anyway, so the human sees the review and none of the `auto`
+resolution runs.
 
-The scary content facts — a migration, an authorization change, a shared package — **no longer
-stop the chain**: they are facts, not findings, so they become loud mandatory annotations on the
-PR and in the ledger (`gates.md` §content triggers). `verify-ui` is untouched by that and stays
-mandatory whenever the `ui` trigger fires.
+The scary content facts — a migration, an authorization change, a shared package — **do not stop
+the chain**: they are facts, not findings, so they become loud mandatory annotations on the PR and
+in the ledger (`gates.md` §content triggers). `verify-ui` is untouched by that and stays mandatory
+whenever the `ui` trigger fires.
 
 ## Navigation
 
