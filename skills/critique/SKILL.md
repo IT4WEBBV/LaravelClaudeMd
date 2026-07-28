@@ -17,6 +17,9 @@ diff incl. uncommitted, the linked plan, the searches a rubric line depends on) 
 boring and easy to do incompletely; and `alternatives` gives **divergent generation
 on demand**, when nobody is present to ask for options.
 
+What it is emphatically **not** for is shaping the review's prose: the reviewer writes
+what the review wants to be, and no stage of this skill reformats it.
+
 ## Invocation
 
 ```
@@ -97,42 +100,42 @@ Abort clearly if the target is empty.
 
 ### Stage 2 — review
 
-**One agent**, the mode's rubric from `references/rubrics.md`, plus the heuristic
-candidates from stage 0. Model configurable, **Fable by default**. Reasoning effort is
-session-level — there is no per-dispatch override.
+**One agent.** It receives the assembled target, the mode's rubric from
+`references/rubrics.md`, and the heuristic candidates from stage 0. It writes the review.
 
-### Stage 3 — filter and shape (the consumer's job, not the reviewer's)
+**No output contract.** There is no table, no severity ranking, no score, no required
+section, no cap on how much or how little it says. If the useful thing is one paragraph
+about a single flaw, that is the review. **What is worth reporting, and how much of it,
+is the reviewer's call** — this skill does not second-guess it.
 
-The reviewer returns **every candidate scored** — tier, failure scenario, category —
-and merges only its own obvious duplicates. It does **not** delete or hide anything: a
-reviewer that silently drops its own findings is the self-grading trap (it can bury an
-inconvenient Tier 2 as Tier 3 and you never see it). **You, the consumer, apply the
-drop policy, visibly:** drop anything without a nameable failure scenario, drop Tier 3,
-rank by tier then severity, **cap at 15** (report the top 15, the rest as category-slug
-one-liners), and state how many were dropped as Tier 3 by category — free to do here
-because you hold the full scored list, and it keeps a mis-ranked Tier 2 spottable.
+One courtesy, not a format: cite `file:line` when pointing at something specific, so a
+claim can be checked without a search. And end with a plain bottom line — ready, ready
+with fixes, or needs rework, and why in a sentence.
 
-### Stage 4 — report in chat
+Model configurable, **Fable by default**. Reasoning effort is session-level — there is
+no per-dispatch override.
 
-A table, one row per finding: **claim** (≤60 chars, the claim alone) · **tier** ·
-**verdict** (`pr` mode only: CONFIRMED / PLAUSIBLE) · **category** slug · **location**
-(`file:line`) · **failure scenario** (concrete inputs/state → wrong output, crash,
-corrupted data). Then an **overall verdict**: *ship* / *ship with fixes* / *rework*,
-one sentence of reasoning. Tier and verdict definitions live in `references/rubrics.md`.
+### Stage 3 — report in chat
 
-### Stage 5 — triage
+The review, as the reviewer wrote it. Do not reformat it into a table, re-rank it,
+summarise it into bullets, or drop parts of it. Relaying it faithfully is the whole job
+— a consumer that reshapes the review reintroduces exactly what this skill stopped
+doing.
 
-Each **surviving** finding gets a disposition: **fix now** / **rework the plan** /
-**file an issue** (hands off to `work-on`) / **drop** — a decision *not to act*,
-distinct from the Stage 3 quality filter. Nothing is filed or posted unless chosen.
-*How* to evaluate findings — verify before implementing, no performative agreement,
-push back with reasoning, stop if items are unclear — is `superpowers:receiving-code-review`'s
-job; this skill points at it rather than restating it.
+State the mode and the assembled target before it (stage 0), so the reader knows what
+was reviewed.
 
-### Stage 6 — feed the rubric, on a pattern
+### Stage 4 — triage
 
-**No persistent tally, no state between runs.** When you notice the same category
-dropped repeatedly — within a session, or against a pasted prior report — surface the
+Decide what to act on. *How* to evaluate a review — verify before implementing, no
+performative agreement, push back with reasoning, stop if something is unclear — is
+`superpowers:receiving-code-review`'s job; this skill points at it rather than
+restating it. Nothing is filed or posted unless chosen.
+
+### Stage 5 — feed the rubric, on a pattern
+
+**No state between runs.** When the same issue keeps recurring across reviews — within
+a session, or against a pasted prior report — surface the
 pattern and **propose a deliberate amendment** to `references/rubrics.md`. Amendments
 are hand-authored edits requiring approval, never automatic — a reviewer that silently
 learns to suppress is a reviewer that quietly stops working. Nothing is written to the
@@ -140,9 +143,10 @@ rubric behind your back.
 
 ## `--verify`
 
-Dispatches a skeptic over **CONFIRMED-eligible findings only** — claims that something
-in the code is wrong at a location. It promotes what survives and refutes what does
-not. No effect in `plan` or `missing`.
+Dispatches a skeptic over the review's checkable claims — the ones asserting that
+something in the code is wrong at a location. It reports which hold up against the code
+and which do not, in prose. No effect in `plan` or `missing`, where the claims are about
+absence and judgment and have no positive evidence to check.
 
 ## Re-review
 
