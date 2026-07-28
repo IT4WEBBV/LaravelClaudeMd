@@ -236,12 +236,12 @@ lands wherever the prose happens to leave it, and the safe default is lost with 
 *The following came out of an independent review of this spec (2026-07-28), which found the
 mechanism gaps now closed in §3, §5, §6 and §7.*
 
-8. **The report-only override (`gates.md:25-31`) — keep or drop?** → **OPEN, owner's call.** It is
-   `auto` with `plan-approval` flipped to `report` in `gate_policy`: "record the findings,
-   adjudicate nothing, escalate nothing." Two of those three are now the default, so the override's
-   only remaining effect is **suppressing the loop-back** — "review the plan, log it, but do not
-   send me back to `design`." That is still a real knob, but it needs a new home since `gate_policy`
-   is being deleted. Resolve before implementing.
+8. **The report-only override (`gates.md:25-31`) — keep or drop?** → *Drop it* (owner's decision).
+   It was `auto` with `plan-approval` flipped to `report` in `gate_policy`: "record the findings,
+   adjudicate nothing, escalate nothing." Two of those three are now the default everywhere, so its
+   only surviving effect was **suppressing the loop-back**, and rehoming a one-case knob after
+   `gate_policy` is deleted costs more than it returns. Deleted deliberately and recorded here, per
+   the repo's own precedent that a removed capability is named rather than orphaned.
 9. **Store the review text, against `manifest.md`'s "Pointers, never content"?** → *Yes, as a named
    exception.* It is the only unreconstructable artifact in the ledger. The rule gets amended
    explicitly (§8) — the repo's precedent is that a reversal is replaced consciously, not silently.
