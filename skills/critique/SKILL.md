@@ -162,8 +162,8 @@ there; it is not duplicated here.
 - **`plan`** — falsifiability, unverified assumptions, the project-vs-package call,
   mechanism failure/cost; plan-conformance questions only when a plan is present.
 - **`pr`** — the compatibility hazard classes (database / in flight / inside the app /
-  outward-facing), each returning a verdict, reported conditionally; package weighting
-  for `it4web/*`; the principles pointer.
+  outward-facing), reported conditionally; package weighting for `it4web/*`; the
+  principles pointer.
 - **`alternatives`** — N agents, each assigned a different axis of variation; each
   alternative must state the condition under which it wins. A PR target needs the
   linked plan/issue.
