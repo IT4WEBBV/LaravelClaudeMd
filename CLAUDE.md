@@ -388,7 +388,7 @@ This clears the Playwright Chrome profile that conflicts with an already-running
 - **Never address a human without my explicit permission**: posting on PRs and issues is fine — write up what changed, what was measured, and what still stands, even when it resolves someone's review remark. What is off-limits is writing *to* a person: naming or greeting them, second person ("je"/"you"), agreeing with or praising them ("scherp gezien"), asking them anything, inviting a reply, or reacting (👍 etc.) to their comment. Keep it an impersonal record of the work, not a message. If it only makes sense as a message to someone, draft it in chat and let me send it — colleagues read it as me talking, so I decide what gets said and when. Same on Slack, email and tickets.
   - ❌ "Scherp gezien Damion — dat klopte inderdaad niet. Ik heb optie 1 gedaan … Als je dat ook weg wilt hebben, hoor ik het graag."
   - ✅ "Optie 1 geïmplementeerd: de presentatie blijft gepauzeerd bij vorige/volgende. Gemeten op test: … Blijft staan: na een minuut inactiviteit hervat het scherm (bewust, voor etalageschermen)."
-- **Never work against a stale checkout**: A `SessionStart` hook (`hooks/git-freshness.sh` in this repo, wired into `~/.claude/settings.json`) fetches and reports staleness automatically — at session start and after every `git checkout`. When it warns, **raise it with me and wait**: do not pull, rebase, or merge on your own initiative. If the hook is not installed (new machine — see [Bootstrapping](#bootstrapping-a-new-machine)), check by hand *before the first edit in a repo*, not just when checking out a branch:
+- **Never work against a stale checkout**: `hooks/git-freshness.sh` in this repo (wired into `~/.claude/settings.json`) fetches and reports staleness automatically. It anchors on **the repo being worked in, not the directory the session was launched in** — it checks the launch directory at session start, then re-checks the first time a file is written in *any* repo, once per repo per session. A `git checkout` clears those cached verdicts so the next edit re-checks. When it warns, **raise it with me and wait**: do not pull, rebase, or merge on your own initiative. If the hook is not installed (new machine — see [Bootstrapping](#bootstrapping-a-new-machine)), check by hand *before the first edit in a repo*, not just when checking out a branch:
   ```bash
   git fetch origin
   git rev-list --count HEAD..origin/main   # commits on the base branch this checkout lacks
@@ -511,13 +511,16 @@ Then wire that hook into `~/.claude/settings.json` — the script lives in this 
 ```json
 "hooks": {
   "SessionStart": [
-    { "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh SessionStart", "timeout": 20, "statusMessage": "Checking git freshness…" } ] }
+    { "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh session", "timeout": 20, "statusMessage": "Checking git freshness…" } ] }
   ],
   "PostToolUse": [
-    { "matcher": "Bash", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh PostToolUse", "if": "Bash(git checkout:*)", "timeout": 20, "statusMessage": "Checking git freshness…" } ] }
+    { "matcher": "Edit|Write", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh edit", "timeout": 20, "statusMessage": "Checking git freshness…" } ] },
+    { "matcher": "Bash", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh checkout", "if": "Bash(git checkout:*)", "timeout": 10 } ] }
   ]
 }
 ```
+
+The three modes are `session` (launch directory, at startup), `edit` (the repo owning the file being written — once per repo per session), and `checkout` (drops cached verdicts after a branch switch).
 
 Re-run step 3 whenever either repo adds a new skill (existing ones update via `git pull`; a brand-new skill folder needs its own symlink).
 
