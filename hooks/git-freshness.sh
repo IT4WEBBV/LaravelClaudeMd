@@ -21,7 +21,26 @@
 set -uo pipefail
 
 event="${1:-SessionStart}"
-repo="${CLAUDE_PROJECT_DIR:-$PWD}"
+
+# Always report on the repo the SESSION is working in — never on whatever
+# directory some command happened to cd into, and never on a "project root" that
+# may sit above the worktree/slot actually in use.
+#
+# The harness hands us the session cwd on stdin; that value tracks EnterWorktree
+# and slot switches, so it is the truest answer to "which repo am I working in".
+# $PWD is the same value in practice (the hook is spawned fresh by the harness,
+# so a `cd` inside a Bash command cannot leak into it) and serves as the fallback.
+#
+# CLAUDE_PROJECT_DIR is deliberately NOT used: it is unset in current Claude Code,
+# and where it is set it names the project root, which can differ from the
+# directory being worked in.
+payload=""
+[ -t 0 ] || payload=$(cat 2>/dev/null)
+
+repo=$(printf '%s' "$payload" \
+    | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | head -1)
+[ -n "$repo" ] && [ -d "$repo" ] || repo="$PWD"
 
 max_fetch_seconds=10    # hard cap on the network call
 fetch_ttl_seconds=900   # skip the network entirely if we fetched within 15 min
@@ -152,7 +171,11 @@ before starting work and let them decide whether to bring the branch up to date
 or deliberately continue on the current base."
     summary="Stale checkout: '$branch' is behind origin — see details before starting work."
 else
-    context="git freshness: '$branch' is current with ${base_ref:-origin} ${upstream:+and $upstream }(fetched ${fetched})."
+    refs="${base_ref:-origin}"
+    if [ -n "$upstream" ] && [ "$upstream" != "$base_ref" ]; then
+        refs="$refs and $upstream"
+    fi
+    context="git freshness: '$branch' is current with ${refs} (fetched ${fetched})."
     summary=""
 fi
 
