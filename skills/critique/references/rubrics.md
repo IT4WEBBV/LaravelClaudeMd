@@ -1,48 +1,26 @@
 # /critique — rubrics
 
-Reference for the four `/critique` modes: hazard classes, principles pointer, tier
-definitions, category slugs, and the drop tally. The SKILL.md pipeline reads this
+Reference for the four `/critique` modes: hazard classes, the principles pointer, the
+evidence standards, and the stage-0 category slugs. The SKILL.md pipeline reads this
 file; it is not loaded until a run needs it.
+
+**This file says what to look for. It does not say what to say** — what is worth
+reporting, and how much of it, is the reviewer's own call.
 
 What reaches the reviewer **after** stage 0's deterministic pre-pass is two layers,
 ordered **most severe first** (attention decays down a prompt):
 
-1. **Hazard classes** — generative questions, each requiring an explicit verdict:
-   **hazard found** / **checked, clean** / **not applicable**. Silence is not an answer.
+1. **Hazard classes** — generative questions. Consider every one of them; mention the
+   ones where there is something to say, including "checked the in-flight jobs,
+   nothing" where that is informative. What is required is the *coverage*, not a
+   recital of a verdict per class.
 2. **Principles** — a pointer to `CLAUDE.md` (below), not a copy.
-
-## Tiers
-
-- **Tier 1** — runtime error, breaking change, data loss, security.
-- **Tier 2** — architectural inconsistency, measurable performance cost,
-  maintainability risk, or a house-rule violation **with a named consequence**.
-- **Tier 3** — subjective preference with **no named consequence**: naming,
-  formatting, micro-optimisation, "I'd have done it differently". **Dropped** from
-  the report and disclosed only as a per-category count.
-
-The Tier 2 / Tier 3 boundary is the *consequence*: a hardcoded URL instead of a
-named route is Tier 2 — it breaks when the route is renamed. If a finding has a real
-consequence it is not Tier 3, whatever it looks like.
-
-Every finding — any tier, any mode — must name a concrete **failure scenario**
-(inputs or state → wrong output, crash, corrupted data). No nameable scenario → the
-filter drops it, unreported.
-
-## Verdicts (`pr` mode only)
-
-- **CONFIRMED** — checked against the code and it holds.
-- **PLAUSIBLE** — reasoned, not positively verifiable.
-
-Shown **only in `pr` mode**. In `plan` and `missing` every finding is PLAUSIBLE by
-construction (absence and judgment claims have no positive evidence to defend), so a
-constant column is omitted rather than trained into the reader as ignorable.
 
 ## Mode: `pr`
 
-Hazard classes over the whole change plus the stage-0 candidates. **Each class
-returns a verdict.** Production state is not knowable from a diff, so hazards are
-reported as **conditional** — "if operation X has not run in production, this drops a
-column it reads" — never as certainties.
+Hazard classes over the whole change plus the stage-0 candidates. Production state is
+not knowable from a diff, so hazards are reported as **conditional** — "if operation X
+has not run in production, this drops a column it reads" — never as certainties.
 
 ### Compatibility hazard classes
 
@@ -121,8 +99,8 @@ What is absent rather than wrong. **Code targets only** — on a design it dupli
 The last two cannot be answered from the change alone — the prior instances are
 outside it by definition. The requirement is therefore on the **evidence, not the
 method**: such a finding must cite **at least two paths in this repository** showing
-the prior instances. A claim without cited paths is dropped by the filter, not
-reported. Cross-repository comparison is out of scope: an agent cannot see the other
+the prior instances. A claim without cited paths has not been established — do not
+make it. Cross-repository comparison is out of scope: an agent cannot see the other
 repos and will invent "portfolio patterns" if asked.
 
 ## Principles (pointer, not a copy)
@@ -139,13 +117,11 @@ rely on a paraphrase. The recurring ones:
 - Small objects, small methods (Sandi Metz).
 - DRY on the **third** repetition, not the first.
 
-Findings in the principles layer must still name a concrete failure scenario — that
-is what stops taste from becoming a Tier 3 preference.
-
 ## Category slugs
 
-Findings carry a kebab-case category slug so recurring noise sources become
-countable. Stage-0 slugs (emitted by `checks/run-checks.php`):
+The stage-0 checks emit a kebab-case category slug per candidate, so the deterministic
+layer's output is countable. These are the checks' own labels; the reviewer is not
+required to use them or to invent any of its own.
 
 | Slug | Source |
 |---|---|
@@ -157,13 +133,10 @@ countable. Stage-0 slugs (emitted by `checks/run-checks.php`):
 | `migration-write` | data write inside `database/migrations/` (heuristic) |
 | `changelog-fragment` | code changed, no `.changelog/unreleased/` fragment (heuristic question) |
 
-Reviewer findings use their own descriptive slugs (e.g. `hardcoded-url`,
-`missing-edge-case`, `plan-drift`, `contract-break`).
-
 ## Amending this rubric
 
-There is **no persistent drop tally and no state between runs.** When the same category
-is dropped repeatedly — within a session, or against a pasted prior report — that is a
-signal the rubric is mis-scoped there. Propose a **deliberate, hand-authored amendment**
+There is **no state between runs.** When the same issue keeps recurring — within a
+session, or against a pasted prior report — that is a signal the rubric is mis-scoped
+there. Propose a **deliberate, hand-authored amendment**
 to this file; it requires approval and is never applied automatically. A reviewer that
 silently learns to suppress is a reviewer that quietly stops working.
