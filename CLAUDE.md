@@ -388,7 +388,14 @@ This clears the Playwright Chrome profile that conflicts with an already-running
 - **Never address a human without my explicit permission**: posting on PRs and issues is fine — write up what changed, what was measured, and what still stands, even when it resolves someone's review remark. What is off-limits is writing *to* a person: naming or greeting them, second person ("je"/"you"), agreeing with or praising them ("scherp gezien"), asking them anything, inviting a reply, or reacting (👍 etc.) to their comment. Keep it an impersonal record of the work, not a message. If it only makes sense as a message to someone, draft it in chat and let me send it — colleagues read it as me talking, so I decide what gets said and when. Same on Slack, email and tickets.
   - ❌ "Scherp gezien Damion — dat klopte inderdaad niet. Ik heb optie 1 gedaan … Als je dat ook weg wilt hebben, hoor ik het graag."
   - ✅ "Optie 1 geïmplementeerd: de presentatie blijft gepauzeerd bij vorige/volgende. Gemeten op test: … Blijft staan: na een minuut inactiviteit hervat het scherm (bewust, voor etalageschermen)."
-- **Sync with remote when working on existing branches**: When checking out or reviewing an existing branch, always run `git fetch` and check if the local branch is up to date with the remote (`git status` or `git log --oneline HEAD..origin/<branch>`). Pull the latest changes before starting any work to avoid conflicts and working on stale code.
+- **Never work against a stale checkout**: A `SessionStart` hook (`hooks/git-freshness.sh` in this repo, wired into `~/.claude/settings.json`) fetches and reports staleness automatically — at session start and after every `git checkout`. When it warns, **raise it with me and wait**: do not pull, rebase, or merge on your own initiative. If the hook is not installed (new machine — see [Bootstrapping](#bootstrapping-a-new-machine)), check by hand *before the first edit in a repo*, not just when checking out a branch:
+  ```bash
+  git fetch origin
+  git rev-list --count HEAD..origin/main   # commits on the base branch this checkout lacks
+  ```
+  Two traps this replaces, both of which let stale work through:
+  - **`git status` cannot see it.** It compares HEAD only against its *tracking* branch, so a feature branch perfectly in sync with `origin/<same-branch>` reports "up to date" while `origin/main` has moved underneath it. Compare against the base branch explicitly.
+  - **`origin/HEAD` is often wrong.** That symref is cached at clone time and never refreshed, so a clone made when `develop` was default still names `develop` long after the repo moved to `main`. Run `git remote set-head origin --auto` before trusting it.
 - **Update the changelog**: When creating a PR, add a changelog entry using whichever convention the project uses:
   - **Fragment-based (project has a `.changelog/unreleased/` directory):** copy `.changelog/unreleased/TEMPLATE.md` to `.changelog/unreleased/<branch-name>.md` (branch name with `/` replaced by `-`) and fill in the `<details>` block. Do **not** edit `CHANGELOG.md` directly — the release workflow rolls fragments in at release time. See `.changelog/unreleased/README.md`.
   - **Plain changelog (no `.changelog/` directory):** update the project's `CHANGELOG.md` directly with a summary of the changes. Check the latest version tag first with `git tag --sort=-v:refname | head -5` to determine the correct next version number.
@@ -494,6 +501,22 @@ for repo in LaravelClaudeMd DevOps-Claude-Config; do
     ln -sfn "$skill" ~/.claude/skills/"$(basename "$skill")"
   done
 done
+
+# 4. Make the stale-checkout hook executable
+chmod +x ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh
+```
+
+Then wire that hook into `~/.claude/settings.json` — the script lives in this repo and updates with a `git pull`, so only this wiring is per-machine:
+
+```json
+"hooks": {
+  "SessionStart": [
+    { "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh SessionStart", "timeout": 20, "statusMessage": "Checking git freshness…" } ] }
+  ],
+  "PostToolUse": [
+    { "matcher": "Bash", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh PostToolUse", "if": "Bash(git checkout:*)", "timeout": 20, "statusMessage": "Checking git freshness…" } ] }
+  ]
+}
 ```
 
 Re-run step 3 whenever either repo adds a new skill (existing ones update via `git pull`; a brand-new skill folder needs its own symlink).
