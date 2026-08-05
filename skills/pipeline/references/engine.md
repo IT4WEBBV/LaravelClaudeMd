@@ -36,7 +36,16 @@ current checkout isn't already it. Derive the starting point from the invocation
 - **From an idea** (no branch yet) → slugify the idea into a branch name — lowercase, replace
   each non-`[a-z0-9]` run with `-`, strip leading/trailing `-`, truncate ~50 chars at a word
   boundary, prefix `feature/` — then create the worktree for it:
-  - **slot-enabled project** (has `scripts/worktree.sh`): `scripts/worktree.sh create <branch>`.
+  - **slot-enabled project** (has `scripts/worktree.sh`): run the repo's **declared**
+    `worktree.create` command from `.claude/work-on.config.md`, substituting the branch. Only
+    when the repo declares no config, fall back to the bare `scripts/worktree.sh create
+    <branch>`. **Never assemble that command yourself when one is declared** —
+    `worktree.create` is where a repo records the flags its own slots need, and a repo
+    mid-rewrite declares a `--base <ref>` there because its current work lives on a long-lived
+    integration branch while `origin/HEAD` still names the pre-cutover default. Dropping the
+    flag cuts the run's branch from the wrong code, and every leg after it looks healthy. This
+    is `work-on`'s own rule too (use the configured command, "never `git worktree add` by
+    hand"), and the pipeline invokes stations rather than reimplementing them.
   - **otherwise** (e.g. this config repo): a plain feature branch in place — `git switch -c
     <branch>` or a harness-native worktree under `.claude/worktrees/<branch>`.
   - **headless with no such machinery and no consent** → stop and report; never mutate the
