@@ -85,6 +85,20 @@ count_lines() {
     printf '%s\n' "$1" | grep -c . 2>/dev/null || true
 }
 
+# Does any line of $1 match the extended regex $2?
+#
+# Deliberately `grep -c` and not `grep -q`. Under `set -o pipefail`, `grep -q`
+# exits the moment it matches, the upstream `printf` takes EPIPE on its
+# still-unwritten remainder, and the pipeline reports that failure — so a
+# successful match reads as no match once the input outgrows the pipe buffer.
+# It fails silently and only on large inputs, which is the worst way to be
+# wrong. Counting drains the input, so the status is grep's own.
+matches_path() {
+    local n
+    n=$(printf '%s\n' "$1" | grep -cE "$2" 2>/dev/null)
+    [ "${n:-0}" -gt 0 ]
+}
+
 abs_git_path() {
     local d
     d=$(git rev-parse "$1" 2>/dev/null) || return
@@ -145,19 +159,19 @@ classify_incoming() {
         tags="${tags}${tags:+, }$n operations"
     fi
 
-    if printf '%s\n' "$files" | grep -q 'composer\.lock'; then
+    if matches_path "$files" 'composer\.lock'; then
         insights="${insights}
   - composer.lock moved on $base — run composer install after catching up"
         tags="${tags}${tags:+, }composer.lock"
     fi
 
-    if printf '%s\n' "$files" | grep -qE 'package-lock\.json|yarn\.lock|pnpm-lock\.yaml'; then
+    if matches_path "$files" 'package-lock\.json|yarn\.lock|pnpm-lock\.yaml'; then
         insights="${insights}
   - JS lockfile moved on $base — run npm install and rebuild assets after catching up"
         tags="${tags}${tags:+, }js lockfile"
     fi
 
-    if printf '%s\n' "$files" | grep -q '\.env\.example'; then
+    if matches_path "$files" '\.env\.example'; then
         insights="${insights}
   - .env.example changed on $base — new environment keys may be required"
         tags="${tags}${tags:+, }.env.example"
