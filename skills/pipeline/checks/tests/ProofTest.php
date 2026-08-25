@@ -13,13 +13,34 @@ it('refuses to let a branch name escape its own directory', function () {
     expect($slug)->not->toContain('/');
 });
 
-it('builds a run directory keyed by repo and branch, never by branch alone', function () {
-    // Branch alone collides across ~20 repos that all grow a `feature/fix-typo`.
-    $a = proof_run_dir('/store', 'ViewieMedia', 'feature/fix-typo');
-    $b = proof_run_dir('/store', 'Deploy', 'feature/fix-typo');
+it('builds a run directory keyed by repo, never by the run segment alone', function () {
+    // PR numbers collide across the ~20 repos that share this store, exactly as `feature/fix-typo` did.
+    $a = proof_run_dir('/store', 'ViewieMedia', 'feature/fix-typo', 412);
+    $b = proof_run_dir('/store', 'Deploy', 'feature/fix-typo', 412);
 
-    expect($a)->toBe('/store/ViewieMedia/feature-fix-typo');
+    expect($a)->toBe('/store/ViewieMedia/pr-412-fix-typo');
     expect($a)->not->toBe($b);
+});
+
+it('keys a run by its PR number and keeps the branch topic readable beside it', function () {
+    // A bare `967` sorts but names nothing; the topic without the namespace and the issue
+    // marker names it without putting a second number in the same segment.
+    expect(proof_run_slug('feature/issue-919-body-margin-sweep', 967))->toBe('pr-967-body-margin-sweep');
+    expect(proof_run_slug('feature/reverb-service-type', 404))->toBe('pr-404-reverb-service-type');
+    expect(proof_run_slug('hotfix/ISSUE_42_retry', 7))->toBe('pr-7-retry');
+});
+
+it('falls back to the branch slug for a run that opened no PR', function () {
+    // review-plan bound-exhaustion halts before handoff, so those runs have only a branch name.
+    expect(proof_run_slug('feature/issue-919-body-margin-sweep'))->toBe('feature-issue-919-body-margin-sweep');
+    expect(proof_run_slug('feature/x', null))->toBe('feature-x');
+    expect(proof_run_slug('feature/x', ''))->toBe('feature-x');
+    expect(proof_run_dir('/store', 'Deploy', 'feature/halted'))->toBe('/store/Deploy/feature-halted');
+});
+
+it('keeps a PR-keyed run segment inside its own directory', function () {
+    expect(proof_run_slug('feature/../../etc/passwd', 5))->not->toContain('..');
+    expect(proof_run_slug('feature/../../etc/passwd', 5))->not->toContain('/');
 });
 
 it('round-trips a run and preserves createdAt across the second write', function () {

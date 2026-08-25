@@ -24,7 +24,7 @@ driving a run — the enforcement lives there, not in this summary:
   the repo declares them in a committed `## Checks` block (`references/engine.md`
   §Mechanical checks). Opt-in: repos that have not declared them are unaffected.
 - **Visual proof** — when `pipeline_triggers(...)['ui']` fires, `verify-ui` writes a durable page to
-  `~/GitProjects/_proofs/<repo>/<branch>/index.html` and the PR gets a text-only record comment
+  `~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/index.html` and the PR gets a text-only record comment
   (`references/engine.md` §The proof store). Backend-only runs are unaffected.
 
 The deterministic guardrails are tested PHP in `checks/` (run

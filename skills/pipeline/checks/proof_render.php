@@ -38,6 +38,7 @@ figcaption { color:var(--muted); font-size:.875rem; margin-bottom:.5rem; }
 ol.legend { padding-left:1.25rem; }
 ol.legend li { margin-bottom:.4rem; }
 ul { padding-left:1.25rem; }
+a { color:inherit; text-decoration:underline; text-underline-offset:.15em; }
 table { border-collapse:collapse; width:100%; font-size:.9rem; }
 td, th { text-align:left; padding:.4rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
 .flag { color:var(--accent); font-weight:600; }
@@ -78,7 +79,15 @@ function proof_render_shots(array $shots): string
                 proof_e((string) (0 + ($badge['leftPct'] ?? 0))),
                 proof_e((string) ($badge['num'] ?? '')),
             );
-            $legend .= '<li><strong>' . proof_e((string) ($badge['title'] ?? '')) . '</strong> — '
+            // Carry the badge's own number onto the list marker. The <ol> would otherwise
+            // renumber from 1 per figure, so a run that numbers its badges continuously across
+            // shots — which nothing forbids — renders a "5" on the image above a "1." in the
+            // legend, and the two stop referring to each other.
+            $marker = is_numeric($badge['num'] ?? null)
+                ? ' value="' . proof_e((string) (int) $badge['num']) . '"'
+                : '';
+
+            $legend .= '<li' . $marker . '><strong>' . proof_e((string) ($badge['title'] ?? '')) . '</strong> — '
                 . proof_e((string) ($badge['note'] ?? '')) . "</li>\n";
         }
 
@@ -141,19 +150,70 @@ function proof_render_ledger(array $ledger): string
     return "<details><summary>Gate ledger</summary>\n<table>\n{$rows}</table>\n</details>\n";
 }
 
+/**
+ * A GitHub URL for this run, or null when the payload carries no `nameWithOwner` and there is
+ * therefore nothing to build one from.
+ *
+ * Absolute by necessity: the page is opened straight off disk, so a relative href would resolve
+ * against `file://` and reach nothing.
+ */
+function proof_github_url(array $run, string $path): ?string
+{
+    $nameWithOwner = trim((string) ($run['nameWithOwner'] ?? ''));
+
+    return $nameWithOwner === '' ? null : 'https://github.com/' . $nameWithOwner . '/' . $path;
+}
+
+/** A reference that becomes a link when there is a URL for it, and stays plain text otherwise. */
+function proof_render_ref(?string $url, string $label): string
+{
+    return $url === null
+        ? proof_e($label)
+        : '<a href="' . proof_e($url) . '">' . proof_e($label) . '</a>';
+}
+
+/**
+ * The issue a run is for. `issue` is authoritative; the branch name is the fallback, so runs
+ * filed before the field existed still link.
+ *
+ * A number is never invented — neither source yielding one means no reference at all, because a
+ * confidently wrong issue link is worse than none. The boundary before `issue` keeps a branch
+ * like `feature/reissue-5-retry` from matching.
+ */
+function proof_issue_number(array $run): ?int
+{
+    if (is_numeric($run['issue'] ?? null)) {
+        return (int) $run['issue'];
+    }
+
+    return preg_match('/(?:^|[^0-9a-z])issue[-_]?(\d+)/i', (string) ($run['branch'] ?? ''), $match) === 1
+        ? (int) $match[1]
+        : null;
+}
+
 function proof_render_run(array $run): string
 {
     $title = (string) ($run['headline'] ?? ($run['branch'] ?? 'pipeline run'));
-    $pr = empty($run['pr']) ? 'no PR' : '#' . (string) $run['pr'] . ' (' . (string) ($run['prState'] ?? '?') . ')';
 
-    $meta = sprintf(
-        '<code>%s</code> · %s · <code>%s</code> · %s mode · %s',
-        proof_e((string) ($run['repo'] ?? '')),
-        proof_e($pr),
-        proof_e((string) ($run['branch'] ?? '')),
-        proof_e((string) ($run['mode'] ?? '')),
+    $pr = empty($run['pr'])
+        ? 'no PR'
+        : proof_render_ref(
+            proof_github_url($run, 'pull/' . (int) $run['pr']),
+            '#' . (string) $run['pr'] . ' (' . (string) ($run['prState'] ?? '?') . ')',
+        );
+
+    $issue = proof_issue_number($run);
+    $issueRef = $issue === null ? '' : proof_render_ref(proof_github_url($run, 'issues/' . $issue), 'issue #' . $issue);
+
+    // array_filter drops the issue reference when the run has none, so the separators stay right.
+    $meta = implode(' · ', array_filter([
+        '<code>' . proof_e((string) ($run['repo'] ?? '')) . '</code>',
+        $pr,
+        $issueRef,
+        '<code>' . proof_e((string) ($run['branch'] ?? '')) . '</code>',
+        proof_e((string) ($run['mode'] ?? '')) . ' mode',
         proof_e((string) ($run['updatedAt'] ?? '')),
-    );
+    ]));
 
     $body = "<h1>" . proof_e($title) . "</h1>\n<p class=\"meta\">{$meta}</p>\n";
 
@@ -191,7 +251,9 @@ function proof_render_index(array $runs): string
     $rows = '';
     foreach ($runs as $entry) {
         $run = $entry['run'];
-        $href = proof_slug((string) ($run['repo'] ?? '')) . '/' . proof_slug((string) ($run['branch'] ?? '')) . '/index.html';
+        // The link comes from the directory the run was found in, never from re-deriving a name
+        // out of the run: a run filed under an earlier naming scheme has to stay reachable.
+        $href = implode('/', array_slice(explode('/', trim((string) $entry['dir'], '/')), -2)) . '/index.html';
 
         // A run that opened no PR is unreachable by the prune pass by design, so the index
         // is where its accumulation becomes visible rather than silent.

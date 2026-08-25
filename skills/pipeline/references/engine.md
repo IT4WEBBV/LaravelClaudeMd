@@ -84,7 +84,7 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 | **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | read-only reviewer subagent writes a review; the engine reads it and acts (§`auto`) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth | writes the PR# pointer |
 | **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links. **Leaves the PR draft** (below) | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
-| **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, writes the run's page to the **proof store** (`~/GitProjects/_proofs/<repo>/<branch>/`) via `checks/proof_cli.php write`, and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
+| **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, writes the run's page to the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — the payload carries `nameWithOwner`, `pr` and `issue` so the page can link back to both — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
 | **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | read-only reviewer subagent writes a review; the engine reads it and acts (§`auto`). The second write is a full payload, not a patch — `proof_cli.php write` always replaces the page, and `proof_write_run()` preserves `createdAt` across it. | feeds the PR-review gate; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
 
 ## The proof store — where the visual record actually lives
@@ -93,11 +93,15 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 attachments exist only via drag-drop in the web UI. So a leg that claims to attach visual proof
 to a PR cannot do it, and the claim previously made here was unimplementable.
 
-`verify-ui` instead writes a self-contained page to `~/GitProjects/_proofs/<repo>/<branch>/`
-— keyed by repo *and* branch, because branch alone collides across the repos that share this
-store. The page carries Problem, Solution, the annotated screenshots, the scope-qualified check
-result and any open questions. `review-pr` rewrites it once more to finalise open questions and
-the ledger. A store-wide `index.html` is the join from a PR back to its page.
+`verify-ui` instead writes a self-contained page to `~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`
+— keyed by repo *and* run, because a PR number collides across the repos that share this store
+as readily as a branch name ever did. The run segment is the PR number, which is what a reader
+has in hand when they come looking, plus the branch's topic so the directory still names
+something; a run that opened no PR keeps its branch slug, and `proof_cli.php write` adopts that
+directory once a PR appears. The page carries Problem, Solution, the annotated screenshots, the
+scope-qualified check result and any open questions, and links out to the PR and the issue.
+`review-pr` rewrites it once more to finalise open questions and the ledger. A store-wide
+`index.html` is the join from a PR back to its page.
 
 **The PR still gets a comment, and it is load-bearing.** The manifest is reconstructable from
 git + gh (`manifest.md` §reconstruction), so the only durable evidence that this non-skippable
