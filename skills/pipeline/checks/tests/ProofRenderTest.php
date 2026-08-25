@@ -81,3 +81,37 @@ it('states the analysed scope rather than an unqualified all-clear', function ()
     // "0 new findings" without its scope reads as covering database/, routes/, config/ and tests/.
     expect($html)->toContain('0 new findings over app/');
 });
+
+it('links each run by its relative directory so the index works over file://', function () {
+    $html = proof_render_index([
+        ['dir' => '/store/ViewieMedia/feature-b', 'run' => proof_fixture_run(['repo' => 'ViewieMedia', 'branch' => 'feature/b'])],
+    ]);
+
+    expect($html)->toContain('href="ViewieMedia/feature-b/index.html"');
+    expect($html)->not->toContain('/store/');
+});
+
+it('flags runs that opened no PR, because pruning can never reach them', function () {
+    $html = proof_render_index([
+        ['dir' => '/store/Deploy/feature-halted', 'run' => proof_fixture_run(['repo' => 'Deploy', 'pr' => null, 'prState' => null])],
+    ]);
+
+    expect($html)->toContain('no PR — prune manually');
+});
+
+it('renders an empty store without failing', function () {
+    $html = proof_render_index([]);
+
+    expect($html)->toStartWith('<!doctype html>');
+    expect($html)->toContain('No runs recorded');
+});
+
+it('shows the PR number and state for a run that has one', function () {
+    $html = proof_render_index([
+        ['dir' => '/store/ViewieMedia/feature-b', 'run' => proof_fixture_run(['pr' => 412, 'prState' => 'MERGED'])],
+    ]);
+
+    expect($html)->toContain('412');
+    expect($html)->toContain('MERGED');
+    expect($html)->not->toContain('prune manually');
+});

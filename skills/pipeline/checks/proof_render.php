@@ -177,3 +177,45 @@ function proof_render_run(array $run): string
         . $body
         . "</body>\n</html>\n";
 }
+
+/**
+ * The index is the join from a PR back to its page — the PR body deliberately carries no
+ * local path, so this is how a run is found again.
+ *
+ * Links are relative to the store root, so the index works when opened over `file://`.
+ *
+ * @param list<array{dir: string, run: array}> $runs newest first, from `proof_scan_runs()`
+ */
+function proof_render_index(array $runs): string
+{
+    $rows = '';
+    foreach ($runs as $entry) {
+        $run = $entry['run'];
+        $href = proof_slug((string) ($run['repo'] ?? '')) . '/' . proof_slug((string) ($run['branch'] ?? '')) . '/index.html';
+
+        // A run that opened no PR is unreachable by the prune pass by design, so the index
+        // is where its accumulation becomes visible rather than silent.
+        $pr = empty($run['pr'])
+            ? '<span class="flag">no PR — prune manually</span>'
+            : proof_e('#' . (string) $run['pr'] . ' ' . (string) ($run['prState'] ?? ''));
+
+        $rows .= '<tr><td><code>' . proof_e((string) ($run['repo'] ?? '')) . '</code></td>'
+            . '<td>' . $pr . '</td>'
+            . '<td><a href="' . proof_e($href) . '">' . proof_e((string) ($run['headline'] ?? ($run['branch'] ?? ''))) . '</a></td>'
+            . '<td>' . proof_e((string) count($run['shots'] ?? [])) . '</td>'
+            . '<td>' . proof_e(substr((string) ($run['updatedAt'] ?? ''), 0, 10)) . "</td></tr>\n";
+    }
+
+    $body = $rows === ''
+        ? "<p class=\"meta\">No runs recorded.</p>\n"
+        : "<table>\n<tr><th>Repo</th><th>PR</th><th>Run</th><th>Shots</th><th>Updated</th></tr>\n{$rows}</table>\n";
+
+    $styles = proof_render_styles();
+
+    return "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
+        . "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
+        . "<title>Pipeline proof store</title>\n<style>\n{$styles}\n</style>\n</head>\n<body>\n"
+        . "<h1>Pipeline proof store</h1>\n"
+        . $body
+        . "</body>\n</html>\n";
+}
