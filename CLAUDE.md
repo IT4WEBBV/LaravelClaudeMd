@@ -41,6 +41,7 @@ project/
 
 - Think first act later. So create a todolist or other plan that can be approved before we start building anything.
 - Feel free to ask questions to clear things up.
+- **Give me actionable multiple-choice questions, not a blob of text.** When something needs my decision, ask it with the `AskUserQuestion` tool: 2-4 concrete options, your recommendation first. Never bury a decision inside a paragraph of findings or in a trailing remark ("say the word and I'll file those", "worth deciding whether…") — I can't tell which lines are FYI and which are blocking, so nothing gets answered and the work stalls. Keep findings that need no decision as prose, and batch pending decisions into one question call instead of dribbling them out. The flip side: decide mechanical implementation details yourself and just tell me the call you made — only ask about things with real consequences.
 - When I ask a question, I'm genuinely curious and want your feedback or explanation. A question does not mean "go change things" — do not start modifying code just because I asked about it. It also does not mean I disagree with the current approach.
 - Testing is important! If possible use TDD. Use the tests to check your own work.
   - Also check in the browser if things work. If available you can use the mcp playwright to do so. Feel free to create an admin account to login if necessary.
