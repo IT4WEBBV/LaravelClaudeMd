@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# git-freshness.sh — warn when a checkout is stale relative to origin.
+# git-freshness.sh — warn when a stale checkout is about to cost you something.
 #
 # Wired into ~/.claude/settings.json. Prints Claude Code hook JSON on stdout.
 #
@@ -23,9 +23,19 @@
 # even when origin/main has moved underneath it. That is the most common
 # stale-checkout case, and it is invisible to `git status`.
 #
-# This script never touches the working tree or any local branch. It fetches and
-# refreshes remote-tracking metadata only; deciding whether to rebase or merge is
-# left to the human.
+# What it deliberately does NOT report: the commit count. "639 commits behind
+# origin/main" is a fact with no action attached — it is almost always true and
+# almost never means anything. Measured across a full set of checkouts, most
+# branches that were "behind" had no local commits at all, so there was nothing
+# to protect; and where there was local work, a 639-commit gap came down to five
+# touched files, three of which actually conflicted. This script reports
+# consequences instead: migrations your dev database is missing, lockfiles that
+# moved, files you will have to merge by hand. If none of those apply, it says
+# nothing at all.
+#
+# This script never touches the working tree, the index, or any local branch. It
+# fetches and refreshes remote-tracking metadata only, and predicts merges in a
+# throwaway index; deciding whether to rebase or merge is left to the human.
 #
 # Every path exits 0: a hook must never take a session down with it.
 
@@ -35,6 +45,7 @@ mode="${1:-session}"
 
 max_fetch_seconds=10    # hard cap on the network call
 fetch_ttl_seconds=900   # skip the network entirely if we fetched within 15 min
+max_listed_files=6      # the conflict list is a prompt, not an inventory
 
 payload=""
 [ -t 0 ] || payload=$(cat 2>/dev/null)
@@ -70,6 +81,10 @@ json_escape() {
         | awk 'BEGIN { ORS = "" } { print (NR > 1 ? "\\n" : "") $0 }'
 }
 
+count_lines() {
+    printf '%s\n' "$1" | grep -c . 2>/dev/null || true
+}
+
 abs_git_path() {
     local d
     d=$(git rev-parse "$1" 2>/dev/null) || return
@@ -103,6 +118,73 @@ emit() {
         printf ',"suppressOutput":true'
     fi
     printf '}\n'
+}
+
+# Incoming changes whose arrival has a concrete local consequence. Anything that
+# does not land in one of these buckets is, for our purposes, invisible: a
+# rebase will absorb it without the human needing to know in advance.
+#
+# Appends to the globals `insights` (the detail) and `tags` (the headline).
+classify_incoming() {
+    local mb=$1 base=$2 files n
+
+    files=$(git diff --name-only "$mb" "$base" 2>/dev/null)
+    [ -n "$files" ] || return 0
+
+    n=$(printf '%s\n' "$files" | grep -c 'database/migrations/')
+    if [ "${n:-0}" -gt 0 ]; then
+        insights="${insights}
+  - $n new migration(s) on $base — your dev database is behind; migrate after catching up"
+        tags="${tags}${tags:+, }$n migrations"
+    fi
+
+    n=$(printf '%s\n' "$files" | grep -cE 'database/(actions|operations)/')
+    if [ "${n:-0}" -gt 0 ]; then
+        insights="${insights}
+  - $n new deploy operation(s) on $base — production-only, but review before rebasing onto them"
+        tags="${tags}${tags:+, }$n operations"
+    fi
+
+    if printf '%s\n' "$files" | grep -q 'composer\.lock'; then
+        insights="${insights}
+  - composer.lock moved on $base — run composer install after catching up"
+        tags="${tags}${tags:+, }composer.lock"
+    fi
+
+    if printf '%s\n' "$files" | grep -qE 'package-lock\.json|yarn\.lock|pnpm-lock\.yaml'; then
+        insights="${insights}
+  - JS lockfile moved on $base — run npm install and rebuild assets after catching up"
+        tags="${tags}${tags:+, }js lockfile"
+    fi
+
+    if printf '%s\n' "$files" | grep -q '\.env\.example'; then
+        insights="${insights}
+  - .env.example changed on $base — new environment keys may be required"
+        tags="${tags}${tags:+, }.env.example"
+    fi
+
+    return 0
+}
+
+# Which files a catch-up would actually make you merge by hand.
+#
+# Performed against a throwaway index so the real index and working tree are
+# never touched. `merge-tree --write-tree` would be the clean way to do this but
+# needs git >= 2.38; `read-tree -m --aggressive` works everywhere and costs about
+# 35ms. It resolves only the trivial cases, so this over-reports slightly: a file
+# both sides touched in non-overlapping regions still shows up. For a warning,
+# that is the right direction to be wrong in.
+predict_conflicts() {
+    local mb=$1 base=$2 idx paths=""
+
+    idx="${TMPDIR:-/tmp}/claude-freshness-idx.$$"
+    rm -f "$idx"
+    if GIT_INDEX_FILE="$idx" git read-tree -m --aggressive "$mb" HEAD "$base" >/dev/null 2>&1; then
+        paths=$(GIT_INDEX_FILE="$idx" git ls-files -u 2>/dev/null | awk '{print $4}' | sort -u)
+    fi
+    rm -f "$idx"
+
+    printf '%s' "$paths"
 }
 
 # Report on the repo containing $1. Prints hook JSON, or nothing when the path
@@ -160,48 +242,74 @@ check_repo() {
         done
     fi
 
-    local warnings="" counts behind_up ahead_up behind_base merge_base
-    warnings=""
+    insights=""
+    tags=""
 
+    # Someone pushed to *this* branch. Always worth knowing and always
+    # actionable — it means another machine, or another slot, is ahead of you.
+    local counts behind_up
     if [ -n "$upstream" ]; then
         counts=$(git rev-list --left-right --count "$upstream...HEAD" 2>/dev/null || echo "0 0")
         behind_up=$(echo "$counts" | awk '{print $1+0}')
-        ahead_up=$(echo "$counts" | awk '{print $2+0}')
         if [ "$behind_up" -gt 0 ]; then
-            warnings="${warnings}
-  - $upstream has $behind_up commit(s) not in this checkout (local is also $ahead_up ahead)"
+            insights="${insights}
+  - $upstream has $behind_up commit(s) not in this checkout — another machine or slot pushed to this branch; pull before continuing"
+            tags="${tags}${tags:+, }branch pushed elsewhere"
         fi
     fi
 
-    # Behind the base branch — the case `git status` cannot see.
+    # The base branch has moved. Only speak if there is local work to protect: a
+    # branch with no local commits and a clean tree catches up as a risk-free
+    # fast-forward, and announcing that is precisely the noise this replaces.
+    local behind_base ahead_base dirty mb conflicts n_conf shown
     if [ -n "$base_ref" ] && [ "$upstream" != "$base_ref" ]; then
         behind_base=$(git rev-list --count "HEAD..$base_ref" 2>/dev/null || echo 0)
-        if [ "$behind_base" -gt 0 ]; then
-            merge_base=$(git merge-base HEAD "$base_ref" 2>/dev/null | cut -c1-9)
-            warnings="${warnings}
-  - $base_ref has $behind_base commit(s) not in this branch (merge-base ${merge_base:-unknown})"
+        ahead_base=$(git rev-list --count "$base_ref..HEAD" 2>/dev/null || echo 0)
+        dirty=$(git status --porcelain 2>/dev/null | grep -c . || true)
+
+        if [ "$behind_base" -gt 0 ] && { [ "$ahead_base" -gt 0 ] || [ "${dirty:-0}" -gt 0 ]; }; then
+            mb=$(git merge-base HEAD "$base_ref" 2>/dev/null)
+
+            if [ -n "$mb" ]; then
+                classify_incoming "$mb" "$base_ref"
+
+                # No local commits means no divergence, so nothing can conflict.
+                if [ "$ahead_base" -gt 0 ]; then
+                    conflicts=$(predict_conflicts "$mb" "$base_ref")
+                    n_conf=$(count_lines "$conflicts")
+                    if [ "${n_conf:-0}" -gt 0 ]; then
+                        shown=$(printf '%s\n' "$conflicts" | head -"$max_listed_files" | sed 's/^/      /')
+                        insights="${insights}
+  - catching up would need manual merging in ${n_conf} file(s):
+${shown}"
+                        if [ "$n_conf" -gt "$max_listed_files" ]; then
+                            insights="${insights}
+      (+$((n_conf - max_listed_files)) more)"
+                        fi
+                        tags="${tags}${tags:+, }${n_conf} to merge by hand"
+                    fi
+                fi
+            fi
         fi
     fi
 
-    local fetched context summary refs
-    fetched=$(human_age "$age")
+    # Nothing with a consequence attached: stay silent. This is the common case,
+    # and keeping it silent is the entire point of the rewrite.
+    if [ -z "$insights" ]; then
+        emit "$event" \
+            "git freshness: $(basename "$target") on '$branch' — nothing incoming that affects this work (fetched $(human_age "$age"))." \
+            ""
+        return 0
+    fi
 
-    if [ -n "$warnings" ]; then
-        context="Stale checkout: $(basename "$target") on branch '$branch'${warnings}
-Last fetch: ${fetched}.
+    local context summary
+    context="Stale checkout with consequences: $(basename "$target") on '$branch'${insights}
+Last fetch: $(human_age "$age").
 
 Do NOT pull, rebase, or merge on your own initiative. Raise this with the user
 before starting work and let them decide whether to bring the branch up to date
 or deliberately continue on the current base."
-        summary="Stale checkout: '$branch' is behind origin — see details before starting work."
-    else
-        refs="${base_ref:-origin}"
-        if [ -n "$upstream" ] && [ "$upstream" != "$base_ref" ]; then
-            refs="$refs and $upstream"
-        fi
-        context="git freshness: $(basename "$target") on '$branch' is current with ${refs} (fetched ${fetched})."
-        summary=""
-    fi
+    summary="$(basename "$target") '$branch': ${tags} — incoming from ${base_ref:-origin}."
 
     emit "$event" "$context" "$summary"
 }
