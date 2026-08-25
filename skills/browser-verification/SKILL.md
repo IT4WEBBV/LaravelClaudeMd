@@ -13,7 +13,20 @@ If the work changed anything the user would see in a browser, you must prove it 
 
 **Violating the letter of this rule is violating the spirit of this rule.**
 
-**REQUIRED SUB-SKILL:** This skill uses the visual companion from superpowers:brainstorming (see `visual-companion.md`) to serve proof pages. You MUST start the visual companion server and write proof HTML to `screen_dir` — pasting screenshots inline in the terminal is NOT a substitute.
+**REQUIRED: proof must be durable.** Write the proof page to the **proof store** by building a
+payload and running:
+
+```
+php ~/.claude/skills/pipeline/checks/proof_cli.php write <payload.json>
+```
+
+It prints the page path; open that. Pasting screenshots inline in the terminal is NOT a
+substitute, and neither is the brainstorming visual companion — that server is session-scoped,
+serves only its newest file, and exits after 4 hours idle, so nothing written there survives to
+review time.
+
+The companion is still the right tool for the interactive **"show me" hand-off** (§6), where the
+user is present and wants the live page rather than a record.
 
 ## The Proof Flow
 
@@ -144,5 +157,5 @@ User says "show me" → navigate to the same state WITHOUT annotations → tell 
 | "The page requires auth I can't get" | Check seeders, create an account, ask the user. Don't skip. |
 | "Too many states to screenshot" | Pick the most critical, max 5. Don't skip entirely. |
 | "All friction with zero signal" | The signal IS the screenshot. That's the proof the user needs. |
-| "Visual companion isn't running, I'll paste inline" | Start it. The companion is NOT optional — it's how proof is presented. Terminal screenshots are not a substitute. |
-| "The companion is just presentation, the real proof is the screenshot" | The companion IS the required delivery mechanism. Screenshot + companion = proof. Screenshot alone = incomplete. |
+| "I'll paste the screenshot inline instead" | Write the page to the proof store. Terminal screenshots are not a substitute — they scroll away and an `auto` run's subagent output is never read. |
+| "The store is just filing, the real proof is the screenshot" | The store IS the required delivery mechanism. Screenshot + durable page = proof. A screenshot that outlives nothing is incomplete. |

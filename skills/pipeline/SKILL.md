@@ -23,6 +23,9 @@ driving a run — the enforcement lives there, not in this summary:
 - **Mechanical checks** — `implement` also runs a repo's PHPStan/Pint checks after each step when
   the repo declares them in a committed `## Checks` block (`references/engine.md`
   §Mechanical checks). Opt-in: repos that have not declared them are unaffected.
+- **Visual proof** — when `pipeline_triggers(...)['ui']` fires, `verify-ui` writes a durable page to
+  `~/GitProjects/_proofs/<repo>/<branch>/index.html` and the PR gets a text-only record comment
+  (`references/engine.md` §The proof store). Backend-only runs are unaffected.
 
 The deterministic guardrails are tested PHP in `checks/` (run
 `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`).

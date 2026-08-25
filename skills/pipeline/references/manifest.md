@@ -117,7 +117,7 @@ Rebuild the cursor by probing **durable state**, then feed the probes to
 | `pr` | `gh pr list --head <branch>` → PR number, else null |
 | `implemented` | PR marked ready / implementation commits present |
 | `uiNeeded` | `pipeline_triggers(<diff>)['ui']` over `git diff origin/<base>...HEAD` |
-| `verifyUi` | a `browser-verification` proof comment is attached to the PR |
+| `verifyUi` | a `browser-verification` **record comment** is attached to the PR (text-only — the images live in the proof store, `engine.md` §The proof store) |
 | `prReviewed` | the `gate_ledger` holds a `pr-review` entry with `outcome: continued` |
 
 The resume order `manifest_infer_cursor` walks (mirrors `pipeline_legs()` plus `'done'`):
