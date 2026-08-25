@@ -87,3 +87,56 @@ function proof_write_run(string $dir, array $run, string $now): array
 
     return $run;
 }
+
+/**
+ * Pure predicate — no filesystem, no `gh`, no clock.
+ *
+ * Two rules the store depends on, both stated in the spec's §Retention:
+ *  - a PR merged this morning is exactly the one still worth looking at this afternoon,
+ *    hence the grace period rather than deleting the moment it closes;
+ *  - a run that opened no PR is never auto-pruned. `review-plan` bound-exhaustion halts
+ *    *before* `handoff` and deliberately opens none, so those runs exist; the index flags
+ *    them for manual pruning rather than a silent cap deleting them.
+ *
+ * Anything unparseable answers "do not prune". Deleting proof is irreversible; keeping it
+ * costs disk.
+ */
+function proof_should_prune(array $run, string $now, int $graceDays = 14): bool
+{
+    if (empty($run['pr'])) {
+        return false;
+    }
+    if (! in_array($run['prState'] ?? '', ['MERGED', 'CLOSED'], true)) {
+        return false;
+    }
+
+    $updated = strtotime((string) ($run['updatedAt'] ?? ''));
+    $nowTs = strtotime($now);
+    if ($updated === false || $nowTs === false) {
+        return false;
+    }
+
+    return $updated < $nowTs - $graceDays * 86400;
+}
+
+/**
+ * Every run in the store, newest first. Shape is fixed at `<root>/<repo>/<branch>/run.json`,
+ * so one glob covers the whole store.
+ *
+ * @return list<array{dir: string, run: array}>
+ */
+function proof_scan_runs(string $root): array
+{
+    $runs = [];
+    foreach (glob(rtrim($root, '/') . '/*/*/run.json') ?: [] as $path) {
+        $dir = dirname($path);
+        $run = proof_read_run($dir);
+        if ($run !== null) {
+            $runs[] = ['dir' => $dir, 'run' => $run];
+        }
+    }
+
+    usort($runs, fn ($a, $b) => strcmp((string) ($b['run']['updatedAt'] ?? ''), (string) ($a['run']['updatedAt'] ?? '')));
+
+    return $runs;
+}
