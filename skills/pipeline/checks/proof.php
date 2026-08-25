@@ -41,12 +41,37 @@ function proof_slug(string $name): string
 }
 
 /**
- * Keyed `<repo>/<branch>`, never by branch alone — roughly twenty repos share this store and
- * every one of them eventually grows a `feature/fix-typo`.
+ * The one path segment a run owns inside its repo's folder.
+ *
+ * Keyed by PR number, because the PR is what a reader has in hand when they come looking, and
+ * it sorts by age. The branch's topic is kept beside it — a bare `967` is sortable but names
+ * nothing — minus the `feature/` namespace, which is the same word on nearly every branch, and
+ * minus any `issue-919-` marker, because a second number in one segment reads as a second PR.
+ *
+ * `verify-ui` runs after `handoff`, so a PR normally exists. A run that opened none — a
+ * `review-plan` bound-exhaustion halt, or a first write that beat `handoff` — keeps the branch
+ * slug, the only name it has. `proof_cli.php write` adopts such a directory once a PR appears.
  */
-function proof_run_dir(string $root, string $repo, string $branch): string
+function proof_run_slug(string $branch, int|string|null $pr = null): string
 {
-    return rtrim($root, '/') . '/' . proof_slug($repo) . '/' . proof_slug($branch);
+    if (empty($pr) || ! is_numeric($pr)) {
+        return proof_slug($branch);
+    }
+
+    $separator = strpos($branch, '/');
+    $topic = $separator === false ? $branch : substr($branch, $separator + 1);
+    $topic = (string) preg_replace('/^issue[-_]?\d+[-_]/i', '', $topic);
+
+    return 'pr-' . (int) $pr . '-' . proof_slug($topic);
+}
+
+/**
+ * Keyed `<repo>/<run>`, never by the run segment alone — roughly twenty repos share this store
+ * and PR numbers collide across them as readily as `feature/fix-typo` ever did.
+ */
+function proof_run_dir(string $root, string $repo, string $branch, int|string|null $pr = null): string
+{
+    return rtrim($root, '/') . '/' . proof_slug($repo) . '/' . proof_run_slug($branch, $pr);
 }
 
 function proof_read_run(string $dir): ?array
@@ -120,8 +145,9 @@ function proof_should_prune(array $run, string $now, int $graceDays = 14): bool
 }
 
 /**
- * Every run in the store, newest first. Shape is fixed at `<root>/<repo>/<branch>/run.json`,
- * so one glob covers the whole store.
+ * Every run in the store, newest first. Shape is fixed at `<root>/<repo>/<run>/run.json`,
+ * so one glob covers the whole store — and it is blind to how the run segment was named, which
+ * is what lets `prune` reach runs filed under an earlier scheme.
  *
  * @return list<array{dir: string, run: array}>
  */

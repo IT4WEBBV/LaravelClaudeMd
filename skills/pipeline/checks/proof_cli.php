@@ -43,7 +43,18 @@ function proof_cli_write(string $payloadPath): int
     }
 
     $root = proof_root();
-    $dir = proof_run_dir($root, (string) ($payload['repo'] ?? 'unknown'), (string) ($payload['branch'] ?? 'unknown'));
+    $repo = (string) ($payload['repo'] ?? 'unknown');
+    $branch = (string) ($payload['branch'] ?? 'unknown');
+    $dir = proof_run_dir($root, $repo, $branch, $payload['pr'] ?? null);
+
+    // A run filed before the directory was keyed by PR — or filed by a write that beat the PR
+    // into existence — still lives under its branch slug. Adopt that directory rather than
+    // starting an empty one beside it, which would orphan the shots it already holds and leave
+    // the store showing the same run twice.
+    $legacy = proof_run_dir($root, $repo, $branch);
+    if ($dir !== $legacy && ! is_dir($dir) && is_dir($legacy)) {
+        rename($legacy, $dir);
+    }
 
     if (! is_dir($dir . '/shots') && ! mkdir($dir . '/shots', 0777, true) && ! is_dir($dir . '/shots')) {
         fwrite(STDERR, "proof: cannot create {$dir}/shots\n");
