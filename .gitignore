@@ -2,3 +2,11 @@
 .claude/*
 !.claude/work-on.config.md
 /vendor
+
+# Agent scratch inside the skills tree.
+# skills/ is symlinked into ~/.claude/skills, which makes it look like scratch space
+# while actually being version-controlled. Pipeline runs have written throwaway
+# measurement scripts here named <purpose>-<issue-number>.mjs. No real skill file
+# carries a trailing issue number, so this cannot mask one.
+skills/**/*-[0-9][0-9][0-9]*.mjs
+skills/**/scratch/
