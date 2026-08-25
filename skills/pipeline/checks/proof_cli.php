@@ -71,10 +71,89 @@ function proof_cli_write(string $payloadPath): int
     return 0;
 }
 
+/**
+ * Refresh one run's PR state from `gh`. A failure returns null and the stored state is kept:
+ * a stale `OPEN` simply means the run is not pruned this pass, which is the safe direction.
+ */
+function proof_cli_pr_state(array $run): ?string
+{
+    if (empty($run['pr']) || empty($run['nameWithOwner'])) {
+        return null;
+    }
+
+    $command = sprintf(
+        'gh pr view %s --repo %s --json state --jq .state 2>/dev/null',
+        escapeshellarg((string) $run['pr']),
+        escapeshellarg((string) $run['nameWithOwner']),
+    );
+
+    exec($command, $output, $code);
+    $state = trim(implode('', $output));
+
+    return ($code === 0 && $state !== '') ? $state : null;
+}
+
+function proof_cli_rmdir(string $dir): void
+{
+    foreach (glob($dir . '/{,.}*', GLOB_BRACE) ?: [] as $path) {
+        $name = basename($path);
+        if ($name === '.' || $name === '..') {
+            continue;
+        }
+        is_dir($path) ? proof_cli_rmdir($path) : @unlink($path);
+    }
+    @rmdir($dir);
+}
+
+/**
+ * Housekeeping over the store's own contents — never a decision about a run.
+ *
+ * `gh` failures are non-fatal by design: no network, a rate limit or an auth problem skips
+ * the pass rather than breaking a pipeline run.
+ */
+function proof_cli_prune(): int
+{
+    $root = proof_root();
+    $now = date('c');
+    $pruned = 0;
+
+    foreach (proof_scan_runs($root) as $entry) {
+        $run = $entry['run'];
+
+        $state = proof_cli_pr_state($run);
+        if ($state !== null && $state !== ($run['prState'] ?? null)) {
+            $run['prState'] = $state;
+            // Preserve updatedAt: the grace period measures age since the run was last
+            // written, not since this housekeeping pass noticed the PR had closed.
+            $run['updatedAt'] = $run['updatedAt'] ?? $now;
+            file_put_contents(
+                $entry['dir'] . '/run.json',
+                json_encode($run, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
+            );
+        }
+
+        if (proof_should_prune($run, $now)) {
+            proof_cli_rmdir($entry['dir']);
+            $pruned++;
+        }
+    }
+
+    file_put_contents($root . '/index.html', proof_render_index(proof_scan_runs($root)));
+    echo "proof: pruned {$pruned} run(s)\n";
+
+    return 0;
+}
+
 $command = $argv[1] ?? '';
 
 if ($command === 'write') {
-    exit(proof_cli_write($argv[2] ?? ''));
+    $status = proof_cli_write($argv[2] ?? '');
+    proof_cli_prune();
+    exit($status);
+}
+
+if ($command === 'prune') {
+    exit(proof_cli_prune());
 }
 
 fwrite(STDERR, "usage: proof_cli.php write <payload.json> | prune\n");
