@@ -130,6 +130,10 @@ function proof_cli_prune(): int
                 $entry['dir'] . '/run.json',
                 json_encode($run, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
             );
+            // The run page prints the state in its header, so it goes stale the moment this
+            // pass learns the PR has closed. Re-render it, or the index and the page it
+            // links to disagree about the same run.
+            file_put_contents($entry['dir'] . '/index.html', proof_render_run($run));
         }
 
         if (proof_should_prune($run, $now)) {
