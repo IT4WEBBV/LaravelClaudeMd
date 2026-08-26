@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { maskFromDiff, clusterMask, classifyKind, iou, mergeRegions, countMaskInBoxes, adjustedPct, worklistFilename, readWorklist, writeWorklist, priorSectionRegions, feedbackMarkdown, resolveStorageState, groupResultsByReport, reportFilename, normalizeConfig } from './parity-lib.mjs';
+import { maskFromDiff, clusterMask, classifyKind, iou, mergeRegions, countMaskInBoxes, adjustedPct, worklistFilename, readWorklist, writeWorklist, priorSectionRegions, feedbackMarkdown, resolveStorageState, groupResultsByReport, reportFilename, normalizeConfig, pageLoadFailure } from './parity-lib.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -246,4 +246,37 @@ test('normalizeConfig applies defaults and validates', () => {
   assert.equal(c.defaultStorageState, undefined);
   assert.equal(normalizeConfig({ legacy: 'a', rebuild: 'b', surfaces: [], defaultStorageState: 'auth.json' }).defaultStorageState, 'auth.json');
   assert.throws(() => normalizeConfig({ legacy: 'a' }), /surfaces/);
+});
+
+// ─── Page-load gate ──────────────────────────────────────────────────────────
+const alive = { status: 200, text: 'Welkom bij de vereniging', elementCount: 340 };
+
+test('pageLoadFailure passes a healthy 200 through untouched', () => {
+  assert.equal(pageLoadFailure(alive), null);
+});
+
+test('pageLoadFailure names the status for every non-OK response', () => {
+  assert.match(pageLoadFailure({ ...alive, status: 500 }), /HTTP 500/);
+  assert.match(pageLoadFailure({ ...alive, status: 403 }), /HTTP 403/);
+  assert.match(pageLoadFailure({ ...alive, status: 404 }), /HTTP 404/);
+});
+
+test('pageLoadFailure lets a served redirect/not-modified through — only 4xx+ is dead', () => {
+  assert.equal(pageLoadFailure({ ...alive, status: 304 }), null);
+});
+
+test('pageLoadFailure treats a null status as nothing-to-judge, not as failure', () => {
+  // goto() returns null on same-document navigation — there is no response to inspect.
+  assert.equal(pageLoadFailure({ ...alive, status: null }), null);
+  assert.equal(pageLoadFailure({ text: alive.text, elementCount: alive.elementCount }), null);
+});
+
+test('pageLoadFailure catches an error page that still answers 200', () => {
+  assert.match(pageLoadFailure({ ...alive, status: 200, text: 'Fatal error: Uncaught Error: boom' }), /Fatal error: Uncaught/);
+  assert.match(pageLoadFailure({ ...alive, status: 200, text: 'Vite manifest not found at: /var/www/public/build/manifest.json' }), /Vite manifest not found/);
+});
+
+test('pageLoadFailure catches a blank 200 but not a legitimately text-free band', () => {
+  assert.match(pageLoadFailure({ status: 200, text: '', elementCount: 1 }), /blank document/);
+  assert.equal(pageLoadFailure({ status: 200, text: '', elementCount: 200 }), null);
 });

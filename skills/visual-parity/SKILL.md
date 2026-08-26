@@ -166,6 +166,7 @@ Rules that catch what eyeballing misses:
 
 ## Caveats that bite
 
+- **A dead page scores.** Two identical error pages diff to a flawless **0.00%** — a down stack reads as perfect parity, which is why the harness refuses to score a page it cannot trust: a 4xx/5xx status, a known fatal-error marker in the rendered text, or a blank document aborts the whole run, naming the side, the status and the URL. If a run aborts, fix the page and re-run; never route around the gate to get a number out of it.
 - **The % undercounts on background-dominated bands.** A section that's mostly white/peach with small content can read **4%** while looking completely wrong — the changed pixels are a tiny fraction. **Trust the diff IMAGE and the band-height convergence, not the % alone.** A low % is necessary, not sufficient.
 - **Anti-aliasing / font hinting** differs across stacks → keep `includeAA:false`, or text edges flood the diff.
 - **Subtle recolors can slip *under* `threshold`.** `PIXELMATCH_OPTS.threshold: 0.1` is lenient (it keeps AA noise down), so a small colour shift — a few levels per channel — may never register as a changed pixel and so never reaches the worklist at all (the `%` and the worklist both read clean). When *colour* parity matters, lower `threshold` (try `0.05`) and re-run; expect more AA noise in return. A near-zero `%` with an empty worklist is necessary, not sufficient — confirm against the diff image.

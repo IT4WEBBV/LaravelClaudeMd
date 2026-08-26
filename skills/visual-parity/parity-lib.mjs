@@ -235,3 +235,34 @@ export function normalizeConfig(raw) {
     threshold: raw.threshold ?? 0.1,
   };
 }
+
+// ── Page-load gate ───────────────────────────────────────────────────────────
+// A page that failed to load still screenshots, and two identical error pages diff to a
+// flawless 0.00% — a dead stack scores perfectly, which reads as success. That is the
+// worst failure mode this harness can have, so the load itself is a gate: a page that is
+// not a healthy document aborts the run instead of quietly becoming a number.
+
+// Matched against RENDERED text, never page source, so a JS bundle that merely mentions one
+// of these cannot trip the gate. Each is verbatim output from a stack broken badly enough to
+// skip its own error handling, which is how a broken page still comes back with a 200.
+const DEAD_PAGE_MARKERS = [
+  'Fatal error: Uncaught',                    // PHP fatal after output was already flushed
+  'Parse error: syntax error',                // broken template, same flushed-output case
+  'Vite manifest not found',                  // assets never built — the page renders unstyled
+  'Whoops, looks like something went wrong',  // Whoops handler served behind a 200
+];
+
+// Returns a short reason the page is unusable, or null when it looks alive.
+// `status` is null when Playwright's goto() returned no response — a same-document
+// navigation, or a redirect it did not re-issue. There is nothing to judge there, and it is
+// not by itself a failure. We judge the status NUMBER rather than response.ok() because ok()
+// is false for every non-2xx, and a 304 is a served page, not a dead one.
+export function pageLoadFailure({ status = null, text = '', elementCount = Infinity } = {}) {
+  if (status !== null && status >= 400) return `HTTP ${status}`;
+  const marker = DEAD_PAGE_MARKERS.find(m => text.includes(m));
+  if (marker) return `error page — rendered text contains "${marker}"`;
+  // Both conditions together, never either alone: a text-free hero band is plausible, a
+  // text-free document with almost no elements in it is a blank 200.
+  if (!text.trim() && elementCount < 10) return 'blank document — no rendered text';
+  return null;
+}

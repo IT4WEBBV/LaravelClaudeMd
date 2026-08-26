@@ -30,6 +30,7 @@ import {
   maskFromDiff, clusterMask, classifyKind, mergeRegions,
   countMaskInBoxes, adjustedPct, worklistFilename, readWorklist, writeWorklist, priorSectionRegions,
   normalizeConfig, resolveStorageState, groupResultsByReport, reportFilename, feedbackMarkdown,
+  pageLoadFailure,
 } from './parity-lib.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -89,8 +90,20 @@ const PIXELMATCH_OPTS = {
     diffColor: [255, 0, 0],
 };
 
-async function prepare(page, url, surface) {
-    await page.goto(url, { waitUntil: 'networkidle' });
+// Aborts the WHOLE run when a page did not load — see pageLoadFailure. Deliberately not a
+// skip and not a warning: the run must not be able to hand back a number it cannot stand behind.
+export async function assertPageLoaded(page, response, url, side) {
+    const probe = await page.evaluate(() => ({
+        text: document.body ? document.body.innerText : '',
+        elementCount: document.body ? document.body.querySelectorAll('*').length : 0,
+    }));
+    const failure = pageLoadFailure({ status: response ? response.status() : null, ...probe });
+    if (failure) throw new Error(`${side} page did not load: ${failure} — ${url}`);
+}
+
+async function prepare(page, url, surface, side) {
+    const response = await page.goto(url, { waitUntil: 'networkidle' });
+    await assertPageLoaded(page, response, url, side);
     if (surface.waitText) {
         await page.getByText(surface.waitText).first().waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
     }
@@ -203,8 +216,8 @@ async function run() {
                 const stateAbs = stateRel ? path.resolve(CONFIG.dir, stateRel) : undefined;
                 const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, ignoreHTTPSErrors: true, deviceScaleFactor: 1, storageState: stateAbs && existsSync(stateAbs) ? stateAbs : undefined });
                 const lp = await ctx.newPage(), rp = await ctx.newPage();
-                await prepare(lp, `${CONFIG.legacy}${surface.path}`, surface);
-                await prepare(rp, `${CONFIG.rebuild}${surface.path}`, surface);
+                await prepare(lp, `${CONFIG.legacy}${surface.path}`, surface, 'legacy');
+                await prepare(rp, `${CONFIG.rebuild}${surface.path}`, surface, 'rebuild');
 
                 const [legMeta, rebMeta] = await Promise.all([anchorTops(lp, surface.sections), anchorTops(rp, surface.sections)]);
                 const [legPng, rebPng] = await Promise.all([fullPagePng(lp), fullPagePng(rp)]);
