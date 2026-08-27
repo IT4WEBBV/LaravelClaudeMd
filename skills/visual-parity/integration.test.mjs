@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { captureHit, detectRegions, reportHtml, loadConfig, classifyHumanRegions } from './parity-harness.mjs';
+import { captureHit, detectRegions, reportHtml, loadConfig, classifyHumanRegions, assertPageLoaded } from './parity-harness.mjs';
 import { PNG } from 'pngjs';
 
 let browser, page;
@@ -224,3 +224,65 @@ test('region box is hidden until its fix-list row is hovered', async () => {
   } finally { await p2.close(); unlinkSync(f); }
 });
 
+
+// ── page-load gate, driven through a REAL goto() response ────────────────────
+// The defect this covers was that goto()'s response was discarded, so these must go through
+// an actual navigation — asserting on a hand-built response object would not have caught it.
+function tinyServer(routes) {
+  return new Promise(resolve => {
+    const server = http.createServer((req, res) => {
+      const route = routes[req.url.split('#')[0]] ?? { status: 404, body: '<h1>no route</h1>' };
+      res.writeHead(route.status, { 'content-type': 'text/html' }).end(route.body);
+    });
+    server.listen(0, () => resolve(server));
+  });
+}
+
+async function withPage(routes, fn) {
+  const server = await tinyServer(routes);
+  const page = await browser.newPage();
+  try {
+    return await fn(page, `http://localhost:${server.address().port}`);
+  } finally {
+    await page.close();
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+test('assertPageLoaded aborts on a non-OK status, naming side, status and url', async () => {
+  await withPage({ '/boom': { status: 500, body: '<h1>Server Error</h1>' } }, async (page, origin) => {
+    const url = `${origin}/boom`;
+    const response = await page.goto(url);
+    await assert.rejects(
+      () => assertPageLoaded(page, response, url, 'rebuild'),
+      e => e.message.includes('rebuild') && e.message.includes('HTTP 500') && e.message.includes(url),
+    );
+  });
+});
+
+test('assertPageLoaded lets a healthy 200 through unchanged', async () => {
+  await withPage({ '/': { status: 200, body: '<h1>Home</h1><p>real content</p>' } }, async (page, origin) => {
+    const response = await page.goto(origin + '/');
+    await assert.doesNotReject(() => assertPageLoaded(page, response, origin + '/', 'legacy'));
+  });
+});
+
+test('assertPageLoaded survives a null response (same-document navigation)', async () => {
+  await withPage({ '/': { status: 200, body: '<h1>Home</h1><p>real content</p>' } }, async (page, origin) => {
+    await page.goto(origin + '/');
+    const response = await page.goto(origin + '/#section');  // same document -> goto returns null
+    assert.equal(response, null, 'precondition: this navigation really does return null');
+    await assert.doesNotReject(() => assertPageLoaded(page, response, origin + '/#section', 'legacy'));
+  });
+});
+
+test('assertPageLoaded catches a PHP fatal that still answers 200', async () => {
+  const body = '<h1>Home</h1><br /><b>Fatal error</b>:  Uncaught Error: Call to a member function id() on null';
+  await withPage({ '/': { status: 200, body } }, async (page, origin) => {
+    const response = await page.goto(origin + '/');
+    await assert.rejects(
+      () => assertPageLoaded(page, response, origin + '/', 'legacy'),
+      /Fatal error: Uncaught/,
+    );
+  });
+});
