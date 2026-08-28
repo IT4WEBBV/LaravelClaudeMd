@@ -30,7 +30,7 @@ import {
   maskFromDiff, clusterMask, classifyKind, mergeRegions,
   countMaskInBoxes, adjustedPct, worklistFilename, readWorklist, writeWorklist, priorSectionRegions,
   normalizeConfig, resolveStorageState, groupResultsByReport, reportFilename, feedbackMarkdown,
-  pageLoadFailure,
+  pageLoadFailure, wrongPageFailure,
 } from './parity-lib.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -90,6 +90,10 @@ const PIXELMATCH_OPTS = {
     diffColor: [255, 0, 0],
 };
 
+// How long a surface's waitText gets to appear before the run aborts. It is a correctness deadline,
+// not a render hint: see wrongPageFailure in parity-lib.mjs.
+const WAIT_TEXT_TIMEOUT_MS = 20000;
+
 // Aborts the WHOLE run when a page did not load — see pageLoadFailure. Deliberately not a
 // skip and not a warning: the run must not be able to hand back a number it cannot stand behind.
 export async function assertPageLoaded(page, response, url, side) {
@@ -105,7 +109,21 @@ async function prepare(page, url, surface, side) {
     const response = await page.goto(url, { waitUntil: 'networkidle' });
     await assertPageLoaded(page, response, url, side);
     if (surface.waitText) {
-        await page.getByText(surface.waitText).first().waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
+        // Aborts the WHOLE run, exactly like assertPageLoaded — see wrongPageFailure for why this
+        // timeout must never be swallowed. This is the only guard that can catch a page that loaded
+        // FINE but is the WRONG page, which is what a stale or expired auth storageState produces.
+        const visible = await page.getByText(surface.waitText).first()
+            .waitFor({ state: 'visible', timeout: WAIT_TEXT_TIMEOUT_MS })
+            .then(() => true).catch(() => false);
+        const failure = wrongPageFailure({ waitText: surface.waitText, visible });
+        if (failure) {
+            throw new Error(
+                `${side} loaded a different page than expected: ${failure} within `
+                + `${WAIT_TEXT_TIMEOUT_MS}ms — ${url}. Either this surface's waitText is wrong, or this `
+                + `side served something else entirely: a stale or expired auth storageState redirects `
+                + `to a login page at HTTP 200, which assertPageLoaded cannot see.`
+            );
+        }
     }
     // dismiss common consent/cookie banners so they aren't a diff variable
     for (const sel of ['.js-cookie-consent-agree', '[data-cookie-accept]', 'button:has-text("Accept")', 'button:has-text("Akkoord")']) {

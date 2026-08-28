@@ -257,6 +257,19 @@ const DEAD_PAGE_MARKERS = [
 // navigation, or a redirect it did not re-issue. There is nothing to judge there, and it is
 // not by itself a failure. We judge the status NUMBER rather than response.ok() because ok()
 // is false for every non-2xx, and a 304 is a served page, not a dead one.
+// The only check that separates a CORRECT page from a WRONG one. pageLoadFailure below catches
+// BROKEN pages — HTTP >= 400, a dead-page marker, a blank document — and an unauthenticated redirect
+// to the reference site's login page is none of those: it answers 200, full of text and full of
+// elements, and sails straight through. So `waitText` is not a timing hint, it is the load-bearing
+// proof named in its own config comment ("some text that proves the page rendered"). Swallowing its
+// timeout let auth'd surfaces diff the rebuild against a login page and hand back a confident
+// percentage the run could not stand behind. Returns a message to abort with, or null.
+export function wrongPageFailure({ waitText = null, visible = false } = {}) {
+  if (!waitText) return null;   // the surface declares no proof text — nothing to judge, not a failure
+  if (visible) return null;
+  return `expected text ${JSON.stringify(waitText)} never became visible`;
+}
+
 export function pageLoadFailure({ status = null, text = '', elementCount = Infinity } = {}) {
   if (status !== null && status >= 400) return `HTTP ${status}`;
   const marker = DEAD_PAGE_MARKERS.find(m => text.includes(m));

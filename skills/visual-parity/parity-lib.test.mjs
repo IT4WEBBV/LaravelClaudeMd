@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { maskFromDiff, clusterMask, classifyKind, iou, mergeRegions, countMaskInBoxes, adjustedPct, worklistFilename, readWorklist, writeWorklist, priorSectionRegions, feedbackMarkdown, resolveStorageState, groupResultsByReport, reportFilename, normalizeConfig, pageLoadFailure } from './parity-lib.mjs';
+import { maskFromDiff, clusterMask, classifyKind, iou, mergeRegions, countMaskInBoxes, adjustedPct, worklistFilename, readWorklist, writeWorklist, priorSectionRegions, feedbackMarkdown, resolveStorageState, groupResultsByReport, reportFilename, normalizeConfig, pageLoadFailure, wrongPageFailure } from './parity-lib.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -250,6 +250,39 @@ test('normalizeConfig applies defaults and validates', () => {
 
 // ─── Page-load gate ──────────────────────────────────────────────────────────
 const alive = { status: 200, text: 'Welkom bij de vereniging', elementCount: 340 };
+
+test('wrongPageFailure aborts when the proof text never appeared', () => {
+  const failure = wrongPageFailure({ waitText: 'Email wijzigen', visible: false });
+  assert.match(failure, /never became visible/);
+  // the message must name the text that was missing, or a run cannot tell WHICH surface drifted
+  assert.match(failure, /Email wijzigen/);
+});
+
+test('wrongPageFailure passes when the proof text is visible', () => {
+  assert.equal(wrongPageFailure({ waitText: 'Email wijzigen', visible: true }), null);
+});
+
+test('wrongPageFailure judges nothing when a surface declares no waitText', () => {
+  // absent waitText is "nothing to prove", never "proof failed" — otherwise every surface without
+  // one would abort the run the moment this guard started throwing
+  assert.equal(wrongPageFailure({ waitText: null, visible: false }), null);
+  assert.equal(wrongPageFailure({ visible: false }), null);
+  assert.equal(wrongPageFailure({}), null);
+  assert.equal(wrongPageFailure(), null);
+});
+
+test('wrongPageFailure is what separates a WRONG page from pageLoadFailure BROKEN page', () => {
+  // this is the exact shape the guard exists for: an expired auth storageState redirects to the
+  // reference site's login page, which answers 200 with a full document. pageLoadFailure cannot
+  // see it, and before this guard threw, the run diffed against it and reported a percentage.
+  const loginPage = { status: 200, text: 'Inloggen  Wachtwoord vergeten?', elementCount: 420 };
+  assert.equal(pageLoadFailure(loginPage), null, 'pageLoadFailure is blind to a wrong-but-healthy page');
+  assert.match(
+    wrongPageFailure({ waitText: 'Email wijzigen', visible: false }),
+    /never became visible/,
+    'wrongPageFailure is the only thing that catches it',
+  );
+});
 
 test('pageLoadFailure passes a healthy 200 through untouched', () => {
   assert.equal(pageLoadFailure(alive), null);
