@@ -33,9 +33,16 @@
 # moved, files you will have to merge by hand. If none of those apply, it says
 # nothing at all.
 #
-# This script never touches the working tree, the index, or any local branch. It
-# fetches and refreshes remote-tracking metadata only, and predicts merges in a
-# throwaway index; deciding whether to rebase or merge is left to the human.
+# The one thing it changes on its own is the local base branch: main/master is
+# fast-forwarded to match origin so that a branch cut later starts from a current
+# base. That is strictly a fast-forward, and only when it cannot cost anything —
+# never with local commits on the base, never into a dirty or mid-operation
+# checkout, and never by writing a ref out from under a checkout that is sitting
+# on it (see worktree_holding, which is the whole reason that function exists).
+#
+# Beyond that it touches nothing: your branch, your index and your working tree
+# are left alone, merges are predicted in a throwaway index, and deciding whether
+# to rebase or merge *your* work is left to the human.
 #
 # Every path exits 0: a hook must never take a session down with it.
 
@@ -201,6 +208,132 @@ predict_conflicts() {
     printf '%s' "$paths"
 }
 
+# Path of the worktree that currently has branch $1 checked out, or empty.
+#
+# This is load-bearing. Writing a branch ref that some checkout is sitting on
+# desynchronises that checkout: the branch moves, its working tree does not, and
+# its index then claims a staged revert of everything that just arrived —
+# committing there would push away the commits we just brought in. git only
+# guards the *current* worktree's branch (verified on 2.33); a branch checked
+# out in a sibling worktree is rewritten without complaint. So: ask, never
+# assume. With slots, the sibling case is the common one.
+worktree_holding() {
+    git worktree list --porcelain 2>/dev/null | awk -v want="refs/heads/$1" '
+        $1 == "worktree" { path = substr($0, index($0, " ") + 1) }
+        $1 == "branch" && $2 == want { print path; exit }
+    '
+}
+
+# A checkout is safe to fast-forward only when there is nothing in it to lose
+# and no operation half-finished on top of it.
+worktree_is_clean() {
+    local wt=$1 dirty gd state
+
+    dirty=$(git -C "$wt" status --porcelain 2>/dev/null | grep -c . || true)
+    [ "${dirty:-0}" -eq 0 ] || return 1
+
+    gd=$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+    for state in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG rebase-merge rebase-apply; do
+        [ -e "$gd/$state" ] && return 1
+    done
+
+    return 0
+}
+
+# What a completed fast-forward costs locally.
+#
+# A ref-only update costs nothing: no checkout moved, so nothing is out of sync
+# and there is nothing to rebuild. Moving a real working tree is different — the
+# containers running against it are now behind the code in it, which is the one
+# consequence worth interrupting for.
+#
+# Appends to `sync_notes` (always, so the record exists) and to `sync_tags`
+# (only when there is something to act on, since tags are what reach the user).
+report_sync() {
+    local base=$1 n=$2 files=$3 wt=$4 needs=""
+
+    if [ -z "$wt" ]; then
+        sync_notes="${sync_notes}
+  - fast-forwarded $base by $n commit(s) — ref only, no checkout has it out, nothing to rebuild"
+        return 0
+    fi
+
+    matches_path "$files" 'composer\.lock' \
+        && needs="${needs}${needs:+, }composer install"
+    matches_path "$files" 'package-lock\.json|yarn\.lock|pnpm-lock\.yaml' \
+        && needs="${needs}${needs:+, }npm install + asset rebuild"
+    matches_path "$files" 'database/migrations/' \
+        && needs="${needs}${needs:+, }migrate"
+    matches_path "$files" '\.env\.example' \
+        && needs="${needs}${needs:+, }check for new .env keys"
+
+    if [ -z "$needs" ]; then
+        sync_notes="${sync_notes}
+  - fast-forwarded $base by $n commit(s) in $wt — application code only, nothing to rebuild"
+        return 0
+    fi
+
+    sync_notes="${sync_notes}
+  - fast-forwarded $base by $n commit(s) in $wt — $needs; that checkout is now
+    ahead of the containers running against it, so run scripts/restart.sh there
+    before using that stack"
+    sync_tags="${sync_tags}${sync_tags:+, }$base +$n, restart needed"
+}
+
+# Bring the local base branch up to date with origin, but only where that is
+# provably safe: nothing local to lose, and either nobody has the branch checked
+# out (a pure ref write) or the checkout that does is clean (a --ff-only merge).
+#
+# Everything else is reported and left exactly as it was. This is the only place
+# the script mutates local state, so every path here either acts on a verified
+# safe condition or says why it did nothing.
+sync_base_branch() {
+    local base_ref=$1 base behind ahead files wt
+
+    [ -n "$base_ref" ] || return 0
+    base=${base_ref#origin/}
+    [ -n "$base" ] || return 0
+    git rev-parse --verify --quiet "refs/heads/$base" >/dev/null 2>&1 || return 0
+
+    behind=$(git rev-list --count "$base..$base_ref" 2>/dev/null || echo 0)
+    [ "${behind:-0}" -gt 0 ] || return 0
+
+    # Local commits on the base branch are somebody's unpushed work. Never.
+    ahead=$(git rev-list --count "$base_ref..$base" 2>/dev/null || echo 0)
+    if [ "${ahead:-0}" -gt 0 ]; then
+        sync_notes="${sync_notes}
+  - $base is $behind behind $base_ref and has $ahead local commit(s) — not a
+    fast-forward, left alone"
+        sync_tags="${sync_tags}${sync_tags:+, }$base needs a manual merge"
+        return 0
+    fi
+
+    files=$(git diff --name-only "$base" "$base_ref" 2>/dev/null)
+    wt=$(worktree_holding "$base")
+
+    # Nobody has it out: a ref write, no working tree involved. Fetching from
+    # the local repo itself keeps git's own non-fast-forward rejection as a
+    # second line of defence without another trip to the network.
+    if [ -z "$wt" ]; then
+        git fetch --quiet . "$base_ref:$base" >/dev/null 2>&1 \
+            && report_sync "$base" "$behind" "$files" ""
+        return 0
+    fi
+
+    if ! worktree_is_clean "$wt"; then
+        sync_notes="${sync_notes}
+  - $base is $behind behind $base_ref but its checkout at $wt has uncommitted
+    changes or an operation in progress — left alone"
+        sync_tags="${sync_tags}${sync_tags:+, }$base checkout dirty"
+        return 0
+    fi
+
+    git -C "$wt" merge --ff-only "$base_ref" >/dev/null 2>&1 \
+        && report_sync "$base" "$behind" "$files" "$wt"
+
+    return 0
+}
+
 # Report on the repo containing $1. Prints hook JSON, or nothing when the path
 # is not a git repo with an origin.
 check_repo() {
@@ -258,6 +391,13 @@ check_repo() {
 
     insights=""
     tags=""
+    sync_notes=""
+    sync_tags=""
+
+    # Catch the local base branch up first, so a branch cut later in this
+    # session starts from the right base rather than from wherever main was
+    # left the last time anyone pulled by hand.
+    sync_base_branch "$base_ref"
 
     # Someone pushed to *this* branch. Always worth knowing and always
     # actionable — it means another machine, or another slot, is ahead of you.
@@ -309,24 +449,50 @@ ${shown}"
 
     # Nothing with a consequence attached: stay silent. This is the common case,
     # and keeping it silent is the entire point of the rewrite.
-    if [ -z "$insights" ]; then
+    if [ -z "$insights" ] && [ -z "$sync_notes" ]; then
         emit "$event" \
             "git freshness: $(basename "$target") on '$branch' — nothing incoming that affects this work (fetched $(human_age "$age"))." \
             ""
         return 0
     fi
 
-    local context summary
-    context="Stale checkout with consequences: $(basename "$target") on '$branch'${insights}
+    local context="" summary=""
+
+    if [ -n "$insights" ]; then
+        context="Stale checkout with consequences: $(basename "$target") on '$branch'${insights}
 Last fetch: $(human_age "$age").
 
 Do NOT pull, rebase, or merge on your own initiative. Raise this with the user
 before starting work and let them decide whether to bring the branch up to date
 or deliberately continue on the current base."
-    summary="$(basename "$target") '$branch': ${tags} — incoming from ${base_ref:-origin}."
+        summary="$(basename "$target") '$branch': ${tags} — incoming from ${base_ref:-origin}."
+    fi
+
+    # A sync that changed nothing anyone has to act on still gets recorded in
+    # the context, so the reason main moved is never a mystery — it just does
+    # not earn a line on screen.
+    if [ -n "$sync_notes" ]; then
+        context="${context}${context:+
+
+}Base branch sync: $(basename "$target")${sync_notes}"
+    fi
+
+    if [ -n "$sync_tags" ]; then
+        if [ -n "$summary" ]; then
+            summary="${summary} Also: ${sync_tags}."
+        else
+            summary="$(basename "$target"): ${sync_tags}."
+        fi
+    fi
 
     emit "$event" "$context" "$summary"
 }
+
+# Sourcing this file with GIT_FRESHNESS_LIB=1 defines the functions above
+# without running the hook. Used by hooks/tests/git-freshness-sync.test.sh.
+if [ "${GIT_FRESHNESS_LIB:-}" = "1" ]; then
+    return 0 2>/dev/null || exit 0
+fi
 
 case "$mode" in
     checkout)
