@@ -6,10 +6,12 @@
  * `proof_render.php` stay testable without touching any of it.
  *
  *   php proof_cli.php write <payload.json>
+ *   php proof_cli.php open [<page.html>]
  *   php proof_cli.php prune
  *
  * Never exits non-zero for a store problem. Failing to *file* proof must not halt a run;
  * only failing to *capture* it does, and that is the leg's decision, not this script's.
+ * `open` is weaker still: it is cosmetic, so every one of its paths logs and returns 0.
  */
 
 require_once __DIR__ . '/proof.php';
@@ -78,6 +80,46 @@ function proof_cli_write(string $payloadPath): int
     file_put_contents($root . '/index.html', proof_render_index(proof_scan_runs($root)));
 
     echo $dir . "/index.html\n";
+
+    return 0;
+}
+
+/**
+ * Open a finished run's page in the desktop browser — the run's last action, once per run.
+ *
+ * Cosmetic, and weaker than every other policy in this file: failing to *capture* proof halts a
+ * run and failing to *file* it logs and continues, but failing to *open* it does not even rate a
+ * distinct outcome. Every path below returns 0, including "there is no page", which is the normal
+ * state of a backend-only run that never triggered `verify-ui`.
+ *
+ * `proof_open_argv()` returns an argv **array** and `proc_open()` runs an array form without a
+ * shell, so the page path — which reaches this store from a JSON payload — is passed to the opener
+ * as one literal argument. There is no command line for a quote or a `;` in it to escape from.
+ *
+ * The opener is expected to return immediately (`open` launches and exits; a desktop `xdg-open`
+ * delegates and exits). On a headless box where `xdg-open` would fall back to a blocking terminal
+ * browser, set `PIPELINE_NO_OPEN=1` — which is what an unattended run wants regardless.
+ */
+function proof_cli_open(string $path): int
+{
+    $argv = proof_open_argv($path === '' ? null : $path);
+
+    if ($argv === null) {
+        fwrite(STDERR, "proof: nothing to open\n");
+
+        return 0;
+    }
+
+    $quiet = ['file', '/dev/null', 'w'];
+    $process = @proc_open($argv, [0 => ['file', '/dev/null', 'r'], 1 => $quiet, 2 => $quiet], $pipes);
+
+    if (! is_resource($process)) {
+        fwrite(STDERR, "proof: could not open {$path}\n");
+
+        return 0;
+    }
+
+    proc_close($process);
 
     return 0;
 }
@@ -167,9 +209,13 @@ if ($command === 'write') {
     exit($status);
 }
 
+if ($command === 'open') {
+    exit(proof_cli_open((string) ($argv[2] ?? '')));
+}
+
 if ($command === 'prune') {
     exit(proof_cli_prune());
 }
 
-fwrite(STDERR, "usage: proof_cli.php write <payload.json> | prune\n");
+fwrite(STDERR, "usage: proof_cli.php write <payload.json> | open [<page.html>] | prune\n");
 exit(0);

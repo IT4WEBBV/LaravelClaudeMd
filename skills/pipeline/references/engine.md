@@ -85,7 +85,7 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth | writes the PR# pointer |
 | **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links. **Leaves the PR draft** (below) | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, writes the run's page to the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — the payload carries `nameWithOwner`, `pr` and `issue` so the page can link back to both — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
-| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | read-only reviewer subagent writes a review; the engine reads it and acts (§`auto`). The second write is a full payload, not a patch — `proof_cli.php write` always replaces the page, and `proof_write_run()` preserves `createdAt` across it. | feeds the PR-review gate; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
+| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | read-only reviewer subagent writes a review; the engine reads it and acts (§`auto`). The second write is a full payload, not a patch — `proof_cli.php write` always replaces the page, and `proof_write_run()` preserves `createdAt` across it. Its **last action** is `checks/proof_cli.php open <page>` (§The proof store). | feeds the PR-review gate; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
 
 ## The proof store — where the visual record actually lives
 
@@ -112,6 +112,36 @@ shot count — and no longer claims to carry the images themselves.
 failing to *file* it logs and continues. The engine never reads the store to decide anything:
 deleting all of `_proofs/` changes no run's behaviour, which is what keeps a durable store
 compatible with the non-goal "no persistent state not reconstructable from git + gh".
+
+**The finished page opens itself — once, at the end.** `review-pr`'s last action, after its final
+`write`, is `php checks/proof_cli.php open <page>`, passing the path that `write` printed on stdout.
+`write` runs at least twice per run — `verify-ui` builds the page, `review-pr` finalises it — so
+opening from `write` would open the same page two or more times; a separate subcommand invoked once,
+at completion, is the only shape that opens once. A run that **halts** after the page exists opens it
+on the same rule, because a halted run is exactly the one a human is about to go looking at: one
+`open`, at whatever turns out to be the run's last action.
+
+**A run with no page opens nothing.** A backend-only run never triggers `ui`, so `verify-ui` never
+ran, no `write` happened and there is no path to pass. `open` given a missing path — or none — logs
+and returns 0; it is a silent no-op, never an error.
+
+**Opening is cosmetic, weaker than every other proof policy.** Failing to *capture* proof halts a
+run; failing to *file* it logs and continues; failing to *open* it does neither — `open` returns 0
+on every path, including a platform it has no opener for (`open` on macOS, `xdg-open` on Linux,
+nothing anywhere else). The page path reaches the store from a JSON payload, so `open` never builds
+a shell string from it: it hands `proc_open()` an argv **array**, which runs without a shell at all.
+
+- **`PIPELINE_NO_OPEN=1`** suppresses opening entirely — headless boxes, CI, and unattended batches
+  where the tabs are noise.
+- **`PIPELINE_OPEN_CMD`** replaces the platform default with an executable that receives the page
+  path as its single argument.
+
+**Concurrent finishes are left undamped, deliberately.** Legs run as background subagents and
+several runs can finish within minutes of each other; each opens only its own page, so four finishes
+are four tabs. Damping that — a lock, a debounce, a "just open the store index instead" — would
+silently drop some run's page, and a reader who cannot tell *which* run was skipped is worse off
+than one who closes a tab. The unattended batch that produces the burst is precisely the case
+`PIPELINE_NO_OPEN=1` already covers.
 
 ## Who takes the PR out of draft — `review-pr`, never `implement`
 
