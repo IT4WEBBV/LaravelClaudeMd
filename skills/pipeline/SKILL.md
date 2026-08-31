@@ -25,7 +25,9 @@ driving a run — the enforcement lives there, not in this summary:
   §Mechanical checks). Opt-in: repos that have not declared them are unaffected.
 - **Visual proof** — when `pipeline_triggers(...)['ui']` fires, `verify-ui` writes a durable page to
   `~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/index.html` and the PR gets a text-only record comment
-  (`references/engine.md` §The proof store). Backend-only runs are unaffected.
+  (`references/engine.md` §The proof store). The finished page **opens in the browser once**, as the
+  run's last action; `PIPELINE_NO_OPEN=1` suppresses that for headless and unattended runs.
+  Backend-only runs have no page and are unaffected.
 
 The deterministic guardrails are tested PHP in `checks/` (run
 `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`).
