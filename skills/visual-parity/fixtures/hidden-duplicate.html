@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>hidden duplicate waitText fixture</title>
+<style>
+  .offscreen-nav { display: none; }
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 0; padding: 24px; }
+</style>
+<!-- FIRST in DOM order and permanently hidden: this is the shape that produced a false abort.
+     A collapsed mobile-nav duplicate of a heading is the real-world case. -->
+<nav class="offscreen-nav"><a href="/mijnverhaal">Mijn verhaal</a></nav>
+
+<!-- SECOND in DOM order and plainly visible: what a reader actually sees. -->
+<main><h1>Mijn verhaal</h1></main>
