@@ -105,6 +105,23 @@ export async function assertPageLoaded(page, response, url, side) {
     if (failure) throw new Error(`${side} page did not load: ${failure} — ${url}`);
 }
 
+// Waits for ANY VISIBLE occurrence of `waitText`, not for the first one in DOM ORDER.
+//
+// `getByText(t).first()` picks the first DOM match and then waits for THAT node to become visible.
+// When the first match is a hidden node — a collapsed mobile-nav anchor, an aria-hidden duplicate, a
+// `display:none` skip-link — it never becomes visible, and the wait times out even though the page is
+// correct and the text is plainly on screen. Harmless while the timeout was swallowed; once the
+// timeout aborts the run, it became a FALSE ABORT on a healthy page. Measured on BreinStraat2's
+// MyStory landing: 2 matches for the same string, [0] a hidden nav anchor, [1] the visible <h1>.
+//
+// Filtering to visible matches first makes the wait mean what the guard needs it to mean — "is this
+// text visible ANYWHERE on the page" — so a hidden duplicate cannot mask a visible one.
+export async function waitTextVisible(page, waitText, timeoutMs) {
+    return page.getByText(waitText).filter({ visible: true }).first()
+        .waitFor({ state: 'visible', timeout: timeoutMs })
+        .then(() => true).catch(() => false);
+}
+
 async function prepare(page, url, surface, side) {
     const response = await page.goto(url, { waitUntil: 'networkidle' });
     await assertPageLoaded(page, response, url, side);
@@ -112,9 +129,7 @@ async function prepare(page, url, surface, side) {
         // Aborts the WHOLE run, exactly like assertPageLoaded — see wrongPageFailure for why this
         // timeout must never be swallowed. This is the only guard that can catch a page that loaded
         // FINE but is the WRONG page, which is what a stale or expired auth storageState produces.
-        const visible = await page.getByText(surface.waitText).first()
-            .waitFor({ state: 'visible', timeout: WAIT_TEXT_TIMEOUT_MS })
-            .then(() => true).catch(() => false);
+        const visible = await waitTextVisible(page, surface.waitText, WAIT_TEXT_TIMEOUT_MS);
         const failure = wrongPageFailure({ waitText: surface.waitText, visible });
         if (failure) {
             throw new Error(

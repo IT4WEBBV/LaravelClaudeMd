@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { captureHit, detectRegions, reportHtml, loadConfig, classifyHumanRegions, assertPageLoaded } from './parity-harness.mjs';
+import { captureHit, detectRegions, reportHtml, loadConfig, classifyHumanRegions, assertPageLoaded, waitTextVisible } from './parity-harness.mjs';
 import { PNG } from 'pngjs';
 
 let browser, page;
@@ -285,4 +285,30 @@ test('assertPageLoaded catches a PHP fatal that still answers 200', async () => 
       /Fatal error: Uncaught/,
     );
   });
+});
+
+// ── waitText must find a VISIBLE match, not the first match in DOM order ────────────────────────
+// Regression guard. `getByText(t).first()` waits on the first DOM node, so a hidden duplicate ahead
+// of the visible one times out and — now that the timeout aborts the run — falsely condemns a
+// healthy page. Measured on BreinStraat2's MyStory landing before this was fixed.
+
+test('waitTextVisible sees the visible match even when a hidden duplicate comes first in the DOM', async () => {
+  await page.goto(pathToFileURL(join(process.cwd(), 'fixtures/hidden-duplicate.html')).href);
+
+  // the fixture must actually contain the trap, or this test proves nothing
+  assert.equal(await page.getByText('Mijn verhaal').count(), 2, 'fixture should hold two matches');
+  assert.equal(await page.getByText('Mijn verhaal').first().isVisible(), false, 'first DOM match must be hidden');
+
+  assert.equal(await waitTextVisible(page, 'Mijn verhaal', 2000), true);
+});
+
+test('waitTextVisible still reports false when the text is genuinely absent', async () => {
+  await page.goto(pathToFileURL(join(process.cwd(), 'fixtures/hidden-duplicate.html')).href);
+  assert.equal(await waitTextVisible(page, 'Energiemonitor', 1500), false);
+});
+
+test('waitTextVisible reports false when EVERY match is hidden', async () => {
+  // the guard must still catch a page that merely contains the string in dead markup
+  await page.setContent('<div style="display:none">Mijn verhaal</div>');
+  assert.equal(await waitTextVisible(page, 'Mijn verhaal', 1500), false);
 });
