@@ -529,7 +529,7 @@ The three modes are `session` (launch directory, at startup), `edit` (the repo o
 
 Run `bash hooks/tests/git-freshness-sync.test.sh` after changing the hook. It builds throwaway repos under `$TMPDIR` and covers every branch of the base-branch sync, including the sibling-worktree case that is easy to get silently wrong.
 
-Re-run step 3 whenever either repo adds a new skill (existing ones update via `git pull`; a brand-new skill folder needs its own symlink). It is idempotent — see [`README.md` § Linking the skills](README.md#linking-the-skills-idempotent) for the `-n` caveat and how to sweep the dangling symlink a renamed or removed skill leaves behind.
+Re-run step 3 whenever either repo adds a new skill (existing ones update via `git pull`; a brand-new skill folder needs its own symlink). It is idempotent — see [`README.md` § Linking the skills](README.md#linking-the-skills) for the `-n` caveat and how to sweep the dangling symlink a renamed or removed skill leaves behind.
 
 **Caveats**
 - Only link the `skills/` folders. Do **not** symlink `DevOps-Claude-Config/settings.json` or its `CLAUDE.md` over yours — that repo is a colleague's personal config; its settings/instructions are not ours.
