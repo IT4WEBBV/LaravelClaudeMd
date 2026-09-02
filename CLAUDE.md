@@ -477,8 +477,8 @@ Personal skills are pooled from **two** git repos, so `~/.claude/skills/` is a *
 
 | Repo | Clone location | Provides |
 |------|----------------|----------|
-| `IT4WEBBV/LaravelClaudeMd` | `~/GitProjects/LaravelClaudeMd/LaravelClaudeMd` | `browser-verification`, `improve-codebase-architecture`, `slots` |
-| `IT4WEBBV/DevOps-Claude-Config` | `~/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config` | `handoff`, `memory-sync`, `release-changelog`, `retenium-prod` |
+| `IT4WEBBV/LaravelClaudeMd` | `~/GitProjects/LaravelClaudeMd/LaravelClaudeMd` | `browser-verification`, `counselors`, `critique`, `experiment`, `improve-codebase-architecture`, `pipeline`, `slots`, `visual-parity` |
+| `IT4WEBBV/DevOps-Claude-Config` | `~/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config` | `handoff`, `memory-sync`, `release-changelog`, `retenium-prod`, `review-pr`, `work-on` |
 
 > **Nested clone layout**: both repos are cloned one level deep — `~/GitProjects/<Repo>/<Repo>/` — to match `DevOps-Claude-Config`'s own README and its `memory-sync` skill, which expects that path. Keep this layout so Mark's skills work unmodified.
 
@@ -529,7 +529,7 @@ The three modes are `session` (launch directory, at startup), `edit` (the repo o
 
 Run `bash hooks/tests/git-freshness-sync.test.sh` after changing the hook. It builds throwaway repos under `$TMPDIR` and covers every branch of the base-branch sync, including the sibling-worktree case that is easy to get silently wrong.
 
-Re-run step 3 whenever either repo adds a new skill (existing ones update via `git pull`; a brand-new skill folder needs its own symlink).
+Re-run step 3 whenever either repo adds a new skill (existing ones update via `git pull`; a brand-new skill folder needs its own symlink). It is idempotent — see [`README.md` § Linking the skills](README.md#linking-the-skills) for the `-n` caveat and how to sweep the dangling symlink a renamed or removed skill leaves behind.
 
 **Caveats**
 - Only link the `skills/` folders. Do **not** symlink `DevOps-Claude-Config/settings.json` or its `CLAUDE.md` over yours — that repo is a colleague's personal config; its settings/instructions are not ours.
