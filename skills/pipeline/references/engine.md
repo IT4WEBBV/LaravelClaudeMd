@@ -51,7 +51,7 @@ The `issues` endpoint returns both, and a PR has a non-null `pull_request` — t
 | a number that is an **issue** | itself; the branch comes from the repo's `branch.issue` pattern in `.claude/work-on.config.md`, not from the idea-slugifier below |
 | a number that is a **PR** | its `closingIssuesReferences`; failing that, the issue number in its `head.ref` |
 | a **spec-path** or an existing branch | the issue number in the branch name, via the same `branch.issue` pattern |
-| a bare **idea** | none. Skip this whole section and say so in one line at kickoff; nothing here is a prerequisite for a run that has no issue to administer |
+| a bare **idea** | none. Skip this whole section **silently** — a run with no issue has nothing to administer, and saying so on every idea-run is the same noise as announcing an absent board (below). A number that was *given* and does not resolve is the opposite case: that is an error, and it is reported |
 
 **Then the blockers — the only check here that can stop a run:**
 
@@ -76,13 +76,22 @@ single source `work-on` and `handoff` read. Parse it with `pipeline_repo_board()
 
 | State | Meaning | Behaviour |
 |---|---|---|
-| `absent` | no `## Board` section, or the untouched template scaffold, and no board-only key anywhere else | board-less repo — skip the status move, note it in one line, continue |
+| `absent` | no `## Board` section, or the untouched template scaffold, and no board-only key anywhere else | not adopted — skip the status move **silently**, exactly as if this section did not exist. The run says nothing about a board |
 | `valid` | all five of `org`, `number`, `project-id`, `status-field-id`, `in-progress-option-id` are filled in | move the item to **In Progress** |
 | `invalid` | a typo'd heading, an unknown key, or a half-filled section | **machinery failure — halt.** `error` carries the reason |
 
 `absent` and `invalid` are different states here for exactly the reason they are under §Mechanical
 checks: a status move that silently stops happening is indistinguishable from a repo that never had
 a board, and the run believes it is covered either way.
+
+**`absent` is silent, and that is the deliberate half.** §Mechanical checks already sets this rule
+for a repo that has not adopted them — *"behaves exactly as it did before, with no mention of
+checks"* — and a board is the same kind of opt-in. A repo that has no board has not failed to do
+anything, so a line reporting that it has no board is noise on **every run in that repo, forever**;
+it also invites the next reader to treat a deliberate non-adoption as a gap to close. The states
+that *do* speak are the ones where something happened or should have: `valid` reports the move it
+made, `invalid` halts and says why. Silence is reserved for "this does not apply here", never for
+"this failed".
 
 ```bash
 ITEM_ID=$(gh project item-add <board.number> --owner <board.org> --url <html_url> --format json --jq '.id')
@@ -290,7 +299,11 @@ a finding it created itself.
 judgment it is best placed to make — so this never interrupts a run in either mode. What it must
 never do is leave the outcome implicit: an issue that closes by accident and an issue that closes
 by decision are indistinguishable after the merge, which is the whole reason this step is written
-down. A run with no related issue records "no linked issue" in one line and moves on.
+down.
+
+**A run that never had an issue skips this section silently** (§The work item) — there is nothing
+to reconcile. That is not the same as a run *with* an issue whose PR carries no closing link: the
+reconciliation ran there and produced an answer, so it is reported like any other outcome.
 
 ## Mechanical checks — the deterministic layer inside `implement`
 

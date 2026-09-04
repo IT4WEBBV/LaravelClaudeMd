@@ -23,7 +23,8 @@ driving a run — the enforcement lives there, not in this summary:
 - **The work item** — a run that carries an issue claims it (board → **In Progress**), refuses to
   start on work with an open blocker, and settles at `review-pr` whether merging closes it
   (`references/engine.md` §The work item, §Closing links). The board half is opt-in per repo via
-  the `## Board` block those repos already have; a board-less repo skips it and runs normally.
+  the `## Board` block those repos already have; a board-less repo skips it **silently** and runs
+  exactly as before, the same way an unadopted `## Checks` block is never mentioned.
 - **Mechanical checks** — `implement` also runs a repo's PHPStan/Pint checks after each step when
   the repo declares them in a committed `## Checks` block (`references/engine.md`
   §Mechanical checks). Opt-in: repos that have not declared them are unaffected.
