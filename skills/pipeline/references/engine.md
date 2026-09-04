@@ -28,6 +28,79 @@ read manifest (or reconstruct it)         # manifest_read / manifest_infer_curso
   `brainstorming` invokes `writing-plans`) would never return, so an inline auto-continuation
   would silently walk past the next gate. A lost leg **halts the chain; it never skips a gate.**
 
+## The work item — resolved before anything is created
+
+A run that carries a GitHub issue owes that issue three things `work-on` already does and the
+pipeline previously did not: it claims it on the board, it refuses to start on blocked work, and
+at the end it settles whether merging closes it (§Closing links). This section is the first two;
+all of it runs **before the worktree exists**, because a run that must not start should leave
+nothing behind.
+
+**Resolve the item first. A bare number classifies itself:**
+
+```bash
+gh api repos/<repo>/issues/<number> \
+  --jq '{number, title, html_url, node_id, state, is_pr: (.pull_request != null)}'
+```
+
+The `issues` endpoint returns both, and a PR has a non-null `pull_request` — the same probe
+`work-on` uses, which is why `/pipeline <number>` needs no separate issue and PR syntax.
+
+| Invocation | The run's issue |
+|---|---|
+| a number that is an **issue** | itself; the branch comes from the repo's `branch.issue` pattern in `.claude/work-on.config.md`, not from the idea-slugifier below |
+| a number that is a **PR** | its `closingIssuesReferences`; failing that, the issue number in its `head.ref` |
+| a **spec-path** or an existing branch | the issue number in the branch name, via the same `branch.issue` pattern |
+| a bare **idea** | none. Skip this whole section and say so in one line at kickoff; nothing here is a prerequisite for a run that has no issue to administer |
+
+**Then the blockers — the only check here that can stop a run:**
+
+```bash
+gh api /repos/<repo>/issues/<number>/dependencies/blocked_by \
+  | jq -r '.[] | select(.state == "open") | "#\(.number) \(.title)"'
+```
+
+Any open blocker → **halt at kickoff**, in both modes, naming the blockers. This is deliberately
+*not* the treatment the content triggers get (`gates.md`): those are facts about a diff, answered
+with an annotation, and the governing principle there is that the pipeline never merges so a bad
+PR is trashable. A blocker is a different claim — that this work may not *start* — and the three
+answers to it (wait, work around it, pick the blocker up first) are all the human's. Halting costs
+nothing: no worktree, no branch, no PR exists yet, so there is nothing to leave behind and nothing
+to clean up.
+
+**Then the board — claim the item before the slow steps.** Board identifiers are **not** in this
+skill; they live in the `## Board` section of the repo's `.claude/work-on.config.md`, the same
+single source `work-on` and `handoff` read. Parse it with `pipeline_repo_board()`
+(`../checks/board.php`), which returns the same three states, for the same reason, as
+`pipeline_repo_checks()`:
+
+| State | Meaning | Behaviour |
+|---|---|---|
+| `absent` | no `## Board` section, or the untouched template scaffold, and no board-only key anywhere else | board-less repo — skip the status move, note it in one line, continue |
+| `valid` | all five of `org`, `number`, `project-id`, `status-field-id`, `in-progress-option-id` are filled in | move the item to **In Progress** |
+| `invalid` | a typo'd heading, an unknown key, or a half-filled section | **machinery failure — halt.** `error` carries the reason |
+
+`absent` and `invalid` are different states here for exactly the reason they are under §Mechanical
+checks: a status move that silently stops happening is indistinguishable from a repo that never had
+a board, and the run believes it is covered either way.
+
+```bash
+ITEM_ID=$(gh project item-add <board.number> --owner <board.org> --url <html_url> --format json --jq '.id')
+gh project item-edit --id "$ITEM_ID" \
+  --project-id <board.project-id> \
+  --field-id <board.status-field-id> \
+  --single-select-option-id <board.in-progress-option-id>
+```
+
+Both calls are idempotent: `item-add` returns the existing item id when the issue is already on the
+board, and an item already In Progress is a no-op worth one line in the kickoff summary. Failing to
+*record* the claim is an annotation, never a halt — the run's work is unaffected by a board that
+would not answer.
+
+**Nothing from this section enters the manifest except the issue number.** The board status is
+recomputable from the board, and `manifest.md` is explicit that storing a recomputable field is a
+latent drift bug. The issue number is a pointer, which is what the manifest is for.
+
 ## Kickoff — resolve the worktree, then start the loop
 
 The whole run lives in **one worktree**; the pipeline ensures one exists, creating it if the
@@ -50,6 +123,11 @@ current checkout isn't already it. Derive the starting point from the invocation
     <branch>` or a harness-native worktree under `.claude/worktrees/<branch>`.
   - **headless with no such machinery and no consent** → stop and report; never mutate the
     primary checkout unattended.
+- **From an `issue#`** → the branch name comes from the repo's `branch.issue` pattern in
+  `.claude/work-on.config.md` (e.g. `feature/issue-<number>-<slug>`), **not** from the slugifier
+  above — a run and a `work-on` session on the same issue must land on the same branch name, or
+  the second one silently opens a second branch for one issue. Then create the worktree exactly
+  as above.
 - **From a spec-path or `pr#`** → the branch is known (the spec's branch; the PR's `head.ref`) →
   create the worktree for it, or use the current checkout if you are already on it.
 - **Already launched inside a claimed feature worktree** → use it; create nothing.
@@ -82,10 +160,10 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 |---|---|---|---|---|
 | **design** *(compound)* | `superpowers:brainstorming` → `superpowers:writing-plans` (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it) | human drives the brainstorm dialogue, which chains into writing-plans; re-invoke `/pipeline` to continue | a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions | writes spec + plan pointers |
 | **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | read-only reviewer subagent writes a review; the engine reads it and acts (§`auto`) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
-| **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth | writes the PR# pointer |
-| **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links. **Leaves the PR draft** (below) | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
+| **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth. References the issue **without a closing keyword** (§Closing links) — this PR carries no implementation yet | writes the PR# pointer |
+| **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links (§Closing links — `review-pr` reconciles them before the PR goes ready). **Leaves the PR draft** (below) | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, writes the run's page to the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — the payload carries `nameWithOwner`, `pr` and `issue` so the page can link back to both — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
-| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | read-only reviewer subagent writes a review; the engine reads it and acts (§`auto`). The second write is a full payload, not a patch — `proof_cli.php write` always replaces the page, and `proof_write_run()` preserves `createdAt` across it. Its **last action** is `checks/proof_cli.php open <page>` (§The proof store). | feeds the PR-review gate; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
+| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | read-only reviewer subagent writes a review; the engine reads it and acts (§`auto`). The second write is a full payload, not a patch — `proof_cli.php write` always replaces the page, and `proof_write_run()` preserves `createdAt` across it. Its **last action** is `checks/proof_cli.php open <page>` (§The proof store). Reconciles the closing links **before** `gh pr ready` (§Closing links). | feeds the PR-review gate; writes `issue_links` onto the entry; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
 
 ## The proof store — where the visual record actually lives
 
@@ -163,6 +241,56 @@ overrides any mark-ready instruction in the plan, the PR comment, or `work-on`'s
 
 A cold-resume session that picks the PR up from its comment is outside the loop, so nothing mechanical
 can stop it undrafting early — the instruction in the brief is the only control. Keep it there.
+
+## Closing links — settled at `review-pr`, never assumed
+
+A PR auto-closes an issue on merge **only** if that issue sits in its `closingIssuesReferences`,
+which a closing keyword in the body (`Closes/Fixes/Resolves #N`) or a manual *Development*-panel
+link populates. Two failure modes follow, and a run that opens a PR at `handoff` and finishes it at
+`review-pr` can produce both:
+
+- **Unintended non-close** — the run delivered the whole issue, no closing link exists, and the
+  issue sits open and orphaned after the merge.
+- **Unintended close** — a closing keyword is present while the delivery is incomplete, so the
+  merge closes work that is still running.
+
+**At `handoff` the answer is always "do not close".** That PR carries a spec and a plan and no
+implementation, so a `Closes #N` in its body would close the issue on merge for work nobody has
+written. Reference the issue with a non-closing form — `Part of #N` / `Refs #N`. This is not a
+preference: it is the same defect `/critique pr`'s own rubric names, *a PR with only a spec and a
+plan that closes the issue on merge while nothing is built*, and a run should not hand its reviewer
+a finding it created itself.
+
+**At `review-pr`, before `gh pr ready`, reconcile — this is the last moment it can be settled.**
+
+1. **Read what will close:**
+   ```bash
+   gh pr view <pr> --json closingIssuesReferences \
+     --jq '.closingIssuesReferences[] | "#\(.number) [\(.state)] \(.title)"'
+   ```
+2. **Decide what should close.** Per related issue, tag each in-scope acceptance point *delivered*,
+   *deliberately dropped* (an explicit, documented decision) or *still TODO*. The issue should close
+   iff every point is delivered or deliberately dropped — a deliberate drop does not block closing;
+   one still-TODO point does. A parent issue closes only when all of its child scope is delivered.
+3. **Correct the body** where the two disagree. Add `Closes #N`, or replace the keyword with
+   `Part of #N`. **One keyword per issue** — after a single keyword, a bare `#2` in `Closes #1, #2`
+   closes only `#1`. Fetch the body and edit it; never blank it:
+   ```bash
+   BODY=$(gh pr view <pr> --json body --jq '.body')
+   gh pr edit <pr> --body "<$BODY with the closing keywords corrected>"
+   ```
+4. **A manual Development-panel link cannot be removed via `gh`.** Editing the body will not clear
+   it. Surface it as a prominent annotation asking for it to be unlinked in the UI, and continue —
+   the run cannot fix it, and halting over it would strand a finished PR.
+5. **Record the outcome per issue** in the `pr-review` ledger entry's `issue_links`
+   (`manifest.md`) and in the PR body: *closes on merge* / *stays open (still TODO: …)* /
+   *deliberately dropped — closes anyway*.
+
+**A mismatch is corrected, not escalated.** The engine knows what it built — that is the one
+judgment it is best placed to make — so this never interrupts a run in either mode. What it must
+never do is leave the outcome implicit: an issue that closes by accident and an issue that closes
+by decision are indistinguishable after the merge, which is the whole reason this step is written
+down. A run with no related issue records "no linked issue" in one line and moves on.
 
 ## Mechanical checks — the deterministic layer inside `implement`
 
@@ -262,6 +390,12 @@ Under `auto` these are the only stops. **No finding stops a run.**
   `work-on` hits a blocker, or the reviewer returns nothing after a single retry. → **halt.** Write
   the failure to the manifest; a human resumes. **No silent retry** beyond that one — a retry hides
   the failure and the machinery may be in an unknown state.
+- **Kickoff halts** (§The work item) — these fire *before* the worktree exists, so they leave
+  nothing behind and there is no manifest yet to write to; report and stop.
+  - **An open blocker** on the run's issue → halt in both modes. Which of wait / work around /
+    pick the blocker up first applies is the human's call, not a finding to resolve.
+  - **`pipeline_repo_board()` returns `invalid`** → machinery failure, same treatment as an
+    `invalid` `## Checks` block. A board-less repo returns `absent` and is unaffected.
 - **Bound exhaustion.** Each loop-back is bounded to **2 cycles** per gate; on what would be the
   third, **halt in-session** — stop, leave the work in the worktree, and say why. The bound is what
   keeps an autonomous loop from churning indefinitely without ever surfacing.

@@ -16,10 +16,14 @@ Core principle: **read the manifest → pick the next leg → run it → write t
 continue.** No long-lived brain; a lost run reconstructs from git + gh. See the references before
 driving a run — the enforcement lives there, not in this summary:
 
-- **`references/engine.md`** — the loop, kickoff/worktree, dev-stack readiness, the per-station
-  briefs, failure policy, navigation. **Read this first.**
+- **`references/engine.md`** — the loop, the work item, kickoff/worktree, dev-stack readiness, the
+  per-station briefs, failure policy, navigation. **Read this first.**
 - **`references/gates.md`** — modes, content triggers, and the forward-navigation guardrail.
 - **`references/manifest.md`** — the disposable-cursor state file and its reconstruction.
+- **The work item** — a run that carries an issue claims it (board → **In Progress**), refuses to
+  start on work with an open blocker, and settles at `review-pr` whether merging closes it
+  (`references/engine.md` §The work item, §Closing links). The board half is opt-in per repo via
+  the `## Board` block those repos already have; a board-less repo skips it and runs normally.
 - **Mechanical checks** — `implement` also runs a repo's PHPStan/Pint checks after each step when
   the repo declares them in a committed `## Checks` block (`references/engine.md`
   §Mechanical checks). Opt-in: repos that have not declared them are unaffected.
@@ -35,12 +39,15 @@ The deterministic guardrails are tested PHP in `checks/` (run
 ## Invocation and navigation
 
 ```
-/pipeline [interactive|auto] <idea | spec-path | pr#>   # start a run (mode defaults to interactive)
-/pipeline                                               # resume the current branch's run
+/pipeline [interactive|auto] <idea | number | spec-path>   # start a run (mode defaults to interactive)
+/pipeline                                                  # resume the current branch's run
 ```
 
 - **One entry point.** `/pipeline` starts a run, or — when a manifest (or reconstructable
   PR/branch state) for the current branch exists — **resumes** it after the invariant checks.
+- **A number is an issue or a PR, and it classifies itself** — the `issues` endpoint returns both,
+  and a PR has a non-null `pull_request` (`references/engine.md` §The work item). There is no
+  separate issue and PR syntax to remember.
 - **Mode defaults to `interactive`.** `auto` is an explicit opt-in for unattended runs; a fresh
   `/pipeline <idea>` never runs unattended by surprise.
 - **Navigation is natural language, not more commands.** Once loaded the engine holds the cursor,
