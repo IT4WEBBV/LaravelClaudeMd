@@ -18,7 +18,7 @@ Read/written by the Phase A helpers in `../checks/manifest.php`:
 | `mode` | **required** | `interactive` or `auto` |
 | `cursor` | **required** | current leg + status |
 | `pipeline_id` | optional | stable id alongside `branch` |
-| `artifacts` | optional | pointers: spec path, plan path, PR number |
+| `artifacts` | optional | pointers: spec path, plan path, PR number, issue number (`engine.md` §The work item) |
 | `last_sha` | optional | HEAD at the last completed leg |
 | `gate_ledger` | optional | the audit trail — each gate's review, what the engine or the human did about it, and the content-trigger annotations (shape below) |
 | `lease` | optional | session id + timestamp (single-driver guard) |
@@ -74,6 +74,7 @@ the PR.
 | `actions[].claim` | the point from the review the engine or human acted on |
 | `actions[].disposition` | `integrated` (edited and committed) \| `recorded` (logged, no edit) \| `open-question` (carried verbatim into the PR body) |
 | `actions[].note` | what was done, or why it was not |
+| `issue_links` | **`pr-review` entries only** — the closing-link reconciliation, one entry per related issue: `{"issue": 1926, "outcome": "closes" \| "stays-open" \| "dropped-but-closes"}` (`engine.md` §Closing links). Absent on a run with no linked issue |
 | `outcome` | `continued` \| `looped-back` \| `halted` |
 
 **A `verify-ui` entry is the thin shape**: `gate`, `cycle`, `at`, `outcome`, and nothing else —
@@ -137,6 +138,15 @@ design → review-plan → handoff → implement → verify-ui → review-pr →
 Anything recorded only ephemerally (fine-grained `/critique` dispositions — `/critique` stores
 nothing by design) is re-established by re-running that leg. The gitignored file is an
 optimisation over this probing, never a prerequisite for it.
+
+**The issue pointer is recovered separately, and it does not move the cursor.** It is not a probe
+above and `manifest_infer_cursor` never sees it — the resume leg does not depend on it. Recover it
+the way `engine.md` §The work item resolves it in the first place: the PR's
+`closingIssuesReferences`, else the issue number in the branch name via the repo's `branch.issue`
+pattern. Recovering it matters for one leg only: `review-pr` cannot reconcile closing links for an
+issue it cannot name, and a reconstructed run that quietly finds none would report "no linked
+issue" for work that has one. So a reconstruction that can find no issue says **unknown**, not
+none — and `review-pr` then reports the reconciliation as not performed rather than as clean.
 
 **One field does not reconstruct, and it fails closed.** The `gate_ledger`'s loop-cycle count has
 no durable source — git and gh record *that* a review happened, not how many times the engine
