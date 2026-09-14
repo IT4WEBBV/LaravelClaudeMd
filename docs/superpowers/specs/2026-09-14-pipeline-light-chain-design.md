@@ -22,10 +22,9 @@ in below; the *Rework log* records how.
 1. **A second chain, `light`, opt-in per run.**
    - **Design:** brainstorming on its **Bounded** path, a short design with no spec or plan document,
      captured as the draft PR's `## Plan`.
-   - **No `review-plan` leg.**
+   - **A short `review-plan`** over that ~20-line design, instead of a 450–1,500-line spec and plan.
    - **The PR opens after implement's first commit.**
-   - **Unchanged:** `verify-ui` and `review-pr`, so every PR still passes an independent review before
-     it leaves draft.
+   - **Unchanged:** `verify-ui` and `review-pr`. The gate set is the same as the full chain's.
    - **Escalation:** a light run moves to `full`, one way and mechanically, as soon as the change stops
      being small. This is the same one-way ratchet brainstorming already has.
 2. **The full suite runs once per tree.** A green result is reused while the working tree's content is
@@ -101,12 +100,11 @@ from the gate ledgers projected onto the PR bodies.
 
 ### 1. Chains as an enum: `PipelineChain::{Full, Light}`
 
-Chain-specific facts live in one backed enum, not in `$chain === 'light'` branches spread over four
+Chain-specific facts live in one backed enum, not in `$chain === 'light'` branches spread over several
 functions.
 
 - `legs()`
-- `gateLegs(array $triggers)`
-- `escalation(array $triggers, int $codeLines): ?string`
+- `escalation(array $triggers, int $codeLines): ?string` (always `null` on `Full`)
 
 `PipelineChain::tryFrom($value) ?? PipelineChain::Full` carries the fail-strict default: anything that
 is not exactly `light` behaves as `full`, the same rule `mode` follows.
@@ -114,28 +112,24 @@ is not exactly `light` behaves as `full`, the same rule `mode` follows.
 | Leg | `Full` (today) | `Light` |
 |---|---|---|
 | **design** | `brainstorming` → `writing-plans`; spec + plan committed | `brainstorming` on its Bounded path; the design becomes the PR's `## Plan` (§2) |
-| **review-plan** | `/critique plan` | not in the chain |
+| **review-plan** | `/critique plan` over spec + plan | `/critique plan` over the Bounded design (§4) |
 | **handoff** | `handoff pr` | not in the chain; `implement` opens the draft PR after its first commit (§3) |
 | **implement** | `work-on` logic; suite after each step | `work-on` logic; filtered tests per step, one full suite at the end, escalation check after every commit (§3, §5) |
 | **verify-ui** | when `ui` fires | unchanged |
 | **review-pr** | `/critique pr` | unchanged; the plan it reviews against is the PR's `## Plan` |
 
-**Gate legs.** `Full`: `review-plan` and `review-pr`, plus `verify-ui` when `ui` fires. `Light`:
-`review-pr`, plus `verify-ui` when `ui` fires. The guarantee in `gates.md` becomes: *no path to a
-non-draft PR that has not passed `review-pr`, nor `review-plan` on the full chain.*
+**Gate legs are identical on both chains:** `review-plan` and `review-pr`, plus `verify-ui` when `ui`
+fires. The guarantee in `gates.md` stands unchanged: *no path to a non-draft PR that has not passed
+`review-plan` and `review-pr`.*
 
-**Navigation reads the chain, deliberately.** `pipeline_can_navigate($from, $to, $doneLegs, $triggers,
-PipelineChain $chain)` gains a parameter. `PipelineTest.php:26–34` pins the signature to exactly four
-parameters, on the grounds that navigation reads "never a human decision, never a review outcome, never
-the mode". `$chain` is a human decision, so that invariant is bent here, on purpose.
+**Navigation does not read the chain.** Light differs only by a non-gate leg: it has no `handoff`, and
+`pipeline_next_leg` steps over that leg the way it already steps over an untriggered `verify-ui`. So
+`pipeline_can_navigate($from, $to, $doneLegs, $triggers)` keeps the signature `PipelineTest.php:26–34`
+pins, and its invariant holds: navigation reads which legs ran, never a human decision.
 
-It holds in substance for three reasons:
-- the light gate set is a subset of the full one;
-- a forward refusal still reads only `doneLegs`;
-- the chain only ever moves toward `Full`.
-
-The pinned test is replaced with that reason, and `gates.md`'s "no third mode and no per-gate override"
-gains a paragraph: *`mode` decides how a gate is resolved; `chain` decides which legs exist.*
+`gates.md`'s "no third mode and no per-gate override" gains a paragraph: *`mode` decides how a gate is
+resolved; `chain` decides how heavy the design leg's output is and whether `handoff` runs. It never
+changes which gates exist.*
 
 **Invocation:** `/pipeline [interactive|auto] [light] <idea | pr#>`. `full` is the default.
 - `light <spec-path>` is refused: a spec means the design was already judged worth writing.
@@ -162,7 +156,8 @@ mid-task upgrades the path."* The light design leg invokes it; it does not reimp
   Bounded checklist, and instead of waiting for approval writes an **Assumptions** list: the questions
   it would have asked, and the answers it assumed. The run escalates when one of those answers would
   change what gets built.
-- **The design is captured as `## Plan`,** held in the manifest until §3 puts it in the PR body:
+- **The design is captured as `## Plan`** in `.claude/pipeline/<branch>.plan.md`, which is excluded from
+  git (§7). `review-plan` reads it there (§4), and §3 copies it into the PR body. It holds:
   - **Problem**: as found in the code; bugs are reproduced first.
   - **Change**: the files involved.
   - **Test first**: the failing test, and why it can fail.
@@ -195,10 +190,20 @@ override.
 - **Implemented marker:** at the end of the leg, `implement` writes `<!-- pipeline-implemented: <sha> -->`
   into the PR body. That is the durable signal §6 reads.
 
-### 4. `verify-ui` and `review-pr` on light
+### 4. The gates on light
 
-Unchanged. The `review-pr` brief names the PR's `## Plan` as the plan to review against, and carries
-§7's suite result.
+**`review-plan`**
+- `/critique plan .claude/pipeline/<branch>.plan.md`: the Bounded design, written there by §2. The path
+  is excluded from git (§7), so the diff stays clean.
+- The rubric is unchanged. The target is ~20 lines of design plus the code it names, not a spec, so the
+  review is short.
+- On the 28 small PRs measured, three quarters of what this gate integrated was process that §9
+  retires. What remains is the ~1-in-4 real code catch (*Review-plan on small changes*).
+- The pre-handoff failure rule applies unchanged. No PR exists yet, so bound exhaustion means no push
+  and no PR; a loop-back goes to `design`.
+
+**`verify-ui` and `review-pr`** are unchanged. The `review-pr` brief names the PR's `## Plan` as the plan
+to review against, and carries §7's suite result.
 
 ### 5. Escalation to `full` — one way, mechanical
 
@@ -210,7 +215,7 @@ Unchanged. The `review-pr` brief names the PR's `## Plan` as the plan to review 
   risk `review-plan` caught on #997. `parse_diff()` gains a `removed` count, an additive change that
   leaves its existing callers untouched.
 
-**Threshold:** proposed at **100** code lines (see *Owner decisions*). That covers 50 of the 71 PRs,
+**Threshold: 100** code lines (owner decision). That covers 50 of the 71 PRs,
 while the guidance for *choosing* light stays "about 50 lines".
 - **Why the backstop sits higher than the guidance:** an escalation after commits exist costs a full run
   on top of a light one. So the backstop should catch changes that are clearly not small, not ones near
@@ -247,7 +252,8 @@ than opening a second one.
 **Never `full` → `light`, and never by the engine.**
 
 **Why the three content triggers escalate here, when on the full chain they only annotate:** on the full
-chain two reviews look at the change; on the light chain only one does. `gates.md` already records that
+chain `review-plan` reads a design that names the migration or the policy; on light it reads a few lines
+that may not. `gates.md` already records that
 authorization and migration defects "are the ones most easily missed in a quick PR skim, precisely
 because they look small".
 
@@ -356,13 +362,13 @@ the pipeline case, so the two do not compete.
 | Change | Where |
 |---|---|
 | new backed enum `PipelineChain::{Full, Light}` with `legs()`, `gateLegs()`, `escalation()` | `checks/chain.php` |
-| `pipeline_legs`, `pipeline_gate_legs`, `pipeline_next_leg`, `pipeline_can_navigate` delegate to a `PipelineChain` argument, defaulting to `Full` | `checks/pipeline.php` |
+| `pipeline_legs` and `pipeline_next_leg` take a `PipelineChain`, defaulting to `Full`; `pipeline_gate_legs` and `pipeline_can_navigate` unchanged | `checks/pipeline.php` |
 | new `pipeline_suite_needed(?array $last, string $tree): bool`, `pipeline_tree_key(string $worktree): string` | `checks/pipeline.php` |
 | new `pipeline_code_lines(string $diff): int`; comment lines ignored in the auth match | `checks/triggers.php` |
 | `parse_diff()` gains a `removed` count per file | `skills/critique/checks/diff_parse.php` |
 | `manifest_infer_cursor()` reads `chain` and `implementedMarker` | `checks/manifest.php` |
 | stations table light column; §Suite reuse; the §`auto` bound; §What a leg brief consists of; kickoff `info/exclude`; invocation | `references/engine.md` |
-| `chain` as the second knob; light gate legs; escalation; replaces the "no per-gate override" sentence | `references/gates.md` |
+| `chain` as the second knob that never changes which gates exist; escalation | `references/gates.md` |
 | `chain`, `suite` fields; ledger gate `chain`; outcome `escalated` | `references/manifest.md` |
 | invocation line | `SKILL.md` |
 | memory points at `engine.md` for the pipeline case | `feedback_never_double_dispatch_subagents.md` |
@@ -427,7 +433,10 @@ share grows above 20 lines. Whether light keeps a short `review-plan` is an owne
 1. **`light` is opt-in and never chosen by the engine under `auto`.** *Rejected:* auto-classification
    from the request under `auto`, where nobody reviews the classification. brainstorming's own
    classification under `interactive` is an open owner decision.
-2. **Drop `review-plan` on light, keep `review-pr`.** Conditional on *Review-plan on small changes*.
+2. **Light keeps a short `review-plan`** (owner decision). *Rejected:* dropping it, as v1 and v2
+   drafted. On small PRs the gate caught a real code defect in 8 of 28 classifiable cases, before the
+   code existed. Once §9 removes the ceremony it mostly policed, and its target shrinks to ~20 lines,
+   what it still costs is small.
 3. **Content triggers escalate on light** instead of annotating (§5).
 4. **No Sonnet for `implement`.** Proposed as "Opus plans, Sonnet implements". *Rejected:* implement and
    verify model time is ~5% of active time, and Sonnet is not the stronger coder. The owner's call:
@@ -447,30 +456,31 @@ share grows above 20 lines. Whether light keeps a short `review-plan` is an owne
    appear there; a local failure that also fails on base is a machinery halt anyway.
 9. **Escalation threshold counts added + deleted,** matching the evidence. v1 calibrated on one metric
    and enforced another.
-10. **The `PipelineChain` enum** carries chain facts, per the polymorphism house rule, and the pinned
-    navigation signature is changed openly (§1).
+10. **The `PipelineChain` enum** carries chain facts, per the polymorphism house rule. Navigation keeps
+    its pinned signature, because both chains have the same gates (§1).
 11. **The brief composition rule lives in `engine.md`;** the memory points at it. Mutation proofs are
     kept for test-after, where the mutation is the point.
 12. **Why the pipeline gets a light chain when `work-on` says "there is no 'small enough to skip the
-    chain'"** (`work-on/SKILL.md:204`): light skips documents and one review, not the chain. It keeps
-    design, TDD, `verify-ui` and `review-pr`.
+    chain'"** (`work-on/SKILL.md:204`): light skips documents and the `handoff` leg, not the chain. It
+    keeps design, both reviews, TDD and `verify-ui`.
 
 ## Validation strategy
 
 - [ ] **Pest, `checks/tests`:**
-  - `PipelineChain` legs and gate legs;
+  - `PipelineChain` legs (light has no `handoff`);
   - `tryFrom` on absent and mangled values;
-  - escalation for each trigger, at the threshold boundary, and on deletions;
+  - escalation for each trigger, at the 100/101 boundary, and on deletions;
   - the auth match ignoring comment lines;
-  - `pipeline_can_navigate` with both chains, including a refused forward jump past an un-run
-    `review-pr` on light; the pinned-signature test replaced with its reason;
+  - `pipeline_next_leg` on light stepping from `review-plan` to `implement`;
+  - `pipeline_can_navigate` refusing a forward jump past an un-run `review-plan` or `review-pr` on a
+    light run, with the pinned-signature test untouched;
   - `pipeline_code_lines` with nested `code/www/` paths and the exclusions;
   - `pipeline_suite_needed` for same tree + green, same tree + red, different tree, and null;
   - `pipeline_tree_key` in a throwaway repo: an untracked file changes the key, writing
     `.claude/pipeline/x.json` after `info/exclude` does not, and committing tested content does not;
   - `manifest_infer_cursor` for light at each stage, a half-implemented light PR (no marker) resuming at
     `implement`, and no-PR falling back to full.
-- [ ] **Existing tests pass**, apart from the deliberately replaced signature test.
+- [ ] **Existing tests pass unchanged.**
 - [ ] **After ~10 light runs, repeat the timing method:**
   - **Target:** a ≤ 50-line change reaches a reviewed draft PR in ≤ 25 active min.
   - **Escalations:** more than about 1 in 3 light runs escalating means the guidance for choosing
@@ -481,9 +491,10 @@ share grows above 20 lines. Whether light keeps a short `review-plan` is an owne
 
 ## Risks accepted
 
-- **One review instead of two on light.** Quantified in *Review-plan on small changes*.
-- **The Assumptions list is the only check on the plan under `auto`.** The plan an `auto` light run
-  follows is reviewed only at `review-pr`, after the code exists.
+- **Light's `review-plan` reads a short design, not a spec.** It sees less than the full chain's review
+  does. The content triggers escalate for exactly that reason (§5), and `review-pr` still reads the
+  whole change.
+- **Under `auto`, the Assumptions list is what `review-plan` audits;** no human approves the design.
 - **Environment drift outside git** (`.env`, a rebuilt container) can make a reused green result stale.
   CI on push is the backstop.
 - **A branch with commits but no PR reconstructs as `full`.**
@@ -492,13 +503,10 @@ share grows above 20 lines. Whether light keeps a short `review-plan` is an owne
 
 1. **Who may choose light under `interactive`?** Either only the explicit `light` word, or also
    brainstorming classifying the task Bounded (the human approves that design, so a human confirmed it).
-2. **Escalation threshold:** 100 code lines (proposed) or 50.
-3. **Does light keep a short `review-plan`?**
-   - **Keep:** `/critique plan` over the ~20-line Bounded design instead of a 450–1,500-line spec and plan.
-     The gate set then equals the full chain's, so `pipeline_can_navigate`'s pinned signature can stay
-     (§1 simplifies).
-   - **Drop,** as drafted: faster, and relies on `verify-ui` and `review-pr` to catch the ~1-in-4 defect
-     after the code exists.
+
+**Decided:**
+- **Threshold:** 100 code lines (§5).
+- **Light keeps a short `review-plan`** (§4, decision 2).
 
 ## Rework log (v1 → v2)
 
@@ -518,7 +526,7 @@ share grows above 20 lines. Whether light keeps a short `review-plan` is an owne
 | §8 evidence n = 2 | stated as thin; rule rests on mechanism, bounded (§8) |
 | brainstorming Bounded path reimplemented | light design invokes it; full chain's latent Bounded bug addressed (§2) |
 | `work-on`'s "no small enough" not discussed | decision 12 |
-| Pinned navigation signature | changed openly, test replaced with reason (§1) |
+| Pinned navigation signature | no longer bent: light keeps `review-plan`, so both chains share one gate set (§1) |
 | §3 skipped board Component and closing links | both named (§3) |
 | Failure policy after escalation | after-handoff rule; cycle count known (§5) |
 | Unlisted ledger values | `chain` gate and `escalated` outcome added to `manifest.md` (§10) |
