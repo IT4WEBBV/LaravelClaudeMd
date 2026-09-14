@@ -35,14 +35,19 @@ The deterministic guardrails are tested PHP in `checks/` (run
 ## Invocation and navigation
 
 ```
-/pipeline [interactive|auto] <idea | spec-path | pr#>   # start a run (mode defaults to interactive)
-/pipeline                                               # resume the current branch's run
+/pipeline [interactive|auto] [light] <idea | spec-path | pr#>   # start a run (mode defaults to interactive)
+/pipeline                                                       # resume the current branch's run
 ```
 
 - **One entry point.** `/pipeline` starts a run, or — when a manifest (or reconstructable
   PR/branch state) for the current branch exists — **resumes** it after the invariant checks.
 - **Mode defaults to `interactive`.** `auto` is an explicit opt-in for unattended runs; a fresh
   `/pipeline <idea>` never runs unattended by surprise.
+- **`light` permits a small design.** A Bounded design is a ~15-line spec and a ~10-line plan
+  instead of a full design; every leg and both reviews still run. Without `light`, `interactive`
+  asks when brainstorming finds the change small, and `auto` always writes the full design. A
+  Bounded run that turns out bigger grows its design and is re-reviewed (`references/engine.md`
+  §Design size).
 - **Navigation is natural language, not more commands.** Once loaded the engine holds the cursor,
   so drive it by saying so — *"next step"*, *"go to step X"*, *"re-run review-plan"*, *"skip
   ahead to handoff"*. A slash command is only a cold-session trigger; there is no separate
