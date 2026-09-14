@@ -491,10 +491,11 @@ Pull **both** repos at the start of each session (see the note at the top of thi
 ### Bootstrapping a new machine
 
 ```bash
-# 1. Clone both config repos into nested wrapper dirs (~/GitProjects/<Repo>/<Repo>/)
-mkdir -p ~/GitProjects/LaravelClaudeMd ~/GitProjects/DevOps-Claude-Config
+# 1. Clone both config repos and the memory vault into nested wrapper dirs (~/GitProjects/<Repo>/<Repo>/)
+mkdir -p ~/GitProjects/LaravelClaudeMd ~/GitProjects/DevOps-Claude-Config ~/GitProjects/SecondBrain
 git clone git@github.com:IT4WEBBV/LaravelClaudeMd.git ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd
 git clone git@github.com:IT4WEBBV/DevOps-Claude-Config.git ~/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config
+git clone git@github.com:jonneroelofs/SecondBrain.git ~/GitProjects/SecondBrain/SecondBrain
 
 # 2. Symlink this file as the global CLAUDE.md
 ln -sfn ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/CLAUDE.md ~/.claude/CLAUDE.md
@@ -507,27 +508,35 @@ for repo in LaravelClaudeMd DevOps-Claude-Config; do
   done
 done
 
-# 4. Make the stale-checkout hook executable
-chmod +x ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh
+# 4. Make the hooks executable
+chmod +x ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh \
+         ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/vault-sync.sh
 ```
 
-Then wire that hook into `~/.claude/settings.json` — the script lives in this repo and updates with a `git pull`, so only this wiring is per-machine:
+Then point auto-memory at the vault and wire the hooks in `~/.claude/settings.json` — the scripts live in this repo and update with a `git pull`, so only this wiring is per-machine:
 
 ```json
+"autoMemoryDirectory": "~/GitProjects/SecondBrain/SecondBrain/memory",
 "hooks": {
   "SessionStart": [
-    { "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh session", "timeout": 20, "statusMessage": "Checking git freshness…" } ] }
+    { "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh session", "timeout": 20, "statusMessage": "Checking git freshness…" } ] },
+    { "matcher": "startup|resume|clear", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/vault-sync.sh session", "timeout": 20, "statusMessage": "Syncing memory…" } ] }
   ],
   "PostToolUse": [
     { "matcher": "Edit|Write", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh edit", "timeout": 20, "statusMessage": "Checking git freshness…" } ] },
     { "matcher": "Bash", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh checkout", "if": "Bash(git checkout:*)", "timeout": 10 } ] }
+  ],
+  "SessionEnd": [
+    { "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/vault-sync.sh end", "timeout": 20 } ] }
   ]
 }
 ```
 
 The three modes are `session` (launch directory, at startup), `edit` (the repo owning the file being written — once per repo per session), and `checkout` (drops cached verdicts after a branch switch).
 
-Run `bash hooks/tests/git-freshness-sync.test.sh` after changing the hook. It builds throwaway repos under `$TMPDIR` and covers every branch of the base-branch sync, including the sibling-worktree case that is easy to get silently wrong.
+`vault-sync.sh` has two: `session` (commit `memory/`, then fetch, rebase and push — at startup, resume and clear) and `end` (commit and push when the session ends). See [Memory (SecondBrain vault)](#memory-secondbrain-vault).
+
+Run `bash hooks/tests/git-freshness-sync.test.sh` or `bash hooks/tests/vault-sync.test.sh` after changing the matching hook. Both build throwaway repos under `$TMPDIR`; the first covers every branch of the base-branch sync, including the sibling-worktree case that is easy to get silently wrong, the second every sync path of the memory vault, including two machines writing at once.
 
 Re-run step 3 whenever either repo adds a new skill (existing ones update via `git pull`; a brand-new skill folder needs its own symlink). It is idempotent — see [`README.md` § Linking the skills](README.md#linking-the-skills) for the `-n` caveat and how to sweep the dangling symlink a renamed or removed skill leaves behind.
 
@@ -537,53 +546,32 @@ Re-run step 3 whenever either repo adds a new skill (existing ones update via `g
 
 ---
 
-## Second Brain (basic-memory archival memory)
+## Memory (SecondBrain vault)
 
-A cross-project knowledge vault lives at `~/GitProjects/SecondBrain/SecondBrain/` (private repo
-`jonneroelofs/SecondBrain`), served to AI via the
-[`basic-memory`](https://github.com/basicmachines-co/basic-memory) MCP server. It is the
-**archival tier** (queried on demand). Native Claude Code auto-memory is the **hot tier** (always
-injected, small, "current sprint" horizon). Markdown is the source of truth; the SQLite index in
-`~/.basic-memory/` is rebuildable (`basic-memory reindex`). Synced via git, **not** basic-memory cloud.
+Auto-memory lives in the SecondBrain vault — `~/GitProjects/SecondBrain/SecondBrain`, private repo
+`jonneroelofs/SecondBrain` — not in machine-local `~/.claude/projects/*/memory`. The
+`autoMemoryDirectory` setting points every session at its `memory/` folder, so memory is versioned in
+git and shared by both machines. It is the only memory system: save memories the normal auto-memory
+way; there is nothing else to write to.
 
-**READ it** (`search_notes` / `build_context`, or CLI `basic-memory tool search-notes "<query>"`) when:
-- starting work on a project → read its `projects/<name>` note first
-- touching an it4web package → read its `packages/<name>` note
-- making an architecture/tooling decision → search `decisions/`
-- hitting a recurring/procedural task → search `playbooks/`
+- **Repo-specific memories** — facts only true inside one repo — go in `memory/repos/<key>/`, with their
+  index line in that folder's own `MEMORY.md`. `<key>` is the repo's GitHub name, lowercased
+  (`IT4WEBBV/ViewieMedia` → `viewiemedia`). Each repo folder has one pointer line in the global
+  `MEMORY.md`: read that repo's index before working in, or answering about, that repo. Everything else
+  is global.
+- **Never store secrets, credentials or client PII** — every memory is pushed to GitHub. `vault-sync.sh`
+  holds back a file that looks like it contains a key; that is a backstop, not a licence.
+- **Syncing is automatic.** `hooks/vault-sync.sh` commits `memory/` and syncs with origin at session start
+  and end. Don't commit or push memory changes by hand.
+- **Vault sync conflicts are yours to resolve** — an exception, for the vault only, to the Git Workflow
+  rule against pulling, rebasing or merging on your own initiative. When the hook reports a conflict,
+  rebase onto the upstream, keep both sides' facts in each conflicted file, continue, push.
+- **A memory saved on the other machine is there at the next session start.**
+- The owner's own notes at the vault root are theirs; the hook never stages them.
 
-**WRITE to it** (`write_note`) when something non-obvious is worth reusing across sessions — a
-decision, gotcha, convention, or "why". One fact per note; new facts start `confidence: provisional`
-and become `confirmed` when they recur. Observations as `- [category] ...`, relations as typed
-wikilinks (see the vault's own `README.md`).
-
-- **Never store** secrets, credentials, or client PII — it is a git repo.
-- **Don't duplicate** what this CLAUDE.md or a skill already documents — link to it instead.
-- The vault repo **commits directly to `main`** (no PRs); that exception is declared in the vault's
-  own `CLAUDE.md` and applies only there.
-
-### Second Brain (multi-machine setup)
-
-Like the skills, the vault is one more git repo pulled into `~/GitProjects`. On a new machine:
-
-```bash
-# 1. Clone the vault
-git clone git@github.com:jonneroelofs/SecondBrain.git ~/GitProjects/SecondBrain/SecondBrain
-
-# 2. Install basic-memory (needs Python >=3.12; uv fetches it automatically)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv tool install basic-memory
-
-# 3. Register the project (points basic-memory at the local clone) and make it default
-basic-memory project add SecondBrain ~/GitProjects/SecondBrain/SecondBrain
-basic-memory project default SecondBrain
-basic-memory reindex            # initial index (0.22.1 has no `sync` subcommand)
-
-# 4. Register the MCP server with Claude Code (user scope; takes effect next session)
-claude mcp add --scope user basic-memory -- "$HOME/.local/bin/basic-memory" mcp
-```
-
-Pull the vault repo at session start alongside the other config repos.
+A new machine gets the vault, the setting and the hooks from [Bootstrapping a new machine](#bootstrapping-a-new-machine).
+If it already has local memories, start one session with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 claude` from `~`
+and have it follow the vault memory `playbook_migrate_machine_memory.md`.
 
 ## Font Awesome Pro icons
 
