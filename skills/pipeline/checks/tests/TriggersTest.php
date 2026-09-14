@@ -134,3 +134,61 @@ it('detects an it4web package by repo name or by a bumped constraint', function 
 DIFF;
     expect(pipeline_triggers($bump, 'acme/project')['package'])->toBeTrue();
 });
+
+it('counts added plus removed code lines, skipping tests, docs, markdown, changelog and lockfiles', function () {
+    $diff = <<<'DIFF'
+--- a/code/www/app/Models/Order.php
++++ b/code/www/app/Models/Order.php
+@@ -1,2 +1,2 @@
+-old
++new
+--- a/code/www/tests/Feature/OrderTest.php
++++ b/code/www/tests/Feature/OrderTest.php
+@@ -1,0 +1,1 @@
++test
+--- a/docs/superpowers/plans/x.md
++++ b/docs/superpowers/plans/x.md
+@@ -1,0 +1,1 @@
++doc
+--- a/.changelog/unreleased/feature-x.md
++++ b/.changelog/unreleased/feature-x.md
+@@ -1,0 +1,1 @@
++entry
+--- a/code/www/composer.lock
++++ b/code/www/composer.lock
+@@ -1,1 +1,1 @@
+-"a"
++"b"
+--- a/README.md
++++ b/README.md
+@@ -1,0 +1,1 @@
++readme
+DIFF;
+    expect(pipeline_code_lines($diff))->toBe(2);
+});
+
+it('judges a deleted file by its old path', function () {
+    $deletedCode = "--- a/app/Legacy.php\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-a\n-b\n-c\n";
+    $deletedTest = "--- a/tests/Feature/LegacyTest.php\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-a\n-b\n";
+    expect(pipeline_code_lines($deletedCode))->toBe(3);
+    expect(pipeline_code_lines($deletedTest))->toBe(0);
+    expect(pipeline_code_lines(''))->toBe(0);
+});
+
+it('ignores comment and docblock lines when detecting authorization', function () {
+    // On a Bounded design `auth` escalates the run, so a comment must not trip it.
+    $comments = <<<'DIFF'
++++ b/app/Http/Controllers/OrderController.php
+@@ -1,0 +1,5 @@
++    /**
++     * Authorised upstream, see Gate::allows in the middleware.
++     */
++    // later: $this->authorize('update', $order);
++    # ->can('view') is checked by the route
+DIFF;
+    expect(pipeline_triggers($comments)['auth'])->toBeFalse();
+
+    // a PHP attribute starts with `#[` and is code, not a comment
+    $attribute = "+++ b/app/Http/Controllers/OrderController.php\n@@ -1,0 +1,1 @@\n+#[Middleware('can:update,order')]\n";
+    expect(pipeline_triggers($attribute)['auth'])->toBeTrue();
+});

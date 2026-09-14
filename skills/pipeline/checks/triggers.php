@@ -22,6 +22,8 @@ function pipeline_triggers(string $diff, ?string $repoPackageName = null): array
     $migrationRe = "#{$appRoot}database/migrations/.*\.php$#";
     $composerRe  = "#{$appRoot}composer\.json$#";
     $authRe      = '/\bauthorize\(|\bGate::|\bPolicy\b|[\'"]can:|->can\(|middleware\([\'"]can:/';
+    // Comment and docblock lines are prose, not authorization. `#[` is a PHP attribute — code.
+    $commentRe   = '#^\s*(?://|\#(?!\[)|/?\*)#';
 
     $ui = $migration = $auth = false;
     $package = $repoPackageName !== null && str_starts_with($repoPackageName, 'it4web/');
@@ -35,7 +37,7 @@ function pipeline_triggers(string $diff, ?string $repoPackageName = null): array
         }
         $isComposer = (bool) preg_match($composerRe, $f['file']);
         foreach ($f['added'] as $a) {
-            if (preg_match($authRe, $a['text'])) {
+            if (preg_match($authRe, $a['text']) && ! preg_match($commentRe, $a['text'])) {
                 $auth = true;
             }
             if ($isComposer && preg_match('#["\']it4web/#', $a['text'])) {
@@ -45,4 +47,24 @@ function pipeline_triggers(string $diff, ?string $repoPackageName = null): array
     }
 
     return ['package' => $package, 'migration' => $migration, 'auth' => $auth, 'ui' => $ui];
+}
+
+/**
+ * Lines of code a change touches — added plus removed — outside tests, docs, markdown,
+ * changelog fragments and lockfiles. The size a Bounded design may reach before it must grow
+ * (`../references/engine.md` §Design size). A deleted file is judged by its old path.
+ */
+function pipeline_code_lines(string $diff): int
+{
+    $notCode = '#(?:^|/)(?:tests|docs|\.changelog)/|\.md$|(?:^|/)(?:composer\.lock|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$#';
+
+    $lines = 0;
+    foreach (parse_diff($diff) as $f) {
+        $path = $f['file'] === '/dev/null' ? $f['old'] : $f['file'];
+        if (! preg_match($notCode, $path)) {
+            $lines += count($f['added']) + $f['removed'];
+        }
+    }
+
+    return $lines;
 }
