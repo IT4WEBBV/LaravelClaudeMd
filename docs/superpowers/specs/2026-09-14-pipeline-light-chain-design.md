@@ -28,7 +28,7 @@ No model changes: every leg keeps the session model, and `/critique` keeps its o
 ## The evidence
 
 Measured from Claude Code transcript timestamps: 70 pipeline runs between 2026-08-06 and 2026-09-11
-(65 BreinStraat2, 4 Deploy, 1 Asimo). **Every run was `auto`**, so interactive timing is unmeasured.
+(almost all BreinStraat2, plus Deploy and Asimo). **Every run was `auto`**, so interactive timing is unmeasured.
 Time is *active* time — tool execution plus model turns — with waits on a human excluded. Legs were
 delimited by hand from transcript markers (±1 min per leg); aggregate shares are heuristic (±3 points).
 
@@ -252,7 +252,7 @@ Parameters default to `full`, so every existing caller and test keeps its curren
    request. The classification would itself be unreviewed, and "this is too simple to need a design"
    is the rationalisation `brainstorming` names as its anti-pattern.
 2. **Drop `review-plan`, keep `review-pr`.** *Rejected:* keeping both gates with shorter documents. On
-   2-line changes `review-plan` took 5–12 min, and the plan of a ≤ 50-line change can be read in its
+   ≤ 50-line changes `review-plan` took 5–12 min, and the plan of a ≤ 50-line change can be read in its
    diff at `review-pr`.
 3. **Content triggers escalate on `light`** instead of annotating (§5).
 4. **No Sonnet for `implement`.** Proposed during the brainstorm as "Opus plans, Sonnet implements".
@@ -297,10 +297,10 @@ rules, found in 33 briefs and copied into 20+ BreinStraat2 plans:
   mutation proof, so keep the rule only for tests added after the code.
 - **"Measure your OWN suite baseline first."** Proposal: superseded by §7's base-branch comparison on
   red.
-- **Status checks to running subagents** ("Status check only — are you still working on the PR #964
-  review?"), 32 of them. They probably follow the memory *never double-dispatch subagents — SendMessage's
-  reply is the liveness check*. Proposal: no check before a reviewer has run longer than its usual
-  length (~11 min); wait for the completion notification.
+- **Status checks to running subagents** ("Status check only — no need to change what you are doing. Are you
+  still working on the PR #964 review?"), roughly 30 of them. They probably follow the memory *never
+  double-dispatch subagents — SendMessage's reply is the liveness check*. Proposal: no check before a
+  reviewer has run past its usual upper end (~11 min); wait for the completion notification.
 
 Decide separately: whether to adopt these, and whether they belong in `engine.md` or in the coordinator
 guidance.
