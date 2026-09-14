@@ -57,7 +57,6 @@ worth keeping for exactly those two properties.
 
 ```
 SecondBrain/                         (private git repo, commits straight to main)
-├── .claude/settings.json            {"worktree":{"bgIsolation":"none"}} — lets bg jobs write memories (probe P2)
 ├── .gitattributes                   memory/**/MEMORY.md merge=union
 ├── CLAUDE.md, README.md             rewritten, short
 ├── 2026-06-30.md, 2026-08-05.md     the owner's own notes — untouched, never staged by the hook
@@ -174,8 +173,8 @@ so the migrating session cannot save into the folder it is retiring:
 1. Probes P1–P3 pass (P5 is informational; see Testing).
 2. `vault-sync.sh`, the `git-freshness.sh` vault skip and their tests merged in LaravelClaudeMd.
 3. Migration commit in the vault: `memory/` tree, old folders removed, `.gitattributes`,
-   `.claude/settings.json`, vault `CLAUDE.md`/`README.md` rewritten, basic-memory lines dropped
-   from `.gitignore`.
+   vault `CLAUDE.md`/`README.md` rewritten, basic-memory lines dropped from `.gitignore`. (No
+   `.claude/settings.json`: probe P2 passed without it.)
 4. `~/.claude/settings.json`: `autoMemoryDirectory` plus hook wiring (through the `update-config` skill).
 5. Old dirs renamed `memory.bak-2026-09-11`; the harness stops reading them once the setting is set.
 6. basic-memory removed: `claude mcp remove basic-memory -s user`, `uv tool uninstall basic-memory`,
@@ -295,3 +294,24 @@ demonstrably misses a repo fact it should have read.
 4. **Claude resolving sync conflicts** could merge two contradicting facts badly. Bounded: only topic
    files can conflict, both sides stay in git history, the resolution is itself a commit.
 5. **Secret-scan false negatives.** The scan is narrow by design; the rule is the control.
+
+## Probe results (2026-09-14, Claude Code 2.1.270)
+
+Run with `--settings` pointing `autoMemoryDirectory` at a throwaway git repo `~/.vault-probe/memory`,
+with `worktree.bgIsolation` at `"worktree"` in `~/.claude/settings.local.json` (the strict setting).
+
+| # | Result | Evidence |
+|---|---|---|
+| P1a | PASS | `claude -p` answered `/Users/jroelofs/.vault-probe/memory/` — `~` expanded |
+| P1b | PASS | `repos/probeproject/MEMORY.md` + `repos/probeproject/probe-colour.md` written; the stamp is `  modified: 2026-09-14T10:06:01.218Z`, **nested under `metadata:`**, so a `^modified:` grep misses it |
+| P1c | reminder | after back-dating the nested stamp and mtime to 2026-08-01, reading the file returned: "This memory is 44 days old. Memories are point-in-time observations, not live state — …" |
+| P2 | a | a `claude --bg` job rooted at `~` wrote `probe-p2a-background-memory-write.md` and its index line, **without** the vault's `.claude/settings.json` |
+| P3 | PASS | a `claude --bg` job in another repo called `EnterWorktree` (transcript under `-Users-jroelofs--vault-probe-repo--claude-worktrees-p3`) and wrote `probe-p3-worktree-memory-write.md` |
+| P5 | YES | the stub hook appended `- PROBE-P5 nonce N515428272`; the same session, asked without tools, quoted that line verbatim from its loaded index (grep count 1 per run) |
+
+Consequences:
+
+- **P2 = a:** the vault gets no `.claude/settings.json`. Auto-memory writes are not refused by the
+  background-isolation guard, so the `bgIsolation` line in the Layout above is not needed.
+- **P5 = YES:** a memory saved on the other machine is in context at the next session start — the
+  `SessionStart` sync runs before the index is read.
