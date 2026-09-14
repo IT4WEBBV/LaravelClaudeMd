@@ -147,6 +147,19 @@ the right place. A resume locates the run's worktree via `git worktree list` for
 claim, so no *second* slot ever appears mid-chain. **Created, never torn down**: teardown is
 destructive and stays the human's call.
 
+**Keep the manifest out of git before writing it.** Many repos do not ignore `.claude/`, and a
+manifest that git can see would be committed by a stray `git add -A` and would change §Suite reuse's
+tree key on every write. At kickoff, before the first `manifest_write`:
+
+```bash
+CHECKS="$HOME/.claude/skills/pipeline/checks"   # the skill's checks, whichever repo the run is in
+php -r 'require $argv[1] . "/suite.php"; pipeline_exclude_manifest(getcwd());' "$CHECKS"
+```
+
+It adds `.claude/pipeline/` to the repo's shared `info/exclude`. That file is local, never pushed and
+shared by every worktree, so the PR diff stays clean. It does nothing when the path is already
+ignored.
+
 ## Dev-stack readiness — pipeline-owned, no hesitation
 
 Several legs need the worktree's stack: `implement` runs the suite after each step, and
@@ -167,12 +180,135 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 
 | Leg | Invokes | Interactive form | Autonomous form | Manifest I/O |
 |---|---|---|---|---|
-| **design** *(compound)* | `superpowers:brainstorming` → `superpowers:writing-plans` (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it) | human drives the brainstorm dialogue, which chains into writing-plans; re-invoke `/pipeline` to continue | a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions | writes spec + plan pointers |
+| **design** *(compound)* | `superpowers:brainstorming`, then `superpowers:writing-plans` for an **Architectural** design (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it); for a **Bounded** design, brainstorming's Bounded path with no `writing-plans` (§Design size) | human drives the brainstorm dialogue; if brainstorming classifies Bounded without `light`, the pipeline asks (§Design size); re-invoke `/pipeline` to continue | a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions. The brief says which path is permitted: Bounded only with `light`, otherwise Architectural | writes spec + plan pointers; the size is the spec's `**Design size:**` header, never stored |
 | **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | read-only reviewer subagent writes a review; the engine reads it and acts (§`auto`) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth. References the issue **without a closing keyword** (§Closing links) — this PR carries no implementation yet | writes the PR# pointer |
 | **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links (§Closing links — `review-pr` reconciles them before the PR goes ready). **Leaves the PR draft** (below) | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, writes the run's page to the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — the payload carries `nameWithOwner`, `pr` and `issue` so the page can link back to both — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
 | **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | read-only reviewer subagent writes a review; the engine reads it and acts (§`auto`). The second write is a full payload, not a patch — `proof_cli.php write` always replaces the page, and `proof_write_run()` preserves `createdAt` across it. Its **last action** is `checks/proof_cli.php open <page>` (§The proof store). Reconciles the closing links **before** `gh pr ready` (§Closing links). | feeds the PR-review gate; writes `issue_links` onto the entry; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
+
+## Design size — Bounded or Architectural
+
+One chain, one set of legs and gates; only what the design leg writes is proportional to the change.
+Every leg after `design` runs unchanged on either size.
+
+| | **Architectural** | **Bounded** |
+|---|---|---|
+| Station | `brainstorming` → `writing-plans` | `brainstorming` on its Bounded path; `writing-plans` is not invoked |
+| Spec | full design | `docs/superpowers/specs/<date>-<slug>-design.md`, ~15 lines |
+| Plan | bite-sized TDD plan | `docs/superpowers/plans/<date>-<slug>.md`, ~10 lines |
+| Header | none, or `**Design size:** Architectural` | `**Design size:** Bounded` |
+
+**The size is read, never stored.** `DesignSize::fromSpec(<spec markdown>)` returns `Bounded` only for
+the exact header line and `Architectural` for anything else, so every older spec keeps the full chain.
+
+### Who picks the size — always a human
+
+`/pipeline [interactive|auto] [light] <idea | number | spec-path>`. The word `light` **permits** Bounded.
+It matters only while `design` has not run; on a resume the size comes from the spec and `light` is
+ignored, with a note saying so.
+
+| | with `light` | without `light` |
+|---|---|---|
+| `interactive` | brainstorming runs normally; Bounded when it classifies Bounded | when brainstorming classifies Bounded, **ask** as one multiple-choice question: *"This looks like a small change: continue with a short design (Bounded), or write the full spec and plan?"* Yes → Bounded. No → tell brainstorming to take the Architectural path |
+| `auto` | the design brief permits the Bounded path | the design brief requires the Architectural path |
+
+brainstorming's own rule applies in every cell: *when in doubt between two paths, take the heavier
+one.* A classification never selects Bounded on its own authority.
+
+**Refuse Bounded in a package repo.** When the repo's `composer.json` `name` starts with `it4web/`,
+say so and take the Architectural path. A shared package is never small.
+
+### What a Bounded design commits
+
+Two commits, spec then plan, so `handoff pr` finds both in the last two commits exactly as it does
+for an Architectural design.
+
+The spec:
+
+```markdown
+# <title> — design
+
+**Design size:** Bounded
+
+## Problem
+<as found in the code; a bug is reproduced first>
+
+## Change
+<the files, and what changes in each>
+
+## Done when
+<the observable result>
+
+## Assumptions
+<auto only: each question that would have been asked, and the answer assumed>
+```
+
+The plan:
+
+```markdown
+# <title> Implementation Plan
+
+**Spec:** docs/superpowers/specs/<date>-<slug>-design.md
+
+## Test first
+<the failing test, and why it can fail on the defect>
+
+## Steps
+1. <step, ending in something verifiable>
+```
+
+`review-plan` reviews both with the unchanged `/critique plan` rubric. The target is ~25 lines plus
+the code they name.
+
+### Escalation — the design grows, one way
+
+**When to check.** Only while the spec says Bounded:
+- after every commit in `implement`, and
+- at the start of every later leg.
+
+```bash
+CHECKS="$HOME/.claude/skills/pipeline/checks"
+git diff origin/<base>...HEAD > "$TMPDIR/pipeline.diff"
+# triggers.php loads the diff parser itself — do not require it a second time
+php -r 'require $argv[1] . "/triggers.php"; require $argv[1] . "/design_size.php";
+        $diff = file_get_contents($argv[2]);
+        $size = DesignSize::fromSpec(file_get_contents($argv[3]));
+        echo $size->escalation(pipeline_triggers($diff), pipeline_code_lines($diff)) ?? "", "\n";' \
+  "$CHECKS" "$TMPDIR/pipeline.diff" "<spec path>"
+# empty line → stays Bounded; otherwise the printed reason is why it must grow
+```
+
+**What escalates.**
+- `migration` or `auth` fires: a 15-line spec may not name what the diff contains.
+- More than `DesignSize::MAX_CODE_LINES` (100) code lines, added + deleted.
+- `package` does **not** escalate. In a project it is a constraint bump whose code was reviewed in
+  the package's own PR; it keeps its annotation.
+- **Judgement also escalates:**
+  - brainstorming's ratchet upgrades the path;
+  - an `auto` assumption turns out to change what gets built;
+  - `implement` needs files or behaviour the plan did not name. The implement subagent returns
+    **"plan insufficient"** instead of improvising.
+
+**On escalation, grow the design; do not re-design it.**
+1. Append a ledger entry: `{gate: 'design-size', leg: <current leg>, at, reason, outcome: 'escalated'}`.
+2. Move the cursor back to `design`; backward navigation is always allowed. In grow form:
+   - change the spec header to `**Design size:** Architectural`;
+   - add a `## Grown from Bounded` section: what changed, why it grew, what already exists (described
+     as state, not re-designed), what remains;
+   - add the remaining steps to the plan;
+   - commit the spec, then the plan.
+3. `review-plan` re-runs over the grown spec and plan **plus `git diff origin/<base>...HEAD`**.
+4. `handoff pr` re-runs; it updates the existing PR, so the resume prompt matches the grown plan.
+5. `implement` continues.
+
+**Gates count again.** `$doneLegs` is `pipeline_done_legs(gate_ledger)`, which ignores every gate pass
+older than the latest escalation. The pass over the small design therefore cannot carry navigation
+past the re-review.
+
+**Once, and one way.** An Architectural spec never shrinks, and an escalation is not a loop-back:
+- it does not count toward `review-plan`'s cycle bound;
+- once the PR exists, bound exhaustion follows the after-`handoff` rule (§Failure policy).
 
 ## The proof store — where the visual record actually lives
 
@@ -305,6 +441,30 @@ down.
 to reconcile. That is not the same as a run *with* an issue whose PR carries no closing link: the
 reconciliation ran there and produced an answer, so it is reported like any other outcome.
 
+## What a leg brief consists of
+
+Every dispatched leg gets a brief, from the engine or from a coordinator running several pipelines.
+A brief consists of:
+
+- **pointers** to the artifacts: spec, plan, PR, issue;
+- **the settled decisions** and the manifest state the leg needs, including §Suite reuse's last
+  green tree;
+- **the overrides this file prescribes for that leg**, e.g. *"leave the PR draft"* (§Who takes the PR
+  out of draft) or the permitted design size (§Design size);
+- **nothing a station does not ask for.** No test policy, proof format or process of the brief
+  writer's own invention.
+
+**Plans and specs committed before 2026-09-14 are not exemplars** for test or proof policy. Many carry
+the rules below, and a design subagent that reads them as examples copies the rules forward.
+
+Three rules briefs invented, measured over 70 runs and retired:
+
+| Invented rule | What it cost | Instead |
+|---|---|---|
+| *"EVERY new assertion must be MUTATION-PROVEN"*, with hash checks and a `*.proof.md` write-up | 4–9 filtered test runs per run plus the write-up; most of what `review-plan` then integrated on small PRs policed it | A test written first has been seen red: that is the proof. Mutation-prove only a test written **after** the code (a test on existing behaviour that could not fail, a test added during review fixes). No proof documents; two lines in the PR body |
+| *"Measure your OWN suite baseline first"* | a full suite before any change (one run: 531 s + 179 s) | §Suite reuse: no baseline; a red suite is a failing step |
+| Status checks to a running subagent (*"are you still working?"*), sent minutes after dispatch | no reviewer finished sooner; each interrupts a turn | Wait for the completion notification. Check liveness only on a suspected stall: an agent past its usual upper end (~11 min for a `/critique` reviewer). Never dispatch a second agent for the same task |
+
 ## Mechanical checks — the deterministic layer inside `implement`
 
 Opt-in per repo. A repo declares its checks in a **committed** `## Checks` block in
@@ -328,7 +488,8 @@ taken from the slot already resolved for the worktree at kickoff. A hardcoded co
 the *primary* stack and analyses the *primary* checkout, reporting no findings and passing green on
 code the run never touched.
 
-**What runs, and when.** After each step: the test suite, then `static-analysis` over the whole
+**What runs, and when.** After each step: the test suite (skipped when §Suite reuse finds this tree
+already green), then `static-analysis` over the whole
 declared scope, then `format` over the whole tree. **No file lists and no diff-scoping** — measured
 on Deploy, scoping to two files costs 4.7s against 11.1s for all of `app/` because the analyser's
 bootstrap is a fixed ~4.5s floor, and paying that 6.4s removes host→container path mapping,
@@ -365,6 +526,42 @@ findings over `app/`", never an unqualified "0 new findings", since the declared
 `database/`, `routes/`, `config/` or `tests/`. Any suppressions added during the run are listed and
 flagged as **not yet judged**, so one cannot enter reading as already resolved.
 
+## Suite reuse — once per tree
+
+A full suite run proves something about the **content** it ran over, not about a commit. Every point
+that runs the full suite asks first:
+
+- after each `implement` step,
+- after review fixes,
+- before `review-pr`.
+
+```bash
+CHECKS="$HOME/.claude/skills/pipeline/checks"
+MANIFEST=".claude/pipeline/<branch>.json"
+TREE=$(php -r 'require $argv[1] . "/suite.php"; echo pipeline_tree_key(getcwd());' "$CHECKS")
+# manifest `suite` is {tree, outcome: green|red, passed, failed, at}
+php -r 'require $argv[1] . "/suite.php";
+        $manifest = json_decode(file_get_contents($argv[2]), true);
+        exit(pipeline_suite_needed($manifest["suite"] ?? null, $argv[3]) ? 0 : 1);' "$CHECKS" "$MANIFEST" "$TREE" \
+  && echo "run the suite" || echo "reuse: this tree is already green"
+```
+
+- **The key.** `pipeline_tree_key()` is the tree the working copy would commit right now, untracked
+  non-ignored files included, built in a temporary index so the real one is untouched. Committing
+  content that was already tested keeps the key, so a run before `git commit` counts for the commit.
+- **Record.** After every full run, write `suite: {tree, outcome, passed, failed, at}` to the
+  manifest. Only `green` is ever reused.
+- **The reviewer is told.** The `review-pr` brief states *"full suite green over tree `<tree>` at
+  `<sha>`: N passed"*. Whether to re-run stays the reviewer's call.
+- **No baseline.** No suite runs before the change. A red full suite is a failing step, fixed and
+  bounded like any other.
+  - When the engine believes a failure predates the change, that is a **machinery failure → halt**
+    with the evidence (§Failure policy), never an annotation.
+  - Never switch the run's worktree to the base commit to compare: under a running stack that
+    desyncs vendor, migrations and assets, and a wrong red would be filed as pre-existing.
+- **Failure to compute the key** (`pipeline_git` throws) is a machinery failure. Run the suite; never
+  assume reuse.
+
 ## `auto` — the engine resolves the review itself
 
 `interactive` stops at every gate: the human reads the review and decides, and none of this section
@@ -378,8 +575,12 @@ needless interrupt costs the one thing `auto` exists to protect.
 
 **What the engine does with a review:**
 
-- **Act on what is worth acting on.** Apply the fixes to the spec, the plan or the code and commit
-  them. Record the rest — already-mitigated observations, notes for posterity — without an edit.
+- **Act on what is worth acting on — yourself.** Apply the fixes to the spec, the plan or the code
+  and commit them **in the engine session**. Edits to documents the engine already holds, and small
+  code fixes, never get a subagent of their own: a fresh agent must first re-read what the engine
+  already has. Rework — a review saying the work is fundamentally wrong — is not an edit; it loops
+  back (next bullet). Record the rest — already-mitigated observations, notes for posterity — without
+  an edit.
 - **Loop back** where the review says the work is fundamentally wrong: `review-plan` → `design`,
   `verify-ui` → `implement`, `review-pr` → `implement`. Bounded (§Failure policy).
 - **Never interrupt on a finding.** Anything unresolved goes into the PR body as an open question,
@@ -448,4 +649,5 @@ language** — *"next step"*, *"go to step X"*, *"re-run review-plan"*, *"skip a
 A slash command is only a cold-session trigger; there is no separate `/next`. Every jump goes
 through `pipeline_can_navigate(from, to, doneLegs, triggers)`: **backward is free; forward past a
 gate leg that has not run is refused** (`gates.md`). That refusal is the un-skippable-review
-promise made mechanical.
+promise made mechanical. `doneLegs` is always `pipeline_done_legs(gate_ledger)`, so a gate passed
+before the latest `design-size` escalation no longer counts (§Design size).

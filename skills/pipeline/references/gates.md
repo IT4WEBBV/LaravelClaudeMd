@@ -27,6 +27,11 @@ a stored `gate_policy`) is **deleted by decision, not oversight**: two of its th
 effects — adjudicate nothing, escalate nothing — are now the default everywhere, which left only
 "do not loop me back to `design`", and that did not justify a stored per-gate field of its own.
 
+**`light` is not a mode, and not a second chain.** It permits a **Bounded** design (`engine.md`
+§Design size): a ~15-line spec and a ~10-line plan instead of a full design. Legs, gates and
+navigation are identical for both sizes. `mode` decides how a gate is resolved; the design size
+decides how much design a gate reviews. Neither changes which gates exist.
+
 What no mode can do is stop a review *leg* from running — that is the navigation guardrail below.
 
 ## Content triggers — three annotate, one gates a leg
@@ -42,6 +47,11 @@ first three is what this section revises.
 | writes a DB migration | an added/changed file path matches `database/migrations/…\.php` | annotation |
 | touches authorization | an added line matches `authorize(` / `Gate::` / `Policy` / `can:` / `->can(` / `middleware('can:` | annotation |
 | the project-vs-package call | **none mechanical** — a `/critique plan` judgment, made in prose (the `plan` rubric asks for it) | the engine acts on it like any other part of the review (`engine.md` §`auto`) |
+
+**On a Bounded design, `migration` and `auth` escalate** instead of only annotating: the design grows
+to Architectural and is re-reviewed (`engine.md` §Design size). The auth match ignores comment and
+docblock lines, because on a Bounded design a false positive costs a re-review, not a footnote.
+`package` only ever annotates.
 
 **The three annotating triggers no longer stop the chain.** They are **facts** — a path matched —
 not findings to be refuted, so "resolving" them is incoherent; the only real question is
@@ -105,7 +115,8 @@ php -r 'require "skills/pipeline/checks/triggers.php";
 
 Navigation is pure functions — call `pipeline_can_navigate` / `pipeline_next_leg` /
 `pipeline_gate_legs` directly (they take no I/O). The manifest's `gate_ledger` records which gates
-have run; `pipeline_can_navigate`'s `$doneLegs` is derived from it.
+have run; `pipeline_can_navigate`'s `$doneLegs` is `pipeline_done_legs()` over it, which drops gate
+passes older than the latest `design-size` escalation.
 
 ## Path anchoring — the app root is not always the repo root
 

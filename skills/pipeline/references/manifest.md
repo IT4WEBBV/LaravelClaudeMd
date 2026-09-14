@@ -22,6 +22,7 @@ Read/written by the Phase A helpers in `../checks/manifest.php`:
 | `last_sha` | optional | HEAD at the last completed leg |
 | `gate_ledger` | optional | the audit trail — each gate's review, what the engine or the human did about it, and the content-trigger annotations (shape below) |
 | `lease` | optional | session id + timestamp (single-driver guard) |
+| `suite` | optional | the last full suite: `{tree, outcome: green\|red, passed, failed, at}` — see *Two rules* for why a recomputable field is stored |
 
 `manifest_validate($data)` returns the list of **missing required keys** — `branch`,
 `worktree`, `mode`, `cursor`. An empty list means valid. Keep this table and that function
@@ -37,6 +38,9 @@ in lock-step: the four required rows above are exactly the four keys the functio
 - **Recomputable fields are derived at leg start, never trusted from the file.** A field that
   git/gh can recompute (the diff's triggers, whether the PR is ready) is recomputed each leg.
   Storing it is a latent drift bug.
+- **Named exception: `suite`.** A suite result is recomputable (re-run it), yet it is stored,
+  because it cannot go stale silently: it is used only when `pipeline_tree_key()` of the current
+  working tree equals the recorded `tree`, and losing it costs one re-run (`engine.md` §Suite reuse).
 
 ## `gate_ledger` — the audit trail that keeps a gate from being decoration
 
@@ -65,7 +69,7 @@ the PR.
 
 | Key | Values |
 |---|---|
-| `gate` | `plan-approval` \| `pr-review` \| `verify-ui` |
+| `gate` | `plan-approval` \| `pr-review` \| `verify-ui` \| `design-size` |
 | `leg` | the leg that produced the entry |
 | `cycle` | 1-based — which pass through this gate produced the entry; `"unknown"` after a reconstruction, which permits no further loop-back (§reconstruction) |
 | `at` | timestamp; the audit trail's only ordering |
@@ -75,13 +79,19 @@ the PR.
 | `actions[].disposition` | `integrated` (edited and committed) \| `recorded` (logged, no edit) \| `open-question` (carried verbatim into the PR body) |
 | `actions[].note` | what was done, or why it was not |
 | `issue_links` | **`pr-review` entries only** — the closing-link reconciliation, one entry per related issue: `{"issue": 1926, "outcome": "closes" \| "stays-open" \| "dropped-but-closes"}` (`engine.md` §Closing links). Absent on a run with no linked issue |
-| `outcome` | `continued` \| `looped-back` \| `halted` |
+| `outcome` | `continued` \| `looped-back` \| `halted` \| `escalated` (only on `design-size`) |
 
 **A `verify-ui` entry is the thin shape**: `gate`, `cycle`, `at`, `outcome`, and nothing else —
 no `review`, no `actions`, because nothing reviews it. It exists for two reasons, and both are
 load-bearing: it carries the `implement`↔`verify-ui` loop bound, and it is how a *completed*
 `verify-ui` reaches `pipeline_can_navigate`'s `$doneLegs` (`gates.md`). Omit it and a triggered
 `verify-ui` can never be recorded as run, so every later forward jump is refused.
+
+**A `design-size` entry** records a Bounded design growing to Architectural
+(`engine.md` §Design size): `gate`, `leg`, `at`, `reason` (the string `DesignSize->escalation()`
+returned, or the judgement in a sentence) and `outcome: escalated`. It is not a loop-back and never
+counts toward a gate's cycle bound. It resets which gates count as run: `pipeline_done_legs()`
+ignores every gate pass older than it.
 
 **The loop bound is read from here, never from memory.** A review may drive a loop-back twice
 before the third must halt (`engine.md` §failure policy). Count **this gate's entries whose
@@ -114,7 +124,7 @@ Rebuild the cursor by probing **durable state**, then feed the probes to
 |---|---|
 | `spec` | spec file present on the branch (`docs/superpowers/specs/…`) |
 | `plan` | plan file present on the branch (`docs/superpowers/plans/…`) |
-| `planApproved` | the `gate_ledger` holds a `plan-approval` entry with `outcome: continued` — a human approval, or the engine's own continue under `auto` — else re-run `review-plan` (a re-review is cheap and stateless) |
+| `planApproved` | the `gate_ledger` holds a `plan-approval` entry with `outcome: continued` newer than the latest `design-size` escalation — a human approval, or the engine's own continue under `auto` — else re-run `review-plan` (a re-review is cheap and stateless) |
 | `pr` | `gh pr list --head <branch>` → PR number, else null |
 | `implemented` | PR marked ready / implementation commits present |
 | `uiNeeded` | `pipeline_triggers(<diff>)['ui']` over `git diff origin/<base>...HEAD` |
