@@ -300,6 +300,30 @@ overrides any mark-ready instruction in the plan, the PR comment, or `work-on`'s
 A cold-resume session that picks the PR up from its comment is outside the loop, so nothing mechanical
 can stop it undrafting early — the instruction in the brief is the only control. Keep it there.
 
+## What a leg brief consists of
+
+Every dispatched leg gets a brief, from the engine or from a coordinator running several pipelines.
+A brief consists of:
+
+- **pointers** to the artifacts: spec, plan, PR, issue;
+- **the settled decisions** and the manifest state the leg needs, including §Suite reuse's last
+  green tree;
+- **the overrides this file prescribes for that leg**, e.g. *"leave the PR draft"* (§Who takes the PR
+  out of draft) or the permitted design size (§Design size);
+- **nothing a station does not ask for.** No test policy, proof format or process of the brief
+  writer's own invention.
+
+**Plans and specs committed before 2026-09-14 are not exemplars** for test or proof policy. Many carry
+the rules below, and a design subagent that reads them as examples copies the rules forward.
+
+Three rules briefs invented, measured over 70 runs and retired:
+
+| Invented rule | What it cost | Instead |
+|---|---|---|
+| *"EVERY new assertion must be MUTATION-PROVEN"*, with hash checks and a `*.proof.md` write-up | 4–9 filtered test runs per run plus the write-up; most of what `review-plan` then integrated on small PRs policed it | A test written first has been seen red: that is the proof. Mutation-prove only a test written **after** the code (a test on existing behaviour that could not fail, a test added during review fixes). No proof documents; two lines in the PR body |
+| *"Measure your OWN suite baseline first"* | a full suite before any change (one run: 531 s + 179 s) | §Suite reuse: no baseline; a red suite is a failing step |
+| Status checks to a running subagent (*"are you still working?"*), sent minutes after dispatch | no reviewer finished sooner; each interrupts a turn | Wait for the completion notification. Check liveness only on a suspected stall: an agent past its usual upper end (~11 min for a `/critique` reviewer). Never dispatch a second agent for the same task |
+
 ## Mechanical checks — the deterministic layer inside `implement`
 
 Opt-in per repo. A repo declares its checks in a **committed** `## Checks` block in
@@ -410,8 +434,12 @@ needless interrupt costs the one thing `auto` exists to protect.
 
 **What the engine does with a review:**
 
-- **Act on what is worth acting on.** Apply the fixes to the spec, the plan or the code and commit
-  them. Record the rest — already-mitigated observations, notes for posterity — without an edit.
+- **Act on what is worth acting on — yourself.** Apply the fixes to the spec, the plan or the code
+  and commit them **in the engine session**. Edits to documents the engine already holds, and small
+  code fixes, never get a subagent of their own: a fresh agent must first re-read what the engine
+  already has. Rework — a review saying the work is fundamentally wrong — is not an edit; it loops
+  back (next bullet). Record the rest — already-mitigated observations, notes for posterity — without
+  an edit.
 - **Loop back** where the review says the work is fundamentally wrong: `review-plan` → `design`,
   `verify-ui` → `implement`, `review-pr` → `implement`. Bounded (§Failure policy).
 - **Never interrupt on a finding.** Anything unresolved goes into the PR body as an open question,
