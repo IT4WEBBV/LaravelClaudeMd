@@ -22,6 +22,8 @@ sometimes for simple changes."*
    base-branch comparison runs only when the suite is red.
 3. **Review fixes are applied by the engine session itself**, never by a subagent dispatched only to
    edit documents.
+4. **Leg briefs stop adding three rules** that no station asks for: mutation proofs for tests already
+   seen red, an upfront suite baseline, and routine status checks to running subagents.
 
 No model changes: every leg keeps the session model, and `/critique` keeps its own default.
 
@@ -72,7 +74,8 @@ recorded in *Risks accepted*.
 - The engine choosing `light` by itself. Classification downward stays a human (or coordinator) call.
 - Per-leg model selection.
 - Changing `/critique`, `work-on`, `handoff` or `browser-verification`.
-- The BreinStraat2 coordinator briefs — see *Open question*.
+- Rewriting existing coordinator briefs, or the plans already committed in BreinStraat2. §9 applies to
+  briefs written from now on.
 
 ## Design
 
@@ -218,7 +221,22 @@ but not who does it. Add: **the engine applies review fixes itself; the only dis
 produce is a loop-back to `design` or `implement`.** A subagent started only to edit documents must
 first re-read the spec, plan and review that the engine already holds.
 
-### 9. Code surface
+### 9. What a brief must not add
+
+A coordinator, or the engine, writes a brief for each dispatched leg. The BreinStraat2 briefs
+(~6–8k characters) add three rules no station asks for; they appear in 33 briefs and were copied into
+20+ BreinStraat2 plans. `engine.md` gains a short section that rules them out for every coordinator:
+
+| Rule found in briefs | Cost measured | Replaced by |
+|---|---|---|
+| *"EVERY new assertion must be MUTATION-PROVEN"*, including a hash check that the mutation altered the file, sometimes written up as a separate `*.proof.md` (PR #1048: 387 lines) | 4–9 filtered test runs per run (~3% of active time) plus the write-up | **Only for a test written after the code**, e.g. a test on existing behaviour that could not fail, or a test added during review fixes. A test written first has been seen red, and that is the proof. No separate proof documents; the proof goes in the PR body in a few lines |
+| *"Measure your OWN suite baseline first"* | a full suite before any change; #1047 spent 531 s + 179 s | §7: compare against the base branch only when the suite is red |
+| Status checks to running subagents (*"Status check only — no need to change what you are doing. Are you still working on the PR #964 review?"*), roughly 30 of them, sent 1–3 min after dispatch | reviewers finished no sooner, and each message interrupts a turn | **Wait for the completion notification.** A liveness check is for a suspected stall only: an agent past its usual upper end (~11 min for a `/critique` reviewer). The rule against dispatching a second agent for the same task still holds |
+
+These are brief rules, not mechanical checks. Like "leave the PR draft", the brief is the only control,
+so the section states them in the imperative.
+
+### 10. Code surface
 
 | Change | Where |
 |---|---|
@@ -228,14 +246,14 @@ first re-read the spec, plan and review that the engine already holds.
 | new `pipeline_suite_needed(?array $last, string $tree): bool` | `checks/pipeline.php` |
 | new `pipeline_code_lines(string $diff): int` | `checks/triggers.php` |
 | `manifest_infer_cursor()` chain-aware | `checks/manifest.php` |
-| stations table gains the light column; §Suite reuse; the §`auto` sentence; invocation | `references/engine.md` |
+| stations table gains the light column; §Suite reuse; the §`auto` sentence; §What a brief must not add; invocation | `references/engine.md` |
 | `chain` as the second knob; light gate legs; escalation | `references/gates.md` |
 | `chain` and `suite` fields; the `chain` ledger gate | `references/manifest.md` |
 | invocation line | `SKILL.md` |
 
 Parameters default to `full`, so every existing caller and test keeps its current behaviour.
 
-### 10. What does not change
+### 11. What does not change
 
 - The full chain's legs, gates and order.
 - `verify-ui` and its proof store.
@@ -267,6 +285,10 @@ Parameters default to `full`, so every existing caller and test keeps its curren
 8. **Threshold: 50 added code lines.** 34 of 71 PRs sat at or under it (median 14). Only added lines
    count, because `parse_diff()` tracks only added lines; a large deletion still reaches `review-pr`.
 9. **Review fixes in the engine** is a rule, not a knob.
+10. **Brief rules live in `engine.md`**, not in memories or BreinStraat2 guidance. Every coordinator reads
+    the engine when it drives a run, and the rules are not BreinStraat2-specific. Existing briefs and
+    committed plans are left as they are. *Rejected:* dropping mutation proofs entirely. For a test on
+    existing behaviour that could not fail (BreinStraat2 #1047), the mutation is the whole point.
 
 ## Validation strategy
 
@@ -286,24 +308,8 @@ Parameters default to `full`, so every existing caller and test keeps its curren
   - **Escalations:** if more than about 1 run in 3 escalates, the guidance for choosing `light` is
     wrong.
   - **Loop-backs:** compare `review-pr` loop-backs between light and full runs, as the quality signal.
-
-## Open question — trimming coordinator briefs (undecided)
-
-The BreinStraat2 coordinator writes ~6–8k-character briefs. Beyond what the skill asks, they add three
-rules, found in 33 briefs and copied into 20+ BreinStraat2 plans:
-
-- **"EVERY new assertion must be MUTATION-PROVEN"**, including "verify each mutation actually altered
-  the file (hash before/after)". Proposal: a test written first has already been seen red, which is the
-  mutation proof, so keep the rule only for tests added after the code.
-- **"Measure your OWN suite baseline first."** Proposal: superseded by §7's base-branch comparison on
-  red.
-- **Status checks to running subagents** ("Status check only — no need to change what you are doing. Are you
-  still working on the PR #964 review?"), roughly 30 of them. They probably follow the memory *never
-  double-dispatch subagents — SendMessage's reply is the liveness check*. Proposal: no check before a
-  reviewer has run past its usual upper end (~11 min); wait for the completion notification.
-
-Decide separately: whether to adopt these, and whether they belong in `engine.md` or in the coordinator
-guidance.
+  - **Brief rules:** filtered mutation runs per run, full suites per run (median 4 today) and status
+    messages sent to running subagents (~30 across 70 runs today) should all drop.
 
 ## Risks accepted
 
