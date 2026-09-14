@@ -282,6 +282,16 @@ is "$(git -C "$repo" rev-list --count main..origin/main)" "0" "main synced on th
 rm -rf "${TMPDIR:-/tmp}/claude-git-freshness/test-edit"
 echo
 
+echo "case 12: the SecondBrain vault is left to vault-sync.sh"
+repo=$(fixture vaultskip 2)
+payload="{\"session_id\":\"test-vault\",\"file_path\":\"$repo/app.php\"}"
+rm -rf "${TMPDIR:-/tmp}/claude-git-freshness/test-vault"
+out=$(printf '%s' "$payload" | VAULT_DIR="$repo" bash "$hook" edit 2>/dev/null)
+is "$out" "" "no report for the vault"
+is "$(git -C "$repo" rev-list --count main..origin/main)" "2" "the vault's main was not fast-forwarded"
+rm -rf "${TMPDIR:-/tmp}/claude-git-freshness/test-vault"
+echo
+
 echo "----------------------------------------"
 printf '%d passed, %d failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]
