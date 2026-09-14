@@ -1,7 +1,7 @@
 # `pipeline` — a light chain, suite reuse, review fixes in the engine, brief composition — design
 
 **Date:** 2026-09-14
-**Status:** draft v2 (post-critique) → owner decisions (end of this file) → implementation plan → PR
+**Status:** draft v2 (post-critique, owner decisions made) → owner read → implementation plan → PR
 **Canonical home:** `IT4WEBBV/LaravelClaudeMd`, `skills/pipeline/` (global skill, symlinked into `~/.claude/skills/`).
 **Amends:** `2026-07-24-pipeline-skill-design.md` (the leg list, "mode is the only knob", the pinned
 navigation signature) and `2026-07-27-pipeline-mechanical-checks-design.md` (when the suite runs).
@@ -91,7 +91,7 @@ from the gate ledgers projected onto the PR bodies.
 
 ## Non-goals
 
-- The engine choosing `light` under `auto` (see *Owner decisions* for `interactive`).
+- The engine choosing `light` by itself, in either mode. Under `interactive` it may *ask* (§2).
 - Per-leg model selection.
 - Changing `/critique`, `work-on`, `handoff`, `brainstorming` or `browser-verification`.
 - Rewriting existing coordinator briefs, or the plans and specs already committed in BreinStraat2.
@@ -166,9 +166,17 @@ mid-task upgrades the path."* The light design leg invokes it; it does not reimp
 
 **The full chain's mirror-image bug is fixed here too.** Today, if brainstorming classifies a full-chain
 task as Bounded, no spec is written, and `manifest_infer_cursor` reads `design` forever
-(`manifest.php:33`). On the full chain the pipeline brief tells brainstorming to take the Architectural
-path. Whether a Bounded classification should instead *be* the light signal is an owner decision (end
-of file).
+(`manifest.php:33`). The full chain now handles that classification explicitly:
+- **`interactive`:** the pipeline **asks the human** whether light is acceptable, as one explicit
+  multiple-choice question.
+  - **Yes** → `chain: light`: the Bounded design becomes the `## Plan`, and the run continues to the
+    short `review-plan`.
+  - **No** → brainstorming is told to take the Architectural path and write the spec and plan.
+- **`auto`:** nobody can be asked, so brainstorming is told to take the Architectural path. Only the
+  explicit `light` word selects light.
+
+A Bounded classification never switches the chain on its own; a human choosing light is the only way
+in.
 
 ### 3. Light implement opens the PR
 
@@ -426,13 +434,14 @@ The code-risk catches were concrete:
   retires, and it was itself wrong at least four times (#1018, #975, #1046, #1002).
 
 So the gate is mostly ceremony by volume, but a real catch lands in roughly one small PR in four. That
-share grows above 20 lines. Whether light keeps a short `review-plan` is an owner decision (end of file).
+share grows above 20 lines. Light therefore keeps a short `review-plan` (§4, decision 2).
 
 ## Decisions log
 
-1. **`light` is opt-in and never chosen by the engine under `auto`.** *Rejected:* auto-classification
-   from the request under `auto`, where nobody reviews the classification. brainstorming's own
-   classification under `interactive` is an open owner decision.
+1. **`light` is always a human choice** (owner decision): the explicit word, or a yes to the question
+   §2 asks under `interactive` after a Bounded classification. *Rejected:* letting that classification
+   switch the chain by itself; the owner wants to be asked. *Rejected:* auto-classification under
+   `auto`, where nobody reviews the classification.
 2. **Light keeps a short `review-plan`** (owner decision). *Rejected:* dropping it, as v1 and v2
    drafted. On small PRs the gate caught a real code defect in 8 of 28 classifiable cases, before the
    code existed. Once §9 removes the ceremony it mostly policed, and its target shrinks to ~20 lines,
@@ -499,14 +508,14 @@ share grows above 20 lines. Whether light keeps a short `review-plan` is an owne
   CI on push is the backstop.
 - **A branch with commits but no PR reconstructs as `full`.**
 
-## Owner decisions
+## Owner decisions (all decided, 2026-09-14)
 
-1. **Who may choose light under `interactive`?** Either only the explicit `light` word, or also
-   brainstorming classifying the task Bounded (the human approves that design, so a human confirmed it).
-
-**Decided:**
+- **Who chooses light:** always a human. Under `interactive`, a Bounded classification makes the
+  pipeline *ask*; it never switches on its own (§2, decision 1).
 - **Threshold:** 100 code lines (§5).
 - **Light keeps a short `review-plan`** (§4, decision 2).
+- **No Sonnet** (decision 4).
+- **Brief rules:** all three retired, written down in `engine.md` (§9).
 
 ## Rework log (v1 → v2)
 
