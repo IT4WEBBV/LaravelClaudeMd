@@ -56,3 +56,30 @@ function pipeline_can_navigate(string $from, string $to, array $doneLegs, array 
 
     return true;
 }
+
+/**
+ * The gate legs that have run, as `pipeline_can_navigate`'s `$doneLegs`. A gate counts once it has
+ * a `continued` entry — but only one newer than the latest `design-size` escalation: a Bounded
+ * design that grew is a different plan, and the pass over the small one must not let navigation
+ * skip the re-review (`../references/engine.md` §Design size).
+ */
+function pipeline_done_legs(array $ledger): array
+{
+    $legOf = ['plan-approval' => 'review-plan', 'pr-review' => 'review-pr', 'verify-ui' => 'verify-ui'];
+
+    $escalatedAt = array_column(
+        array_filter($ledger, fn (array $entry) => ($entry['outcome'] ?? null) === 'escalated'),
+        'at',
+    );
+    $since = $escalatedAt === [] ? '' : max($escalatedAt);
+
+    $done = [];
+    foreach ($ledger as $entry) {
+        $leg = $legOf[$entry['gate'] ?? ''] ?? null;
+        if ($leg !== null && ($entry['outcome'] ?? null) === 'continued' && ($entry['at'] ?? '') > $since) {
+            $done[] = $leg;
+        }
+    }
+
+    return array_values(array_unique($done));
+}
