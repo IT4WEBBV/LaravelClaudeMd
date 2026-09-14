@@ -380,7 +380,47 @@ the pipeline case, so the two do not compete.
 
 ## Review-plan on small changes
 
-*Measurement in progress, filled in before the owner reads this draft.*
+Measured over the 42 pipeline PRs with ≤ 80 code lines.
+
+**Where the record lives.** The `review-plan` ledger is projected onto the PR body in only ~14 of them.
+The rest was recovered from the proof store's `run.json` and from the committed spec or plan (a section
+headed *"What the `review-plan` gate changed"*). No record exists for 9 PRs; one ran no gate; one
+records counts only. That leaves **28 classifiable PRs**.
+
+**What got integrated.** Each item was classified as:
+- **code-risk:** a concrete defect would have shipped;
+- **test-quality:** the code was right, the test would not have proved it;
+- **process:** proof format, counts, doc wording, mutation mechanics.
+
+| Code lines | Classifiable PRs | Items | Code-risk | Test-quality | Process | PRs with a code-risk catch |
+|---|---|---|---|---|---|---|
+| ≤ 20 | 12 | 86 | 2 | 11 | 66 (+7 runbook) | 2 |
+| 21–50 | 8 | 54 | 3 | 12 | 39 | 3 |
+| 51–80 | 8 | 64 | 7 | 12 | 45 | 4 |
+| **All** | **28** | **204** | **12 (6%)** | **35 (17%)** | **150 (74%)** | **9** |
+
+The code-risk catches were concrete:
+- **Asimo #173:** a literal left in the Blade would have rendered *"Promo Promo until 30-09-2026"*, with
+  every planned assertion green.
+- **BreinStraat2 #935:** making `complete()` private would have left the PDF 500 reachable through
+  public `submitThemes()`.
+- **#937:** a full-screen dialog would have had no way to close on a phone.
+- **#1046:** `validate()` in an update hook would have wiped the whole error bag.
+- **#942:** three legacy defects would have been reinstated.
+
+**Reading it honestly:**
+- **Share.** In **8 of 28** classifiable PRs (29%; at least 19% of all 42), `review-plan` caught a code
+  defect that `review-pr` never mentioned. That is 2 of 12 at ≤ 20 lines, and 6 of 16 above that.
+- **Counterfactual.** "Never mentioned by `review-pr`" is weaker than it sounds: `review-pr` only ever saw
+  the code *after* the fix. Nothing measures whether it, or `verify-ui`, would have caught these later.
+  Some are visible enough that `verify-ui` plausibly would have (the doubled label, the dialog).
+- **Alternative count.** If a planned test that would pass with the defect present counts as code-risk,
+  the count rises to 14 of 28.
+- **Precision.** 74% of what the gate integrated was process, much of it policing the ceremony §9
+  retires, and it was itself wrong at least four times (#1018, #975, #1046, #1002).
+
+So the gate is mostly ceremony by volume, but a real catch lands in roughly one small PR in four. That
+share grows above 20 lines. Whether light keeps a short `review-plan` is an owner decision (end of file).
 
 ## Decisions log
 
@@ -453,6 +493,12 @@ the pipeline case, so the two do not compete.
 1. **Who may choose light under `interactive`?** Either only the explicit `light` word, or also
    brainstorming classifying the task Bounded (the human approves that design, so a human confirmed it).
 2. **Escalation threshold:** 100 code lines (proposed) or 50.
+3. **Does light keep a short `review-plan`?**
+   - **Keep:** `/critique plan` over the ~20-line Bounded design instead of a 450–1,500-line spec and plan.
+     The gate set then equals the full chain's, so `pipeline_can_navigate`'s pinned signature can stay
+     (§1 simplifies).
+   - **Drop,** as drafted: faster, and relies on `verify-ui` and `review-pr` to catch the ~1-in-4 defect
+     after the code exists.
 
 ## Rework log (v1 → v2)
 
