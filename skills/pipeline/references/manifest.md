@@ -22,6 +22,7 @@ Read/written by the Phase A helpers in `../checks/manifest.php`:
 | `last_sha` | optional | HEAD at the last completed leg |
 | `gate_ledger` | optional | the audit trail — each gate's review, what the engine or the human did about it, and the content-trigger annotations (shape below) |
 | `lease` | optional | session id + timestamp (single-driver guard) |
+| `suite` | optional | the last full suite: `{tree, outcome: green\|red, passed, failed, at}` — see *Two rules* for why a recomputable field is stored |
 
 `manifest_validate($data)` returns the list of **missing required keys** — `branch`,
 `worktree`, `mode`, `cursor`. An empty list means valid. Keep this table and that function
@@ -37,6 +38,9 @@ in lock-step: the four required rows above are exactly the four keys the functio
 - **Recomputable fields are derived at leg start, never trusted from the file.** A field that
   git/gh can recompute (the diff's triggers, whether the PR is ready) is recomputed each leg.
   Storing it is a latent drift bug.
+- **Named exception: `suite`.** A suite result is recomputable (re-run it), yet it is stored,
+  because it cannot go stale silently: it is used only when `pipeline_tree_key()` of the current
+  working tree equals the recorded `tree`, and losing it costs one re-run (`engine.md` §Suite reuse).
 
 ## `gate_ledger` — the audit trail that keeps a gate from being decoration
 

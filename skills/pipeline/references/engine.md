@@ -60,6 +60,19 @@ the right place. A resume locates the run's worktree via `git worktree list` for
 claim, so no *second* slot ever appears mid-chain. **Created, never torn down**: teardown is
 destructive and stays the human's call.
 
+**Keep the manifest out of git before writing it.** Many repos do not ignore `.claude/`, and a
+manifest that git can see would be committed by a stray `git add -A` and would change §Suite reuse's
+tree key on every write. At kickoff, before the first `manifest_write`:
+
+```bash
+CHECKS="$HOME/.claude/skills/pipeline/checks"   # the skill's checks, whichever repo the run is in
+php -r 'require $argv[1] . "/suite.php"; pipeline_exclude_manifest(getcwd());' "$CHECKS"
+```
+
+It adds `.claude/pipeline/` to the repo's shared `info/exclude`. That file is local, never pushed and
+shared by every worktree, so the PR diff stays clean. It does nothing when the path is already
+ignored.
+
 ## Dev-stack readiness — pipeline-owned, no hesitation
 
 Several legs need the worktree's stack: `implement` runs the suite after each step, and
@@ -187,7 +200,8 @@ taken from the slot already resolved for the worktree at kickoff. A hardcoded co
 the *primary* stack and analyses the *primary* checkout, reporting no findings and passing green on
 code the run never touched.
 
-**What runs, and when.** After each step: the test suite, then `static-analysis` over the whole
+**What runs, and when.** After each step: the test suite (skipped when §Suite reuse finds this tree
+already green), then `static-analysis` over the whole
 declared scope, then `format` over the whole tree. **No file lists and no diff-scoping** — measured
 on Deploy, scoping to two files costs 4.7s against 11.1s for all of `app/` because the analyser's
 bootstrap is a fixed ~4.5s floor, and paying that 6.4s removes host→container path mapping,
@@ -223,6 +237,42 @@ manifest.
 findings over `app/`", never an unqualified "0 new findings", since the declared scope does not cover
 `database/`, `routes/`, `config/` or `tests/`. Any suppressions added during the run are listed and
 flagged as **not yet judged**, so one cannot enter reading as already resolved.
+
+## Suite reuse — once per tree
+
+A full suite run proves something about the **content** it ran over, not about a commit. Every point
+that runs the full suite asks first:
+
+- after each `implement` step,
+- after review fixes,
+- before `review-pr`.
+
+```bash
+CHECKS="$HOME/.claude/skills/pipeline/checks"
+MANIFEST=".claude/pipeline/<branch>.json"
+TREE=$(php -r 'require $argv[1] . "/suite.php"; echo pipeline_tree_key(getcwd());' "$CHECKS")
+# manifest `suite` is {tree, outcome: green|red, passed, failed, at}
+php -r 'require $argv[1] . "/suite.php";
+        $manifest = json_decode(file_get_contents($argv[2]), true);
+        exit(pipeline_suite_needed($manifest["suite"] ?? null, $argv[3]) ? 0 : 1);' "$CHECKS" "$MANIFEST" "$TREE" \
+  && echo "run the suite" || echo "reuse: this tree is already green"
+```
+
+- **The key.** `pipeline_tree_key()` is the tree the working copy would commit right now, untracked
+  non-ignored files included, built in a temporary index so the real one is untouched. Committing
+  content that was already tested keeps the key, so a run before `git commit` counts for the commit.
+- **Record.** After every full run, write `suite: {tree, outcome, passed, failed, at}` to the
+  manifest. Only `green` is ever reused.
+- **The reviewer is told.** The `review-pr` brief states *"full suite green over tree `<tree>` at
+  `<sha>`: N passed"*. Whether to re-run stays the reviewer's call.
+- **No baseline.** No suite runs before the change. A red full suite is a failing step, fixed and
+  bounded like any other.
+  - When the engine believes a failure predates the change, that is a **machinery failure → halt**
+    with the evidence (§Failure policy), never an annotation.
+  - Never switch the run's worktree to the base commit to compare: under a running stack that
+    desyncs vendor, migrations and assets, and a wrong red would be filed as pre-existing.
+- **Failure to compute the key** (`pipeline_git` throws) is a machinery failure. Run the suite; never
+  assume reuse.
 
 ## `auto` — the engine resolves the review itself
 
