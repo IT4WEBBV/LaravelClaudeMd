@@ -1028,13 +1028,15 @@ grep -n -E 'basic-memory|Second Brain|SecondBrain|vault-sync|autoMemoryDirectory
 
 Expected: no `basic-memory` and no `Second Brain` hits. `SecondBrain`, `vault-sync` and `autoMemoryDirectory` appear only in the bootstrap block and the new Memory section.
 
-- [ ] **Step 7: Commit, push, open the PR**
+- [ ] **Step 7: Commit, push, update the PR and mark it ready**
+
+The handoff opened a draft PR for this branch, so this step retitles it, replaces its body and takes it out of draft. Running the plan without that PR: use `gh pr create --base main --title "Move auto-memory into the SecondBrain vault" --body-file - <<'EOF'` in place of the `gh pr edit` line, and skip `gh pr ready`.
 
 ```bash
 git add CLAUDE.md
 git commit -m "CLAUDE.md: memory lives in the SecondBrain vault; replace the basic-memory sections"
 git push -u origin feature/vault-auto-memory
-gh pr create --base main --title "Move auto-memory into the SecondBrain vault" --body-file - <<'EOF'
+gh pr edit --title "Move auto-memory into the SecondBrain vault" --body-file - <<'EOF'
 ## Summary
 
 Auto-memory moves into the SecondBrain vault so the one memory system in use is versioned in git and shared by both machines. basic-memory is retired.
@@ -1054,9 +1056,10 @@ Spec: `docs/superpowers/specs/2026-09-11-vault-auto-memory-design.md` (includes 
 
 The hooks do nothing until `~/.claude/settings.json` wires them. Migrating the memories into the vault and the cut-over on this machine (plan Tasks 5–6) follow the merge directly. Until then, the new Memory section describes a setup that is not yet live.
 EOF
+gh pr ready
 ```
 
-Before running `gh pr create`, replace both `<paste the summary line>` markers with the real `N passed, 0 failed` lines from Task 3 Step 4.
+Before running `gh pr edit`, replace both `<paste the summary line>` markers with the real `N passed, 0 failed` lines from Task 3 Step 4.
 
 **Checkpoint:** stop here. The owner merges the PR. The `git-freshness` hook then fast-forwards the primary checkout's `main`. Confirm with `git -C ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd log -1 --format=%s main` before Task 5.
 
