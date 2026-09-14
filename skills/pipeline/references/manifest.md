@@ -86,10 +86,11 @@ load-bearing: it carries the `implement`↔`verify-ui` loop bound, and it is how
 `verify-ui` reaches `pipeline_can_navigate`'s `$doneLegs` (`gates.md`). Omit it and a triggered
 `verify-ui` can never be recorded as run, so every later forward jump is refused.
 
-**A `design-size` entry** records a Bounded design growing to Architectural: `gate`, `leg`, `at`,
-`reason` (the string `DesignSize->escalation()` returned, or the judgement in a sentence) and
-`outcome: escalated`. It is not a loop-back and never counts toward a gate's cycle bound. It resets
-which gates count as run: `pipeline_done_legs()` ignores every gate pass older than it.
+**A `design-size` entry** records a Bounded design growing to Architectural
+(`engine.md` §Design size): `gate`, `leg`, `at`, `reason` (the string `DesignSize->escalation()`
+returned, or the judgement in a sentence) and `outcome: escalated`. It is not a loop-back and never
+counts toward a gate's cycle bound. It resets which gates count as run: `pipeline_done_legs()`
+ignores every gate pass older than it.
 
 **The loop bound is read from here, never from memory.** A review may drive a loop-back twice
 before the third must halt (`engine.md` §failure policy). Count **this gate's entries whose
