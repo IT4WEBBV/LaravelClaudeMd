@@ -604,6 +604,12 @@ Under `auto` these are the only stops. **No finding stops a run.**
   `work-on` hits a blocker, or the reviewer returns nothing after a single retry. → **halt.** Write
   the failure to the manifest; a human resumes. **No silent retry** beyond that one — a retry hides
   the failure and the machinery may be in an unknown state.
+- **A Fable usage limit is not a hard failure.** `/critique` moves the reviewer to Opus itself
+  (`../../critique/SKILL.md` §Stage 2). That switch is not the single retry above: a reviewer that
+  then returns nothing still gets its retry, on Opus. Its record is `/critique`'s one chat line; the
+  ledger entry and the PR carry the review and what was done about it, as for any review. A usage
+  limit on the Opus dispatch too is the hard failure: halt, and put the reset time in the failure
+  written to the manifest so the human knows when a resume can work.
 - **Kickoff halts** (§The work item) — these fire *before* the worktree exists, so they leave
   nothing behind and there is no manifest yet to write to; report and stop.
   - **An open blocker** on the run's issue → halt in both modes. Which of wait / work around /
