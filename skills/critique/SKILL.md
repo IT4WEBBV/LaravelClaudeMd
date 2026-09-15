@@ -115,6 +115,20 @@ with fixes, or needs rework, and why in a sentence.
 Model configurable, **Fable by default**. Reasoning effort is session-level — there is
 no per-dispatch override.
 
+**A usage limit on Fable moves the review to Opus.** When a Fable reviewer terminates early
+on a usage limit — its failure names `rate_limit` or HTTP 429, as in *"Agent terminated early
+due to an API error: You've hit your … limit · resets 9:00pm"* — dispatch the same brief once
+more with `model: "opus"`:
+
+- The new brief is the original brief. Whatever the Fable agent wrote before it died is
+  discarded: a cut-off review has no bottom line and reads as a finished one.
+- The switch is a change of model, not a retry, so it spends none of a caller's retry budget.
+- A usage limit on the Opus dispatch as well means the whole account is limited: report that
+  error with its reset time, and stop.
+
+The same holds for every agent this skill dispatches — the `alternatives` agents and the
+`--verify` skeptic included.
+
 ### Stage 3 — report in chat
 
 The review, as the reviewer wrote it. Do not reformat it into a table, re-rank it,
@@ -123,7 +137,12 @@ summarise it into bullets, or drop parts of it. Relaying it faithfully is the wh
 doing.
 
 State the mode and the assembled target before it (stage 0), so the reader knows what
-was reviewed.
+was reviewed. A review that moved to Opus adds one line there, and the switch is reported
+nowhere else:
+
+```
+Reviewed on Opus — Fable usage limit reached (resets <time from the error>).
+```
 
 ### Stage 4 — triage
 
