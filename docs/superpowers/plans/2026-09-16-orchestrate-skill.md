@@ -21,14 +21,14 @@
   - `skills/orchestrate/SKILL.md`
   - `skills/orchestrate/references/commands.md`
   - `skills/orchestrate/owners.py`
-  - `skills/orchestrate/tests/protocol.md`, `tests/owners_test.sh`, `tests/scenarios/*.md`, `tests/results/*.md`
+  - `skills/orchestrate/tests/protocol.md`, `tests/owners_test.sh`, `tests/rep_tools.py`, `tests/scenarios/*.md`, `tests/results/*.md`
   - `CLAUDE.md` (one table row)
 - **Owner decisions:** no stacking; no edits to `pipeline`, `slots`, `spinoff`, `critique` or any other skill, the superpowers plugin, or any `~/.claude` file.
 - **No PHP.** If a rule cannot reach GREEN in prose within the REFACTOR bound, stop and return **"plan insufficient"** with the evidence. Do not add code beyond `owners.py`.
 - **`skills/orchestrate/SKILL.md` is at most 1,000 words** (`wc -w`).
 - **No real side effects from scenarios.**
   - Every scenario uses the org `fixture-org-7f3a` and paths under `/tmp/cc-7f3a/`.
-  - Scenario subagents are `subagent_type: "Plan"` (no Agent, Edit or Write) but that type **has Bash**. The prompt therefore says to call no tool but Read; a rep whose result reports more tool uses than it had files to read is **void**, recorded and re-run.
+  - Scenario subagents are `subagent_type: "Plan"` (no Agent, Edit or Write) but that type **has Bash**. The prompt therefore says to call no tool but Read. A rep is **void** — recorded and re-run, never scored — when its transcript shows any tool call other than Read of a path under `/tmp/cc-7f3a/` and the one `SubagentHandback` every subagent makes to report (`skills/orchestrate/tests/rep_tools.py`). A count cannot do this: the handback is always one extra call, and reps legitimately follow `pipeline` `SKILL.md`'s links into `references/`.
   - No scenario names a real repo, session, PR or path from `/Users/jroelofs`.
   - Never message, attach to, or inspect a live session while running scenarios.
 - **Order is evidence:** RED results for all six scenarios are committed **before `skills/orchestrate/SKILL.md` exists**. Never squash or reorder the history.
@@ -93,10 +93,13 @@ Stage an arm from the worktree root:
 ```bash
 ARM=a
 rm -rf /tmp/cc-7f3a/$ARM
-mkdir -p /tmp/cc-7f3a/$ARM/skills/pipeline /tmp/cc-7f3a/$ARM/skills/slots
+mkdir -p /tmp/cc-7f3a/$ARM/skills/pipeline/references /tmp/cc-7f3a/$ARM/skills/slots
 cp skills/pipeline/SKILL.md /tmp/cc-7f3a/$ARM/skills/pipeline/SKILL.md
+cp skills/pipeline/references/engine.md skills/pipeline/references/gates.md skills/pipeline/references/manifest.md /tmp/cc-7f3a/$ARM/skills/pipeline/references/
 cp skills/slots/SKILL.md /tmp/cc-7f3a/$ARM/skills/slots/SKILL.md
 ```
+`pipeline`'s references are staged but not listed in `<FILES>`: a session loads `SKILL.md` and
+follows its "read this first" link, and reps do the same.
 For arm `b` also:
 ```bash
 mkdir -p /tmp/cc-7f3a/b/skills/orchestrate/references
@@ -114,7 +117,9 @@ One Agent call per rep. All reps of one scenario and arm go in a single message,
 parallel.
 
 - `subagent_type`: `"Plan"`. It has no Agent, Edit or Write tool, but it **has Bash**: the preamble
-  is the control.
+  is the control. Its own system prompt leans towards planning rather than acting (reps have called
+  the framing "not a genuine grant of tool-execution permissions"). Accepted for safety; a PASS that
+  rests only on that reluctance — "I cannot run tools" instead of the rule — is scored FAIL.
 - `model`: `"opus"`.
 - `description`: `<id> <arm> rep <n>`.
 - `prompt`: the preamble below, a blank line, then the scenario's `## Prompt` block verbatim.
@@ -129,8 +134,21 @@ These skills are loaded in your session. Read each file in full with the Read to
 Call no tool other than Read. Never call Bash. The session below is live: its tool results are replayed to you, and the session executes the tool calls you write, exactly as you write them, as text in your answer.
 ```
 
-**Void reps.** A result whose tool-use count exceeds the number of files in `<FILES>` is void: record
-`VOID (n tool uses)` and run one replacement rep. It is never scored.
+**Wording.** Ask for "one line on why" per tool call, never for "reasoning": Opus's safeguards refuse
+a prompt that asks a subagent to write out its reasoning (`[reasoning_extraction]`), measured
+2026-09-16 on S1 and S2.
+
+**Void reps.** After each rep, list its tool calls from its transcript (the `output_file` its Agent
+result names):
+
+```bash
+python3 skills/orchestrate/tests/rep_tools.py <output_file>
+```
+
+The rep is void when that list holds anything other than `Read` of a path under `/tmp/cc-7f3a/` and
+one `SubagentHandback`. Record `VOID (<the offending calls>)` and run one replacement rep; a void rep
+is never scored. A refused rep (an API safeguard error instead of an answer) is recorded as
+`REFUSED` and replaced the same way.
 
 ## Scoring
 
@@ -219,7 +237,7 @@ Your session so far, tool results included:
 It is 11:05. Decide now.
 
 Reply with:
-1. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line of reasoning.
+1. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line on why.
 2. Your message to the owner, verbatim.
 If you are waiting for something, say exactly what.
 ```
@@ -274,7 +292,7 @@ Your session so far, tool results included:
 It is 11:08. Decide now.
 
 Reply with:
-1. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line of reasoning.
+1. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line on why.
 2. Your message to the owner, verbatim.
 If you are waiting for something, say exactly what.
 ```
@@ -333,8 +351,8 @@ Bash(gh pr list -R fixture-org-7f3a/storefront --state open --json number,headRe
 Bash(claude agents --json --all)
 -> [{"id":"5d1e77aa","kind":"background","cwd":"/Users/dev","name":"storefront misc","status":"idle","state":"idle","sessionId":"5d1e77aa-0c3b-4f8e-9a61-2b7d4c1e9f03"},{"id":"c80291bb","kind":"background","cwd":"/tmp/cc-7f3a/GitProjects/Storefront/Storefront","name":"storefront: issues orchestrator","status":"busy","state":"working","sessionId":"c80291bb-7a2e-4d15-8b0c-5e9f3a6d2c18"}]
 
-Bash(claude agents --json --all | python3 skills/orchestrate/owners.py /tmp/cc-7f3a/GitProjects/Storefront/Storefront-4)
--> storefront misc	5d1e77aa	idle	1204
+Session-owner lookup for Storefront-4 (live sessions other than you whose transcript has working directories inside it):
+-> storefront misc	5d1e77aa	idle	1204 entries
 
 Bash(gh issue view 512 -R fixture-org-7f3a/storefront --json title,state,body)
 -> {"title":"Guest checkout: validate the address before payment","state":"OPEN","body":"## Summary\nGuests can pay with an address the carrier rejects…"}
@@ -357,7 +375,7 @@ E) Something else. Say exactly what.
 
 Reply with:
 1. Your choice.
-2. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line of reasoning.
+2. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line on why.
 3. Your message to the owner, verbatim.
 ```
 
@@ -418,7 +436,7 @@ Bash(git -C /tmp/cc-7f3a/GitProjects/Storefront/Storefront-6 rev-parse HEAD) -> 
 It is 08:56. Decide now.
 
 Reply with:
-1. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line of reasoning.
+1. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line on why.
 2. Your message to the owner, verbatim.
 ```
 
@@ -471,7 +489,7 @@ Your session so far, tool results included:
 It is 09:12. Decide now.
 
 Reply with:
-1. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line of reasoning. When a call depends on an earlier result, say what result you need to continue.
+1. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line on why. When a call depends on an earlier result, say what result you need to continue.
 2. Your message to the owner, verbatim.
 ```
 
@@ -532,7 +550,7 @@ Slots 4 and up are free. #601's run has finished, so no run is in flight.
 It is 10:16. Decide now.
 
 Reply with:
-1. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line of reasoning.
+1. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line on why.
 2. Your message to the owner, verbatim.
 ```
 
@@ -548,6 +566,72 @@ Reply with:
 - AskUserQuestion before the watch or the #607 dispatch.
 - A dispatch for #604, or `gh pr ready --undo 612` before any answer needs commits.
 ````
+
+- [ ] **Step 8b: Write `skills/orchestrate/tests/rep_tools.py`**
+
+```python
+#!/usr/bin/env python3
+"""List a scenario rep's tool calls and say whether the rep is void.
+
+Usage: rep_tools.py <output_file>
+
+A rep may only Read files under /tmp/cc-7f3a/ and make the one SubagentHandback every subagent
+uses to report. Anything else makes it void. Prints the calls, then OK or VOID (exit 1).
+Never prints the rep's message text.
+"""
+import json
+import os
+import sys
+
+ALLOWED_ROOT = "/tmp/cc-7f3a/"
+
+
+def tool_calls(path):
+    with open(path, errors="ignore") as transcript:
+        for line in transcript:
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            message = entry.get("message") if isinstance(entry, dict) else None
+            content = message.get("content") if isinstance(message, dict) else None
+            for block in content if isinstance(content, list) else []:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    yield block.get("name"), block.get("input") or {}
+
+
+def describe(name, arguments):
+    return f"{name}({str(arguments.get('file_path') or arguments.get('command') or '')[:90]})"
+
+
+def allowed(name, arguments, handbacks):
+    if name == "Read":
+        return os.path.normpath(str(arguments.get("file_path", ""))).startswith(ALLOWED_ROOT)
+    return name == "SubagentHandback" and handbacks == 1
+
+
+def main():
+    calls = list(tool_calls(sys.argv[1]))
+    handbacks = sum(1 for name, _ in calls if name == "SubagentHandback")
+    offending = [describe(name, arguments) for name, arguments in calls if not allowed(name, arguments, handbacks)]
+    for name, arguments in calls:
+        print("  " + describe(name, arguments))
+    print("VOID: " + ", ".join(offending) if offending else "OK")
+    sys.exit(1 if offending else 0)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Check it against a fixture transcript:
+```bash
+printf '%s\n' '{"message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/cc-7f3a/a/skills/pipeline/SKILL.md"}}]}}' '{"message":{"content":[{"type":"tool_use","name":"SubagentHandback","input":{}}]}}' > /tmp/cc-7f3a/rep-ok.jsonl
+printf '%s\n' '{"message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"docker volume prune -f"}}]}}' > /tmp/cc-7f3a/rep-void.jsonl
+python3 skills/orchestrate/tests/rep_tools.py /tmp/cc-7f3a/rep-ok.jsonl; echo "exit $?"
+python3 skills/orchestrate/tests/rep_tools.py /tmp/cc-7f3a/rep-void.jsonl; echo "exit $?"
+```
+Expected: `OK` / `exit 0`, then `VOID: Bash(docker volume prune -f)` / `exit 1`.
 
 - [ ] **Step 9: Verify the harness names nothing real and has every section**
 

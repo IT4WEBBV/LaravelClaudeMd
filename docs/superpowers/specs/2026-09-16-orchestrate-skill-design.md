@@ -412,8 +412,12 @@ resumes them. It never re-dispatches.
     Read tool; call no other tool — never Bash; write every command as text*. Scenario subagents are
     the `Plan` type, which has no Agent, Edit or Write tool — but it **does** have Bash, so that
     instruction is the control, not the agent type.
-  - A rep whose result reports more tool uses than it has files to read is **void**: recorded as such
-    and re-run, not scored.
+  - A rep whose transcript shows any tool call other than Read under `/tmp/cc-7f3a/` and its one
+    `SubagentHandback` is **void**: recorded as such and re-run, not scored
+    (`tests/rep_tools.py`). A count does not work: the handback is always one extra call, and reps
+    follow `pipeline`'s links into its references, which both arms therefore stage.
+  - Prompts ask for "one line on why" per call, never for "reasoning": Opus's safeguards refused the
+    latter (`[reasoning_extraction]`) on the first RED attempt, 2026-09-16.
   - Fixtures use a non-existent org (`fixture-org-7f3a/storefront`) and paths under `/tmp/cc-7f3a/`.
 - **Arms.**
   - **RED** loads what the situation would load today: `pipeline` `SKILL.md` for every scenario, plus
