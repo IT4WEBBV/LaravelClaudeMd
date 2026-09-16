@@ -372,8 +372,9 @@ resumes them. It never re-dispatches.
 - **`skills/orchestrate/owners.py`** — the in-flight owner lookup (§3), like `spinoff`'s
   `check-launch.py`: reads `claude agents --json --all`, prints `name id state entries` per owning
   session. `--projects-dir` and `--session-id` options exist so the test can point it at a fixture.
-- **`skills/orchestrate/tests/`** — the pressure-scenario protocol, scenarios, recorded results, and
-  `owners_test.sh`.
+- **`skills/orchestrate/tests/owners_test.sh`** — the fixture test for `owners.py`. Nothing else in
+  `tests/` ships (owner decision, 2026-09-16, `review-pr`): like every other skill in both repos, the
+  repo holds what the skill runs and the unit tests for its code, not pressure scenarios or run logs.
 - **`CLAUDE.md`** — the LaravelClaudeMd row of the Skills table gains `orchestrate`. **README** needs no
   change: its linking loop picks the new folder up, and the PR body says each machine must re-run it.
 
@@ -404,8 +405,9 @@ resumes them. It never re-dispatches.
 
 **How they run.**
 
-- **Location.** `skills/orchestrate/tests/protocol.md`, `tests/scenarios/`, `tests/results/`. All
-  committed and reviewable in the PR. None under `scratch/`, which `.gitignore` excludes.
+- **Location.** The protocol, scenarios, `rep_tools.py` and results were committed on the PR branch
+  while the skill was built, and removed before merge (owner decision): the PR body carries the
+  RED/GREEN table and the branch history the files, as for `critique` and `spinoff`.
 - **Prompt shape.** A framing ("you are the orchestrator session; this is real work; choose and act"),
   the fabricated session so far, the owner's pressure message, and the instruction to answer with the
   exact tool calls in order plus one line of reasoning each. S3 forces an A–E choice.
