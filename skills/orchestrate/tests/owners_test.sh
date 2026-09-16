@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Fixture test for owners.py: only live sessions other than the caller, whose transcript
-# (main or subagents/) has cwd entries inside the worktree, own it.
+# Fixture test for owners.py: only working or blocked sessions other than the caller, whose
+# transcript (main or subagents/) has cwd entries inside the worktree, own it.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TMP="$(mktemp -d)"
@@ -17,14 +17,20 @@ printf '{"type":"user","cwd":"%s","message":"see %s"}\n' "$TMP/Shop/Shop" "$WT" 
 entry "$TMP/Shop/Shop"     > "$P/b/eee.jsonl"
 entry "$WT/code/www"       > "$P/b/eee/subagents/agent-1.jsonl"   # live, a subagent works inside -> owner
 entry "$TMP/Shop/Shop-40"  > "$P/b/fff.jsonl"                 # prefix trap: Shop-40 is not Shop-4
+entry "$WT"                > "$P/a/ggg.jsonl"                 # done, works in the worktree   -> skipped
+entry "$WT"                > "$P/a/hhh.jsonl"                 # failed, works in the worktree -> skipped
+entry "$WT"                > "$P/a/iii.jsonl"                 # stopped, works in the worktree -> skipped
 
 AGENTS='[
  {"id":"aaa","name":"run a","state":"working","sessionId":"aaa"},
  {"id":"bbb","name":"old run","state":"done","sessionId":"bbb"},
  {"id":"ccc","name":"me","state":"working","sessionId":"ccc"},
- {"id":"ddd","name":"mentions","state":"idle","sessionId":"ddd"},
+ {"id":"ddd","name":"mentions","state":"working","sessionId":"ddd"},
  {"id":"eee","name":"run e","state":"blocked","sessionId":"eee"},
- {"id":"fff","name":"neighbour","state":"working","sessionId":"fff"}
+ {"id":"fff","name":"neighbour","state":"working","sessionId":"fff"},
+ {"id":"ggg","name":"finished run","state":"done","sessionId":"ggg"},
+ {"id":"hhh","name":"crashed run","state":"failed","sessionId":"hhh"},
+ {"id":"iii","name":"stopped run","state":"stopped","sessionId":"iii"}
 ]'
 
 actual="$(printf '%s' "$AGENTS" | python3 "$HERE/../owners.py" "$WT" --projects-dir "$P" --session-id ccc | sort)"

@@ -3,9 +3,10 @@
 
 Usage: claude agents --json --all | owners.py <worktree> [--projects-dir DIR] [--session-id ID]
 
-A session owns a worktree when its transcript, or one of its subagents' transcripts, has entries
-whose cwd lies inside it. Finished sessions and the calling session are skipped. Grepping for the
-path or the branch is not enough: slot directories are recycled, and every session that mapped a
+A session owns a worktree when its state is working or blocked (the live states `claude agents`
+reports) and its transcript, or one of its subagents' transcripts, has entries whose cwd lies inside
+it. Every other state (done, failed, stopped, …) and the calling session are skipped. Grepping for
+the path or the branch is not enough: slot directories are recycled, and every session that mapped a
 worktree mentions it.
 
 Prints one line per owner: name, id, state, matching entries (tab-separated).
@@ -16,6 +17,8 @@ import glob
 import json
 import os
 import sys
+
+LIVE_STATES = {"working", "blocked"}
 
 
 def inside(cwd, worktree):
@@ -52,7 +55,7 @@ def main():
 
     for session in json.load(sys.stdin):
         session_id = session.get("sessionId")
-        if not session_id or session_id == args.session_id or session.get("state") == "done":
+        if not session_id or session_id == args.session_id or session.get("state") not in LIVE_STATES:
             continue
         count = entries_inside(transcripts(args.projects_dir, session_id), worktree)
         if count:
