@@ -10,7 +10,11 @@ the path or the branch is not enough: slot directories are recycled, and every s
 worktree mentions it.
 
 Prints one line per owner: name, id, state, matching entries (tab-separated).
-No output means no live session owns it: the work is orphaned.
+No output and exit 0 means no live session owns it: the work is orphaned.
+
+Fails closed: when a live session has no transcript, or its transcripts hold no cwd entries at all,
+the lookup cannot tell whether that session owns the worktree (the transcript layout or format has
+changed). It then prints nothing, names the sessions on stderr and exits 2. That is never "orphaned".
 """
 import argparse
 import glob
@@ -31,8 +35,7 @@ def transcripts(projects_dir, session_id):
     )
 
 
-def entries_inside(paths, worktree):
-    count = 0
+def cwd_entries(paths):
     for path in paths:
         with open(path, errors="ignore") as transcript:
             for line in transcript:
@@ -40,9 +43,8 @@ def entries_inside(paths, worktree):
                     cwd = json.loads(line).get("cwd")
                 except (json.JSONDecodeError, AttributeError):
                     continue  # a line still being written, or not an entry
-                if cwd and inside(cwd, worktree):
-                    count += 1
-    return count
+                if cwd:
+                    yield cwd
 
 
 def main():
@@ -53,13 +55,31 @@ def main():
     args = parser.parse_args()
     worktree = os.path.abspath(args.worktree).rstrip("/")
 
+    owners, unreadable = [], []
     for session in json.load(sys.stdin):
         session_id = session.get("sessionId")
-        if not session_id or session_id == args.session_id or session.get("state") not in LIVE_STATES:
+        if session_id == args.session_id or session.get("state") not in LIVE_STATES:
             continue
-        count = entries_inside(transcripts(args.projects_dir, session_id), worktree)
+        label = f"{session.get('name', '')} ({session.get('id', '')}, {session.get('state', '')})"
+        cwds = list(cwd_entries(transcripts(args.projects_dir, session_id))) if session_id else []
+        if not cwds:
+            unreadable.append(label)
+            continue
+        count = sum(1 for cwd in cwds if inside(cwd, worktree))
         if count:
-            print(f"{session.get('name', '')}\t{session.get('id', '')}\t{session.get('state', '')}\t{count}")
+            owners.append(f"{session.get('name', '')}\t{session.get('id', '')}\t{session.get('state', '')}\t{count}")
+
+    if unreadable:
+        print(
+            "owners.py: cannot tell whether these live sessions own the worktree, because no transcript "
+            f"with cwd entries was found under {args.projects_dir}: " + "; ".join(unreadable)
+            + ". Treat the worktree as owned and ask the owner.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    for owner in owners:
+        print(owner)
 
 
 if __name__ == "__main__":

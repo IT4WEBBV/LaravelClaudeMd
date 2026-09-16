@@ -42,7 +42,9 @@ The PR is found by prefix: `closingIssuesReferences` stays empty until the run's
   ```bash
   claude agents --json --all | python3 ~/.claude/skills/orchestrate/owners.py <worktree>
   ```
-  One line: in flight, owned by that session. No output: orphaned. Several lines: ask which one.
+  One line: in flight, owned by that session. Several lines: ask which one. No output and exit 0:
+  orphaned. **A non-zero exit is never orphaned**: the lookup could not read a live session's
+  transcript, so treat the worktree as owned and ask the owner, quoting the error.
   Only a `working` or `blocked` session owns a worktree; `done`, `failed` and `stopped` rows never do.
   An open PR with no worktree has no owner to find: treat it as orphaned.
 
@@ -107,8 +109,10 @@ Verify, printed together:
 git -C <worktree> status --porcelain | wc -l                                          # 0
 git -C <worktree> rev-parse HEAD                                                       # equals the sha below
 gh pr view <P> -R <repo> --json state,headRefOid --jq '"\(.state) \(.headRefOid)"'    # MERGED <sha>
-claude agents --json --all | python3 ~/.claude/skills/orchestrate/owners.py <worktree>   # nothing, and no pending notice of yours
+claude agents --json --all | python3 ~/.claude/skills/orchestrate/owners.py <worktree>   # nothing, exit 0, and no pending notice of yours
 ```
+A non-zero exit from `owners.py` fails the check: do not tear down; ask, quoting its error.
+
 Then, from the primary checkout:
 ```bash
 ./scripts/worktree.sh remove <N> --force-local-branch-removal     # declared remove is scripts/worktree.sh
