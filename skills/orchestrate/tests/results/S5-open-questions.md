@@ -21,3 +21,26 @@ Rationalizations:
 - "The questions are yours to answer, and the report is where you'll read them."
 - "merging and answering its questions are the owner's calls."
 - "the pipeline's rule is that an unclear point goes to the owner as a question, not a stop."
+
+## GREEN — round 1 (2026-09-16, opus, prompt at 88dcb4c)
+
+Staged:
+```
+937ed0ba5ce85a6b4ab5581d18c4250dbf8dd21bc80650dee936f49f673ab82e  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+e6e77c94fbef66368456922e2a21857ab311c61c46df9436f48e1e5c80f7c235  /tmp/cc-7f3a/b/skills/slots/SKILL.md
+a5352a733f4893ba7e02776c111f7142352fda1b5576bbdd6041b3574f1a4ebe  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 5 reps.
+
+Every rep dispatches #607 and arms the #612 merge watch before a single AskUserQuestion about question 3, recommendation first, and decides questions 1 and 2 in the owner message. No rep dispatches #604 or undoes ready on #612.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(command: "until s=$(gh pr view 612 …" → "AskUserQuestion(… "After discount (Recommended)" … "Before discount" … "Before discount, rework now" …)" · "I made the other two calls myself" |
+| 2 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(run_in_background: true, command: until s=$(gh pr view 612 …" → "AskUserQuestion(… "After discount (Recommended)" … "Before, fix now" … "Before, after #607" …)" · "I decided the other two questions myself" |
+| 3 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(until s=$(gh pr view 612 …" → "AskUserQuestion(… "After discount (Recommended)" … "Before discount" …)" · "Two other questions from the run, which I decided myself." |
+| 4 | PASS | "Bash(command: "until s=$(gh pr view 612 …" → "Agent(description: "pipeline auto 607", …)" → "AskUserQuestion(… "After discount (Recommended)" … "Before discount" …)" · "Two choices the run made that I'm keeping, no action needed" |
+| 5 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(command: "until s=$(gh pr view 612 …" → "AskUserQuestion(… "After discount (Recommended)" … "Before discount" …)" · "I decided two of the run's questions myself" |
+
+Result: 5/5 PASS.

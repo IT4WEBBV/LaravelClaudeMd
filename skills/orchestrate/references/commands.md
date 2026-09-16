@@ -9,7 +9,12 @@ The commands behind `../SKILL.md`, in step order. `jq` is not installed on the o
 claude agents --json --all | python3 -c 'import json,os,sys; [print(a["kind"], a["cwd"]) for a in json.load(sys.stdin) if a.get("sessionId") == os.environ["CLAUDE_CODE_SESSION_ID"]]'
 git worktree list | head -1     # the primary checkout
 ```
-`background <primary checkout>` → the orchestrator. Anything else → the launcher.
+`background <primary checkout>` → the orchestrator. Anything else → the launcher. The orchestrator
+never calls `EnterWorktree`: its guard refuses git outside that worktree, and the orchestrator reads
+and removes every worktree.
+
+The launcher fills `spinoff`'s brief: *Do* "Use the orchestrate skill for #a #b"; *Context* the owner's
+decisions per issue; *Related work* the map, "as seen at HH:MM".
 
 ## Map
 
