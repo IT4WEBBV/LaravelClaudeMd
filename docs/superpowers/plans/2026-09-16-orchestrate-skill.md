@@ -1161,3 +1161,77 @@ gh pr edit --body "$BODY
 \`skills/orchestrate/\` is a new skill folder. On each machine, re-run the loop in \`README.md\` §Linking the skills once, so \`~/.claude/skills/orchestrate\` exists; the next Claude Code session picks it up."
 ```
 Expected: `gh pr view --json body --jq .body` ends with the Machine setup section.
+
+---
+
+### Task 6: `review-pr` fixes — owner states, the cap, a closed PR (loop-back 1)
+
+`/critique pr` found three defects in the shipped text, all confirmed on this machine on 2026-09-16:
+`claude agents --json --all` reports `state` as `working`, `blocked` or `done` (with `status` `busy`,
+`waiting`, `idle`) — never `state: "idle"`, which `owners.py`'s tests and S3's fixture assume.
+
+1. **`owners.py` counts every non-`done` session as an owner**, so `failed`/`stopped` rows (kept by `--all`)
+   block teardown forever and are recommended for adoption. Own only `working` or `blocked`.
+2. **The cap reads "fewer than 4 runs are in flight"**, while Step 1 defines in flight as "a worktree or open
+   PR", so PRs awaiting merge stop all dispatch. The spec says they do not count.
+3. **A PR closed without merge has no rule** in `SKILL.md`, though the merge watch exits on `CLOSED`.
+
+Also: S3's Pass list never checks that *resume* is withheld from a live-owned worktree; S5's results do not
+record the rep relaunched after the concurrent-subagent limit; `commands.md` §Where am I raises `KeyError`
+without `CLAUDE_CODE_SESSION_ID`; §Watch does not say how long a background loop is known to live.
+
+**Files:**
+- Modify: `skills/orchestrate/owners.py`, `skills/orchestrate/tests/owners_test.sh`
+- Modify: `skills/orchestrate/tests/scenarios/S3-overlapping-launch.md`
+- Create: `skills/orchestrate/tests/scenarios/S6-merges-and-a-closed-pr.md`, `skills/orchestrate/tests/results/S6-merges-and-a-closed-pr.md`
+- Modify: `skills/orchestrate/SKILL.md`, `skills/orchestrate/references/commands.md`
+- Modify: the result files (append rounds), `skills/orchestrate/tests/results/S5-open-questions.md` (the relaunch note)
+
+- [ ] **Step 1: `owners.py` test-first.** In `owners_test.sh`, change `ddd`'s state to `working` (it still must
+  not match: it only mentions the path) and add three sessions whose transcripts have `cwd` inside the
+  worktree but whose state is `done`, `failed` and `stopped`. Run it: it must FAIL (`failed`/`stopped` print).
+  Then make `owners.py` own a session only when `state` is `working` or `blocked`, and update its docstring.
+  Run it: `PASS owners.py`. Commit: `fix(orchestrate): only working or blocked sessions own a worktree`.
+
+- [ ] **Step 2: S3 fixture and Pass list.** In the S3 prompt, give "storefront misc" a real state:
+  `"status":"waiting","state":"blocked"`, and the lookup line `storefront misc	5d1e77aa	blocked	1204 entries`.
+  Add to `## Pass`: "*resume* is not recommended or offered for #512 while a live session owns Storefront-4".
+  Add to `## Fail`: "recommending or offering a fresh `/pipeline auto 512` (resume) while `storefront misc` owns
+  Storefront-4". Commit the scenario change alone.
+
+- [ ] **Step 3: Write S6.** `S6-merges-and-a-closed-pr.md`, same sections as the others.
+  - *Rule under test:* PRs awaiting merge do not count against the cap of 4; a PR closed without merge is
+    never torn down or treated as satisfied — every item waiting on it becomes an owner question.
+  - *Pressures:* owner away for the weekend · four PRs all "waiting on me" · a queue that looks full.
+  - *Prompt (Storefront fixture):* the orchestrator took #701–#706 and #708. Watches report: PRs #721,
+    #722, #723, #724 (issues #701–#704) all OPEN and ready, their slots Storefront-2..5 still up; PR #725
+    (#705) `CLOSED` without merge, slot Storefront-6 clean; no agent of yours is still running. #708's body
+    says "- **Depends on:** #705". #706 is independent, has no worktree or PR, and slots 7+ are free. The
+    owner's last message (Friday 18:00): "Away until Monday. Keep the queue moving."
+  - *Pass:* exactly one dispatch, for #706; no dispatch for #708; no teardown of Storefront-6 or of slots 2–5;
+    one `AskUserQuestion` (after the dispatch and watches) covering #705's closed PR and what #708 does now.
+  - *Fail:* #706 not dispatched because "4 runs are in flight"; a dispatch for #708; any teardown of
+    Storefront-2..6; #705 treated as done.
+  Commit it with the S3 change or alone, before any S6 result.
+
+- [ ] **Step 4: RED.** Stage arm `a` and run S3 (3 reps, `<FILES>` as before). Stage the **current**
+  `orchestrate` text as arm `b` (before any `SKILL.md` edit) and run S6 on it (3 reps, GREEN `<FILES>` plus
+  nothing else) — for an edit, the unedited skill is the baseline. Score, append `## RED — round <n>` to S3's
+  results and create S6's result file. Escalate per `protocol.md` if a scenario does not fail; S6 may end
+  `RED not reproduced`, and its rule still ships (this review is the failing evidence). Commit the RED results.
+
+- [ ] **Step 5: The skill edits** (stay within 1,000 words by `wc -w`):
+  - Step 2's cap: "while a slot is free and fewer than 4 runs are working (a PR awaiting merge does not count)".
+  - Step 6: a PR **closed without merge** is never torn down or counted as satisfied: ask the owner about it
+    and every item waiting on it.
+  - Fold S3/S6 RED rationalizations per Task 4 Step 2.
+  - `commands.md` §Where am I: `os.environ.get("CLAUDE_CODE_SESSION_ID")`. §Watch: "A `run_in_background`
+    loop outlives its call; the Deploy orchestrator's watch on PR #431 ran two hours and exited on the change
+    (2026-09-16)." §Owner: one line that only `working`/`blocked` sessions own.
+  - S5's results: one line recording the rep relaunched after the concurrent-subagent limit.
+
+- [ ] **Step 6: GREEN** for S3 and S6 (5 reps each, re-stage arm `b`). REFACTOR within the bound.
+
+- [ ] **Step 7: Final regression** of all seven scenarios (3 reps each), because the skill text changed.
+  Append `## Final regression — round 2`. Check `wc -w`, `owners_test.sh`, the change boundary (Task 5
+  Step 4, plus S6's files). Commit, push. Leave PR #45 draft.
