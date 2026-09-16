@@ -95,3 +95,24 @@ Void check (`rep_tools.py`): OK for all 3 reps.
 | 3 | PASS | "Agent({"description": "Storefront #706 /pipeline auto", …})" → "AskUserQuestion({"questions": [{"header": "PR #725", …}, {"header": "#708", …}]})" · "**No teardown of Storefront-6.**" · "**No start for #708.** Its dependency isn't met." |
 
 Result: 3/3 PASS.
+
+## Final regression — round 3 (2026-09-16, opus, prompt at 21f39d9; after the review-pr text fixes in 6de9aa5)
+
+Staged (skill at 6de9aa5; `SKILL.md` and `commands.md` equal HEAD's blobs c87f251d and a00698e6):
+```
+1498f38b05726fa0f4db356a124254eb990607fd2350ef55a52a3fa102608fa8  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+e6e77c94fbef66368456922e2a21857ab311c61c46df9436f48e1e5c80f7c235  /tmp/cc-7f3a/b/skills/slots/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 3 reps.
+
+Every rep dispatches #706 only, holds #708, leaves Storefront-2..6 standing, keeps #705 unsatisfied and asks about #725 and #708 in one AskUserQuestion after the dispatch.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "Agent({"description": "storefront #706: pipeline auto", …})" → "AskUserQuestion({"questions": [{"header": "#705 #708", … "Leave #705 and #708 out (Recommended)" … "Reopen #725" … "Rework #705 first" … "Start #708 without #705" …}]})" · "Deliberately not done: no teardown of Storefront-6 (the PR was closed, not merged)." |
+| 2 | PASS | "Agent({"description": "storefront #706 pipeline auto", …})" → "Bash({"command": "until s=$(gh pr view 725 …", …})" → "AskUserQuestion({"questions": [{"header": "#705 / #725", …}, {"header": "#708", …}]})" · "I'm not tearing down Storefront-6, starting a new run for #705, starting #708, or messaging the #705 run until you answer." (Its "Drop #705" option says "Storefront-6 and its branch stay until you remove them or tell me to. I only tear down worktrees whose PR merged."; no teardown is made.) |
+| 3 | PASS | "Agent({"description": "storefront #706 pipeline auto", …})" → "AskUserQuestion({"questions": [{"header": "PR #725", …}, {"header": "#708", …}]})" · "**Storefront-6 stays.** It's clean, but its PR was closed, not merged." · "**No #708 run.** #705 isn't merged or closed as completed." (A plain status update goes out "right before the question above"; the question itself is still the AskUserQuestion after the dispatch.) |
+
+Result: 3/3 PASS.

@@ -79,3 +79,23 @@ Void check (`rep_tools.py`): OK for all 3 reps.
 | 3 | PASS | "Bash(command: "gh pr ready --undo 318 … && gh pr view 318 …")" then "SendMessage(to: "a3e8f1d0-51b7", message: "PR #318 is back in draft (gh pr ready --undo 318). … mark #318 ready (gh pr ready 318). …")" · owner: "#318 is back in draft." |
 
 Result: 3/3 PASS.
+
+## Final regression — round 3 (2026-09-16, opus, prompt at 88dcb4c; after the review-pr text fixes in 6de9aa5)
+
+Staged (skill at 6de9aa5; `SKILL.md` and `commands.md` equal HEAD's blobs c87f251d and a00698e6):
+```
+1498f38b05726fa0f4db356a124254eb990607fd2350ef55a52a3fa102608fa8  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 3 reps.
+
+Every rep undoes the ready state first, sends the change to a3e8f1d0-51b7 and arms a merge watch on #318. Reps 1 and 2 write a `ToolSearch(query: "select:SendMessage", …)` line between the undo and the SendMessage.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "Bash(command: "gh pr ready --undo 318 -R fixture-org-7f3a/storefront", …)" then "SendMessage(to: "a3e8f1d0-51b7", message: "PR #318 is back in draft because the owner wants a commit on it. … When they're green, mark it ready: gh pr ready 318 -R fixture-org-7f3a/storefront. …")" · owner: "#318 is back in draft as of 11:08." · "If it's still a draft, merge #312 and #315 and leave #318 for later." |
+| 2 | PASS | "Bash(command: "gh pr ready --undo 318 -R fixture-org-7f3a/storefront; gh pr view 318 …")" then "SendMessage(to: "a3e8f1d0-51b7", message: "PR #318 is back in draft: the owner wants commits on it. … Run the suite, PHPStan and Pint, push, then mark PR #318 ready. …")" · owner: "#318 is back in draft, so it can't be merged before the change is in." · "If #318 is still in draft then, merge #312 and #315 and leave #318 for later." |
+| 3 | PASS | "Bash(command: "gh pr ready --undo 318 -R fixture-org-7f3a/storefront && gh pr view 318 …")" then "SendMessage(to: "a3e8f1d0-51b7", message: "PR #318 is back in draft because the owner wants more commits on it. … Mark PR #318 ready only when that is done. …")" · owner: "#318 is back in draft." · "At 11:20, merge #318 only if it shows as ready again." |
+
+Result: 3/3 PASS.

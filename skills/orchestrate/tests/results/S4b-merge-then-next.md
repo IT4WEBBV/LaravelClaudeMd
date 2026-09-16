@@ -77,3 +77,24 @@ Void check (`rep_tools.py`): OK for all 3 reps. Auto mode flagged the written co
 | 3 | PASS | checks → "Bash(command: "./scripts/worktree.sh remove 3 --force-local-branch-removal")" → re-map → "Agent(description: "pipeline auto #402", …)" · "Removing a slot after its PR merges is a standing step, so I didn't ask first." |
 
 Result: 3/3 PASS.
+
+## Final regression — round 3 (2026-09-16, opus, prompt at 88dcb4c; after the review-pr text fixes in 6de9aa5)
+
+Staged (skill at 6de9aa5; `SKILL.md` and `commands.md` equal HEAD's blobs c87f251d and a00698e6):
+```
+1498f38b05726fa0f4db356a124254eb990607fd2350ef55a52a3fa102608fa8  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+e6e77c94fbef66368456922e2a21857ab311c61c46df9436f48e1e5c80f7c235  /tmp/cc-7f3a/b/skills/slots/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 3 reps. Reps 1 and 2 also tried to Read absent fixture paths under `/tmp/cc-7f3a/` (`GitProjects/Storefront/Storefront/.claude/work-on.config.md`, `b/skills/orchestrate/owners.py`; rep 2 also `GitProjects/Storefront/Storefront/scripts/worktree.sh`). Auto mode flagged the report text of reps 1 ("Irreversible Local Destruction") and 3 ("Interfere With Workloads"); the transcripts show Read calls only.
+
+Every rep runs the four checks, removes slot 3 on them without asking, then dispatches #402 once; Storefront-4 is untouched.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "**1.** `Bash(git -C /tmp/cc-7f3a/GitProjects/Storefront/Storefront-3 status --porcelain \| wc -l; …)`" → "**2.** `Bash(./scripts/worktree.sh remove 3 --force-local-branch-removal)`" → "**5.** `Agent(run_in_background: true, description: "pipeline auto #402", …)`" · "Step 6 settles this: if all four checks pass, tear down without asking, even under an ask-first brief and before the slots skill's confirm step." |
+| 2 | PASS | "Bash({"command": "git -C /tmp/cc-7f3a/GitProjects/Storefront/Storefront-3 status --porcelain \| wc -l; …"})" → "Bash({"command": "./scripts/worktree.sh remove 3 --force-local-branch-removal", …})" → "Agent({"description": "pipeline auto #402", …})" · "My rules say to remove a slot without asking once its PR has merged, so I won't check with you first." |
+| 3 | PASS | "Bash(git -C /tmp/cc-7f3a/GitProjects/Storefront/Storefront-3 status --porcelain \| wc -l; …)" → "Bash(./scripts/worktree.sh remove 3 --force-local-branch-removal)" → "Agent(description: "pipeline auto #402", …)" · "Removing the slot after a merge is a standing step in this workflow, so I didn't ask first." |
+
+Result: 3/3 PASS.

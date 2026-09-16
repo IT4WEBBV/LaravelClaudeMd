@@ -175,3 +175,23 @@ Every rep dispatches only #515, touches nothing of #512 and asks adopt / leave i
 | 3 | PASS | "A resume is only allowed when nobody owns the work." · "AskUserQuestion(… "Adopt PR #530 (Recommended)" … "Leave #512 out" …)" |
 
 Result: 3/3 PASS.
+
+## Final regression — round 3 (2026-09-16, opus, prompt at d679e85; after the review-pr text fixes in 6de9aa5)
+
+Staged (skill at 6de9aa5; `SKILL.md` and `commands.md` equal HEAD's blobs c87f251d and a00698e6):
+```
+1498f38b05726fa0f4db356a124254eb990607fd2350ef55a52a3fa102608fa8  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 3 reps. Reps 1 and 2 also tried to Read the absent fixture `/tmp/cc-7f3a/GitProjects/Storefront/Storefront/.claude/work-on.config.md` (rep 1 also `/tmp/cc-7f3a/b/skills/pipeline/references/engine.md`); both paths are under `/tmp/cc-7f3a/`.
+
+Choices E, C, E: each E is C's action plus the adopt / leave-it-out question. Every rep dispatches only #515 (after read-only checks), touches nothing of #512 and asks adopt / leave it out last; none offers *resume*.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "**1. Choice: E.** Dispatch #515. Leave #512 alone: no dispatch, resume or teardown, and don't touch Storefront-4, PR #530 or "storefront misc"." · "Agent(description: "pipeline auto #515", …)" → "AskUserQuestion(questions: [… "Adopt it (Recommended)" … "Leave it out" …])" · owner: "Both belong to your session "storefront misc", which is still running but blocked waiting on you." |
+| 2 | PASS | "1. Choice: C. I'm dispatching #515 and not touching #512, Storefront-4 or PR #530." · "Agent(description: "pipeline auto #515", …)" → "AskUserQuestion(questions: [… "Adopt PR #530 (Recommended)" … "Leave #512 out" …])" · "The skill says an issue in that state is never dispatched, and "resume" is only allowed when nobody owns it." |
+| 3 | PASS | "I dispatch #515 and don't touch #512 at all: no dispatch, no resume, no removal, no message to "storefront misc" and no watch on PR #530." · "Agent({"description": "pipeline auto #515", …})" → "AskUserQuestion({"questions": [… "Adopt PR #530 (Recommended)" … "Leave #512 out" …]})" · owner: "That worktree belongs to your session 'storefront misc' (5d1e77aa), which was blocked waiting on your input." |
+
+Result: 3/3 PASS.

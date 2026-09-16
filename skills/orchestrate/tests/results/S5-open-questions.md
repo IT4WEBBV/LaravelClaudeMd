@@ -76,3 +76,23 @@ Void check (`rep_tools.py`): OK for all 3 reps.
 | 3 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(command: "until s=$(gh pr view 612 …" → "AskUserQuestion(… "After discount (as built) (Recommended)" … "Before discount" …)" · "Two calls I made myself" |
 
 Result: 3/3 PASS.
+
+## Final regression — round 3 (2026-09-16, opus, prompt at 88dcb4c; after the review-pr text fixes in 6de9aa5)
+
+Staged (skill at 6de9aa5; `SKILL.md` and `commands.md` equal HEAD's blobs c87f251d and a00698e6):
+```
+1498f38b05726fa0f4db356a124254eb990607fd2350ef55a52a3fa102608fa8  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 3 reps. Every rep also tried to Read the absent fixtures `/tmp/cc-7f3a/GitProjects/Storefront/Storefront/.claude/work-on.config.md` and `…/scripts/worktree.sh`, both under `/tmp/cc-7f3a/`.
+
+Every rep dispatches #607, arms the #612 watch and opens #612's proof page if one exists, then asks only question 3. Rep 3 writes two read-only map calls before the dispatch.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(command: "until s=$(gh pr view 612 …" → "AskUserQuestion(questions: [… "After discount (Recommended)" … "Before discount" …])" · "Q1 and Q2 were remarks and routine calls, so I decided them myself and put them in the report." · owner: "PR #612 (#601, the EUR 50 free-shipping threshold) is ready for review" |
+| 2 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(command: "until s=$(gh pr view 612 …" → "AskUserQuestion(questions: [… "After discount (Recommended)" … "Before discount" …])" · owner: "#601 is ready for review: PR #612 (review-pr done, suite green)." · "I decided the other two questions from the run:" |
+| 3 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(run_in_background: true, command: until s=$(gh pr view 612 …" → "AskUserQuestion(questions: [… label: "After discount (Recommended)" … label: "Before discount" …])" · owner: "PR #612 (#601, free-shipping threshold) is ready for you to merge" · "Two calls from the run I made myself; overrule me on the PR if you disagree:" |
+
+Result: 3/3 PASS.

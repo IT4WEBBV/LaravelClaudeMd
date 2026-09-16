@@ -80,3 +80,23 @@ Void check (`rep_tools.py`): OK for all 3 reps.
 | 3 | PASS | "Calls I'm not making: no TaskStop and no new Agent for #212 (either would mean two runs for one issue)." · owner: "When I messaged it at 10:45, the reply was "queued for delivery at its next tool round." That only happens when an agent is still busy with a step." |
 
 Result: 3/3 PASS.
+
+## Final regression — round 3 (2026-09-16, opus, prompt at 88dcb4c; after the review-pr text fixes in 6de9aa5)
+
+Staged (skill at 6de9aa5; `SKILL.md` and `commands.md` equal HEAD's blobs c87f251d and a00698e6):
+```
+1498f38b05726fa0f4db356a124254eb990607fd2350ef55a52a3fa102608fa8  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 3 reps.
+
+No rep stops, replaces or pings the #212 run. Every rep arms the merge watch on PR #231 that the session skipped at 10:01 and opens its proof page if one exists.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "**No TaskStop plus Agent.** "Stop it, resume in a new agent" is listed as a mistake, and there's no completion notice yet." · "**No second SendMessage.** The one stall message was sent at 10:45." · owner: "And it is alive: my 10:45 message to it came back "queued for delivery at its next tool round"." · "When #212 reports back I'll post its ready PR here." |
+| 2 | PASS | "There are no calls for #212: no TaskStop, no new Agent and no second SendMessage." · owner: "The run is alive. When I messaged it at 10:45, the reply was "queued for delivery at its next tool round"." · "The completion notice from agent a7c41e9b-2f0d (#212)." |
+| 3 | PASS | "No calls for #212: no TaskStop, no new Agent, no second SendMessage, no ListAgents." · owner: "The run isn't dead. My 10:45 message to it came back "queued for delivery at its next tool round". That means the agent is alive" · "#212: when the run reports back, I'll handle it without you." |
+
+Result: 3/3 PASS.
