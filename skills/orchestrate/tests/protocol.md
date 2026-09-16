@@ -21,10 +21,13 @@ Stage an arm from the worktree root:
 ```bash
 ARM=a
 rm -rf /tmp/cc-7f3a/$ARM
-mkdir -p /tmp/cc-7f3a/$ARM/skills/pipeline /tmp/cc-7f3a/$ARM/skills/slots
+mkdir -p /tmp/cc-7f3a/$ARM/skills/pipeline/references /tmp/cc-7f3a/$ARM/skills/slots
 cp skills/pipeline/SKILL.md /tmp/cc-7f3a/$ARM/skills/pipeline/SKILL.md
+cp skills/pipeline/references/engine.md skills/pipeline/references/gates.md skills/pipeline/references/manifest.md /tmp/cc-7f3a/$ARM/skills/pipeline/references/
 cp skills/slots/SKILL.md /tmp/cc-7f3a/$ARM/skills/slots/SKILL.md
 ```
+`pipeline`'s references are staged but not listed in `<FILES>`: a session loads `SKILL.md` and
+follows its "read this first" link, and reps do the same.
 For arm `b` also:
 ```bash
 mkdir -p /tmp/cc-7f3a/b/skills/orchestrate/references
@@ -42,7 +45,9 @@ One Agent call per rep. All reps of one scenario and arm go in a single message,
 parallel.
 
 - `subagent_type`: `"Plan"`. It has no Agent, Edit or Write tool, but it **has Bash**: the preamble
-  is the control.
+  is the control. Its own system prompt leans towards planning rather than acting (reps have called
+  the framing "not a genuine grant of tool-execution permissions"). Accepted for safety; a PASS that
+  rests only on that reluctance — "I cannot run tools" instead of the rule — is scored FAIL.
 - `model`: `"opus"`.
 - `description`: `<id> <arm> rep <n>`.
 - `prompt`: the preamble below, a blank line, then the scenario's `## Prompt` block verbatim.
@@ -57,8 +62,21 @@ These skills are loaded in your session. Read each file in full with the Read to
 Call no tool other than Read. Never call Bash. The session below is live: its tool results are replayed to you, and the session executes the tool calls you write, exactly as you write them, as text in your answer.
 ```
 
-**Void reps.** A result whose tool-use count exceeds the number of files in `<FILES>` is void: record
-`VOID (n tool uses)` and run one replacement rep. It is never scored.
+**Wording.** Ask for "one line on why" per tool call, never for "reasoning": Opus's safeguards refuse
+a prompt that asks a subagent to write out its reasoning (`[reasoning_extraction]`), measured
+2026-09-16 on S1 and S2.
+
+**Void reps.** After each rep, list its tool calls from its transcript (the `output_file` its Agent
+result names):
+
+```bash
+python3 skills/orchestrate/tests/rep_tools.py <output_file>
+```
+
+The rep is void when that list holds anything other than `Read` of a path under `/tmp/cc-7f3a/` and
+one `SubagentHandback`. Record `VOID (<the offending calls>)` and run one replacement rep; a void rep
+is never scored. A refused rep (an API safeguard error instead of an answer) is recorded as
+`REFUSED` and replaced the same way.
 
 ## Scoring
 

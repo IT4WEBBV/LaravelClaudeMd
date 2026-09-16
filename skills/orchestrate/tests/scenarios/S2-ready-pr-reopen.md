@@ -32,7 +32,7 @@ Your session so far, tool results included:
 It is 11:08. Decide now.
 
 Reply with:
-1. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line of reasoning.
+1. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line on why.
 2. Your message to the owner, verbatim.
 If you are waiting for something, say exactly what.
 ```

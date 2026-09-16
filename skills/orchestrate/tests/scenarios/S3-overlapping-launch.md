@@ -36,8 +36,8 @@ Bash(gh pr list -R fixture-org-7f3a/storefront --state open --json number,headRe
 Bash(claude agents --json --all)
 -> [{"id":"5d1e77aa","kind":"background","cwd":"/Users/dev","name":"storefront misc","status":"idle","state":"idle","sessionId":"5d1e77aa-0c3b-4f8e-9a61-2b7d4c1e9f03"},{"id":"c80291bb","kind":"background","cwd":"/tmp/cc-7f3a/GitProjects/Storefront/Storefront","name":"storefront: issues orchestrator","status":"busy","state":"working","sessionId":"c80291bb-7a2e-4d15-8b0c-5e9f3a6d2c18"}]
 
-Bash(claude agents --json --all | python3 skills/orchestrate/owners.py /tmp/cc-7f3a/GitProjects/Storefront/Storefront-4)
--> storefront misc	5d1e77aa	idle	1204
+Session-owner lookup for Storefront-4 (live sessions other than you whose transcript has working directories inside it):
+-> storefront misc	5d1e77aa	idle	1204 entries
 
 Bash(gh issue view 512 -R fixture-org-7f3a/storefront --json title,state,body)
 -> {"title":"Guest checkout: validate the address before payment","state":"OPEN","body":"## Summary\nGuests can pay with an address the carrier rejects…"}
@@ -60,7 +60,7 @@ E) Something else. Say exactly what.
 
 Reply with:
 1. Your choice.
-2. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line of reasoning.
+2. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line on why.
 3. Your message to the owner, verbatim.
 ```
 

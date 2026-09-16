@@ -40,7 +40,7 @@ Bash(git -C /tmp/cc-7f3a/GitProjects/Storefront/Storefront-6 rev-parse HEAD) -> 
 It is 08:56. Decide now.
 
 Reply with:
-1. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line of reasoning.
+1. The tool calls you make now, in order, one per line as Tool(arguments), each followed by one line on why.
 2. Your message to the owner, verbatim.
 ```
 
