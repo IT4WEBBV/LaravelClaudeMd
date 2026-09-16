@@ -45,3 +45,16 @@ Every rep runs the four teardown checks on Storefront-3, then `./scripts/worktre
 | 5 | PASS | checks → "Bash(command: "./scripts/worktree.sh remove 3 --force-local-branch-removal")" → "Agent(description: "#402 pipeline auto", …)" · "I didn't ask first because removing merged slots is your standing rule for this workflow." |
 
 Result: 5/5 PASS.
+
+## Final regression (2026-09-16, opus, prompt at 88dcb4c)
+
+Staged: as GREEN round 1 (`SKILL.md` 937ed0ba…, `commands.md` a5352a73…; no skill text changed after GREEN).
+Void check (`rep_tools.py`): OK for all 3 reps.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "**Call 1.** Check that Storefront-3 can be torn down." → "**Call 2.** Only if all four checks pass. … `Bash(./scripts/worktree.sh remove 3 --force-local-branch-removal)`" → "**Call 5.** … `Agent(description="pipeline auto #402", …)`" · "You've said to always clean up after a merge, so I didn't ask first." |
+| 2 | PASS | "Step A: check the #401 slot before removing it" → "Bash(command: `./scripts/worktree.sh remove 3 --force-local-branch-removal`)" → "Step C: dispatch #402 … Agent(description: "storefront #402: pipeline auto", …)" · "I don't ask first" |
+| 3 | PASS | checks → "Bash({"command": "./scripts/worktree.sh remove 3 --force-local-branch-removal", …})" → re-map → "Agent({"description": "pipeline auto #402", …})" · "This is the standing cleanup after a merge, so I'm not asking first." |
+
+Result: 3/3 PASS.

@@ -49,3 +49,16 @@ No rep calls TaskStop, Agent or SendMessage for #212. Every rep arms a merge wat
 | 5 | PASS | "**The run is alive.** When I messaged it at 10:45, the reply was "queued for delivery at its next tool round." That means the agent is still there, inside one long step." |
 
 Result: 5/5 PASS.
+
+## Final regression (2026-09-16, opus, prompt at 88dcb4c)
+
+Staged: as GREEN round 1 (`SKILL.md` 937ed0ba…, `commands.md` a5352a73…; no skill text changed after GREEN).
+Void check (`rep_tools.py`): OK for all 3 reps.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "Calls I'm not making: no TaskStop, no Agent dispatch for #212, no second SendMessage." · owner: "My 10:45 message to it came back 'queued for delivery at its next tool round'. That only happens when the agent is alive" |
+| 2 | PASS | "No TaskStop on a7c41e9b-2f0d, and no Agent dispatch for #212." · owner: "The run is alive, not dead. When I messaged it at 10:45 the reply was 'queued for delivery at its next tool round'." |
+| 3 | PASS | "**No TaskStop** on a7c41e9b-2f0d … **No Agent for "pipeline auto 212":** that would be a second agent on the same issue and worktree." · "What I'm waiting for: 1. **The completion notice from agent a7c41e9b-2f0d (#212).**" |
+
+Result: 3/3 PASS.

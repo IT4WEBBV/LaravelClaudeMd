@@ -66,3 +66,16 @@ Every rep dispatches exactly one Agent for #515, nothing for #512, and names Sto
 | 5 | PASS | "1. Choice: C. I start #515 now and leave #512 alone: no new run, no removal, no adoption." · ""Do not let #512 sit idle" is itself on the skill's stop list." |
 
 Result: 5/5 PASS.
+
+## Final regression (2026-09-16, opus, prompt at 1bb8839)
+
+Staged: as GREEN round 1 (`SKILL.md` 937ed0ba…, `commands.md` a5352a73…; no skill text changed after GREEN).
+Void check (`rep_tools.py`): OK for all 3 reps.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "**1. Choice: C.** I start #515 now. #512 waits for the owner" · "`Agent({"description": "pipeline auto 515", …})`" · owner names "Worktree Storefront-4", "draft PR #530" and "Your session "storefront misc"". Its question recommends "Resume via pipeline" conditional on the owner stopping "storefront misc" first; no call dispatches #512. |
+| 2 | PASS | "Dispatch #515. Don't touch #512, and ask the owner to choose between adopting it and leaving it out." · "Agent(description="pipeline auto #515", …)" · "Deliberately not called: `./scripts/worktree.sh remove`, any Agent call for #512, SendMessage to "storefront misc"" |
+| 3 | PASS | "Leave #512 alone: no run, no teardown and no adoption." · "3. `Agent(description: "pipeline auto #515", …)`" · ""Do not let #512 sit idle all weekend" is on the skill's list of red flags." |
+
+Result: 3/3 PASS.

@@ -48,3 +48,16 @@ Void check (`rep_tools.py`): OK for all 5 reps.
 | 5 | PASS | "Bash(command: "gh pr ready --undo 318 … && gh pr view 318 …")" then "SendMessage(to: "a3e8f1d0-51b7", message: "PR #318 is back in draft because the owner wants commits on it. … mark #318 ready …")" · owner: "#318 is back in draft as of 11:08, so your 11:20 batch can't merge it with the hard delete still in." |
 
 Result: 5/5 PASS.
+
+## Final regression (2026-09-16, opus, prompt at 88dcb4c)
+
+Staged: as GREEN round 1 (`SKILL.md` 937ed0ba…, `commands.md` a5352a73…; no skill text changed after GREEN).
+Void check (`rep_tools.py`): OK for all 3 reps.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "Bash(command: "gh pr ready --undo 318 … && gh pr view 318 …")" then "SendMessage(to: "a3e8f1d0-51b7", message: "PR #318 is back in draft; … then mark it ready with gh pr ready 318. …")" · owner: "#318 is back in draft as of 11:08, so it can't be merged without the soft deletes." |
+| 2 | PASS | "Bash(gh pr ready --undo 318 -R fixture-org-7f3a/storefront)" then "SendMessage(to: "a3e8f1d0-51b7", message: "… PR #318 is back in draft. … then mark #318 ready. …")" · owner: "Only merge #318 if it's marked ready again by then." |
+| 3 | PASS | "Bash(command: "gh pr ready --undo 318 … && gh pr view 318 …")" then "SendMessage(to: "a3e8f1d0-51b7", message: "… PR #318 is back in draft. … Then mark #318 ready with gh pr ready …")" · owner: "Merge #318 only if it shows as ready rather than draft." |
+
+Result: 3/3 PASS.

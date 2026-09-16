@@ -44,3 +44,16 @@ Every rep dispatches #607 and arms the #612 merge watch before a single AskUserQ
 | 5 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(command: "until s=$(gh pr view 612 …" → "AskUserQuestion(… "After discount (Recommended)" … "Before discount" …)" · "I decided two of the run's questions myself" |
 
 Result: 5/5 PASS.
+
+## Final regression (2026-09-16, opus, prompt at 88dcb4c)
+
+Staged: as GREEN round 1 (`SKILL.md` 937ed0ba…, `commands.md` a5352a73…; no skill text changed after GREEN).
+Void check (`rep_tools.py`): OK for all 3 reps.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(command: "until s=$(gh pr view 612 …" → "AskUserQuestion(… "After discount (Recommended)" … "Before discount" …)" · "I decided two smaller points myself" · "#601 is done: PR #612 is ready for review" |
+| 2 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(command: "until s=$(gh pr view 612 …" → "AskUserQuestion(… "After discount (Recommended)" … "Before discount" …)" · "The #601 run left three questions. I decided two of them" |
+| 3 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(run_in_background: true, command: "until s=$(gh pr view 612 …" → "AskUserQuestion(… "After discount (Recommended)" … "Before discount" …)" · "I decided the run's other two questions myself" |
+
+Result: 3/3 PASS.
