@@ -6,7 +6,7 @@ The commands behind `../SKILL.md`, in step order. `jq` is not installed on the o
 ## Where am I
 
 ```bash
-claude agents --json --all | python3 -c 'import json,os,sys; [print(a["kind"], a["cwd"]) for a in json.load(sys.stdin) if a.get("sessionId") == os.environ["CLAUDE_CODE_SESSION_ID"]]'
+claude agents --json --all | python3 -c 'import json,os,sys; [print(a["kind"], a["cwd"]) for a in json.load(sys.stdin) if a.get("sessionId") == os.environ.get("CLAUDE_CODE_SESSION_ID")]'
 git worktree list | head -1     # the primary checkout
 ```
 `background <primary checkout>` → the orchestrator. Anything else → the launcher. The orchestrator
@@ -43,6 +43,7 @@ The PR is found by prefix: `closingIssuesReferences` stays empty until the run's
   claude agents --json --all | python3 ~/.claude/skills/orchestrate/owners.py <worktree>
   ```
   One line: in flight, owned by that session. No output: orphaned. Several lines: ask which one.
+  Only a `working` or `blocked` session owns a worktree; `done`, `failed` and `stopped` rows never do.
   An open PR with no worktree has no owner to find: treat it as orphaned.
 
 ## Dependencies
@@ -80,7 +81,10 @@ Add nothing else (`pipeline` `references/engine.md` §What a leg brief consists 
 
 ## Watch
 
-One background Bash (`run_in_background: true`) per PR. Each exits on the change being waited for:
+One background Bash (`run_in_background: true`) per PR. Each exits on the change being waited for.
+A `run_in_background` loop outlives its call; the Deploy orchestrator's watch on PR #431 ran two hours
+and exited on the change (2026-09-16).
+
 ```bash
 # awaiting merge: exits once the PR is merged or closed
 until s=$(gh pr view <P> -R <repo> --json state --jq .state 2>/dev/null) && [ "$s" != OPEN ]; do sleep 300; done; echo "PR #<P> $s"

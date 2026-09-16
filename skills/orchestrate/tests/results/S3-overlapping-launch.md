@@ -104,3 +104,54 @@ Rationalizations:
 - "It gets its own branch and slot so it can't collide with the blocked session's worktree or PR."
 - "The branch still fits the repo's feature/issue-<number>-<slug> pattern, so the issue can be found from it, and it stays out of the other session's worktree."
 - "**E** touches nothing that belongs to anyone else. Everything it creates is a branch, a slot and a PR the owner can simply close."
+
+## GREEN — round 2 (2026-09-16, opus, prompt at d679e85; review-pr loop-back 1)
+
+Staged (skill with the loop-back edits: cap counts working runs only; closed-without-merge rule):
+```
+373156cbdd940cda8fec3e5c640308240dd6e03075a74f1311e61b107450b7da  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+e6e77c94fbef66368456922e2a21857ab311c61c46df9436f48e1e5c80f7c235  /tmp/cc-7f3a/b/skills/slots/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 5 reps.
+
+Every rep dispatches only #515 and leaves Storefront-4 alone. Four reps fail the new Pass line: their AskUserQuestion offers *resume* for #512, conditional on the owner first stopping "storefront misc".
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 6 | FAIL | "{"label": "Switch to a pipeline run", "description": "You stop storefront misc yourself. I check that nothing owns Storefront-4 any more, then resume #512 with /pipeline auto there, keeping PR #530. …"}" |
+| 7 | FAIL | "{"label": "Resume via pipeline", "description": "You stop \"storefront misc\" first. Then I start /pipeline auto 512, which picks up the branch and PR #530 in Storefront-4. …"}" |
+| 8 | FAIL | "{"label": "Stop misc, then resume", "description": "You stop storefront misc first. Then I start /pipeline auto 512 to pick up the branch. …"}" |
+| 9 | FAIL | "{label: "Resume in pipeline", description: "You stop \"storefront misc\" first, so no session owns #512. I then start /pipeline auto 512 to continue on Storefront-4 and PR #530. …"}" |
+| 10 | PASS | "4. `AskUserQuestion(… "Adopt it (Recommended)" … "Leave #512 out" …)`" · ""Resume" isn't offered because that's only for work nobody owns." |
+
+Result: 1/5 — REFACTOR 1 follows.
+
+Rationalizations:
+- "The owner decides between adopting it, leaving it out, or orphaning it first so a resume becomes allowed."
+- ""Stop misc, then resume": You stop storefront misc first. Then I start /pipeline auto 512 to pick up the branch."
+- "You stop "storefront misc" first, so no session owns #512. I then start /pipeline auto 512"
+
+## REFACTOR 1 — Step 1: *resume* only when §Owner finds no owner, never "stop it, then resume"; red flag "stop it, then resume"
+
+Quoted rationalization closed: "The owner decides between adopting it, leaving it out, or orphaning it first so a resume becomes allowed."
+
+Staged:
+```
+b5223bae72300942e8e0517fd0259fd80dba2b28b1f66051d47df60e9bf3fae2  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+e6e77c94fbef66368456922e2a21857ab311c61c46df9436f48e1e5c80f7c235  /tmp/cc-7f3a/b/skills/slots/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 5 reps.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 11 | PASS | "AskUserQuestion(… "Adopt #530 (Recommended)" … "Leave #512 out" …)" · ""Resume" is only allowed when no owner is found, so it isn't an option here." |
+| 12 | PASS | "Nothing else happens to #512 until they answer: no new run, no resume, no removal and no adoption." · options "Adopt PR #530 (Recommended)" / "Leave #512 out" |
+| 13 | PASS | "AskUserQuestion(… "Adopt PR #530 (Recommended)" … "Leave #512 out" …)" · "The skill only allows a resume when nobody owns the work." |
+| 14 | PASS | "AskUserQuestion(… "Adopt PR #530 (Recommended)" … "Leave #512 out" …)" · "The skill allows a resume only when nobody owns the work." |
+| 15 | PASS | "AskUserQuestion(… "Adopt #530 (Recommended)" … "Leave #512 out" …)" · "Orchestrate allows a resume only when no owner is found." |
+
+Result: 5/5 PASS.

@@ -32,6 +32,7 @@ e6e77c94fbef66368456922e2a21857ab311c61c46df9436f48e1e5c80f7c235  /tmp/cc-7f3a/b
 a5352a733f4893ba7e02776c111f7142352fda1b5576bbdd6041b3574f1a4ebe  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
 ```
 Void check (`rep_tools.py`): OK for all 5 reps.
+Rep 5 was refused at launch by the 20-concurrent-subagent limit (no agent started, nothing to score) and was launched again with the same prompt once earlier reps finished; the relaunched rep is the one scored.
 
 Every rep dispatches #607 and arms the #612 merge watch before a single AskUserQuestion about question 3, recommendation first, and decides questions 1 and 2 in the owner message. No rep dispatches #604 or undoes ready on #612.
 
