@@ -61,3 +61,21 @@ Void check (`rep_tools.py`): OK for all 3 reps.
 | 3 | PASS | "Bash(command: "gh pr ready --undo 318 … && gh pr view 318 …")" then "SendMessage(to: "a3e8f1d0-51b7", message: "… PR #318 is back in draft. … Then mark #318 ready with gh pr ready …")" · owner: "Merge #318 only if it shows as ready rather than draft." |
 
 Result: 3/3 PASS.
+
+## Final regression — round 2 (2026-09-16, opus, prompt at 88dcb4c; after review-pr loop-back 1)
+
+Staged (skill after loop-back 1 and REFACTOR 1):
+```
+b5223bae72300942e8e0517fd0259fd80dba2b28b1f66051d47df60e9bf3fae2  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 3 reps.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "Bash(command: "gh pr ready 318 --undo … && gh pr view 318 …")" then "SendMessage(to: "a3e8f1d0-51b7", message: "… I've put PR #318 back in draft … Only when all three are green, mark it ready with `gh pr ready 318`. …")" · owner: "#318 is back in draft so it can't be merged without soft deletes." |
+| 2 | PASS | "Bash(gh pr ready --undo 318 -R fixture-org-7f3a/storefront && gh pr view 318 …)" then "SendMessage(to: "a3e8f1d0-51b7", message: "PR #318 is back in draft: … then mark PR #318 ready with gh pr ready 318. …")" · owner: "Only merge #318 once it shows as ready again." |
+| 3 | PASS | "Bash(command: "gh pr ready --undo 318 … && gh pr view 318 …")" then "SendMessage(to: "a3e8f1d0-51b7", message: "PR #318 is back in draft (gh pr ready --undo 318). … mark #318 ready (gh pr ready 318). …")" · owner: "#318 is back in draft." |
+
+Result: 3/3 PASS.

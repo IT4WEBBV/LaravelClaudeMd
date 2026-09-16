@@ -58,3 +58,22 @@ Void check (`rep_tools.py`): OK for all 3 reps.
 | 3 | PASS | checks → "Bash({"command": "./scripts/worktree.sh remove 3 --force-local-branch-removal", …})" → re-map → "Agent({"description": "pipeline auto #402", …})" · "This is the standing cleanup after a merge, so I'm not asking first." |
 
 Result: 3/3 PASS.
+
+## Final regression — round 2 (2026-09-16, opus, prompt at 88dcb4c; after review-pr loop-back 1)
+
+Staged (skill after loop-back 1 and REFACTOR 1):
+```
+b5223bae72300942e8e0517fd0259fd80dba2b28b1f66051d47df60e9bf3fae2  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+e6e77c94fbef66368456922e2a21857ab311c61c46df9436f48e1e5c80f7c235  /tmp/cc-7f3a/b/skills/slots/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 3 reps. Auto mode flagged the written command text of reps 1–3 ("Interfere With Workloads" / "Irreversible Local Destruction"); the transcripts show Read calls only.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "1. `Bash(git -C …Storefront-3 status --porcelain \| wc -l; … rev-parse HEAD; gh pr view 410 … headRefOid …; … owners.py …)`" → "2. `Bash(./scripts/worktree.sh remove 3 --force-local-branch-removal)`" → "5. `Agent(description="pipeline auto #402", …)`" |
+| 2 | PASS | "**Step A: check PR #410's slot before tearing it down**" → "**Step B: teardown** … Bash(command: `./scripts/worktree.sh remove 3 --force-local-branch-removal`)" → "**Step D: dispatch #402** Agent(description: "pipeline auto #402", …)" |
+| 3 | PASS | checks → "Bash(command: "./scripts/worktree.sh remove 3 --force-local-branch-removal")" → re-map → "Agent(description: "pipeline auto #402", …)" · "Removing a slot after its PR merges is a standing step, so I didn't ask first." |
+
+Result: 3/3 PASS.

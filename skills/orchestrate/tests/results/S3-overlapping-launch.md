@@ -155,3 +155,23 @@ Void check (`rep_tools.py`): OK for all 5 reps.
 | 15 | PASS | "AskUserQuestion(… "Adopt #530 (Recommended)" … "Leave #512 out" …)" · "Orchestrate allows a resume only when no owner is found." |
 
 Result: 5/5 PASS.
+
+## Final regression — round 2 (2026-09-16, opus, prompt at d679e85; after review-pr loop-back 1)
+
+Staged (skill after loop-back 1 and REFACTOR 1):
+```
+b5223bae72300942e8e0517fd0259fd80dba2b28b1f66051d47df60e9bf3fae2  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 3 reps.
+
+Every rep dispatches only #515, touches nothing of #512 and asks adopt / leave it out; none offers *resume*.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "The only allowed question is adopt / leave it out, and "resume" is allowed only when nothing owns the work." · "AskUserQuestion(… "Adopt PR #530 (Recommended)" … "Leave #512 out" …)" |
+| 2 | PASS | "It offers no resume option because a session still owns the work." · "AskUserQuestion(… "Adopt (Recommended)" … "Leave it out" …)" |
+| 3 | PASS | "A resume is only allowed when nobody owns the work." · "AskUserQuestion(… "Adopt PR #530 (Recommended)" … "Leave #512 out" …)" |
+
+Result: 3/3 PASS.

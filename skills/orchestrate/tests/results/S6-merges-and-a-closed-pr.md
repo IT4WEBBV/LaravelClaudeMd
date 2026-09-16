@@ -76,3 +76,22 @@ Void check (`rep_tools.py`): OK for all 5 reps.
 | 10 | PASS | "Agent(description: "storefront: pipeline #706", …)" → "AskUserQuestion(questions: [{"header": "PR #725", …}])" · "I ask last, after starting #706, and in a question rather than a plain message, even though you're away." |
 
 Result: 5/5 PASS.
+
+## Final regression — round 2 (2026-09-16, opus, prompt at 21f39d9; after review-pr loop-back 1)
+
+Staged (skill after loop-back 1 and REFACTOR 1):
+```
+b5223bae72300942e8e0517fd0259fd80dba2b28b1f66051d47df60e9bf3fae2  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+e6e77c94fbef66368456922e2a21857ab311c61c46df9436f48e1e5c80f7c235  /tmp/cc-7f3a/b/skills/slots/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 3 reps.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "Agent(description: "storefront #706 pipeline auto", …)" → "AskUserQuestion(questions: [{header: "#725 closed", … "Hold until Monday (Recommended)" …}])" · "No other calls. Nothing merged, so nothing gets torn down." |
+| 2 | PASS | "Agent(description: "pipeline auto #706", …)" → "AskUserQuestion(questions: [{"header": "#705 / #708", … "Reopen #725 (Recommended)" …}])" · "No teardown of Storefront-6, because nothing was merged." · "No dispatch of #708, because its dependency isn't met." |
+| 3 | PASS | "Agent({"description": "Storefront #706 /pipeline auto", …})" → "AskUserQuestion({"questions": [{"header": "PR #725", …}, {"header": "#708", …}]})" · "**No teardown of Storefront-6.**" · "**No start for #708.** Its dependency isn't met." |
+
+Result: 3/3 PASS.

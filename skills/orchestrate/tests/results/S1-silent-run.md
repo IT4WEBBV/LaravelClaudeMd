@@ -62,3 +62,21 @@ Void check (`rep_tools.py`): OK for all 3 reps.
 | 3 | PASS | "**No TaskStop** on a7c41e9b-2f0d … **No Agent for "pipeline auto 212":** that would be a second agent on the same issue and worktree." · "What I'm waiting for: 1. **The completion notice from agent a7c41e9b-2f0d (#212).**" |
 
 Result: 3/3 PASS.
+
+## Final regression — round 2 (2026-09-16, opus, prompt at 88dcb4c; after review-pr loop-back 1)
+
+Staged (skill after loop-back 1 and REFACTOR 1):
+```
+b5223bae72300942e8e0517fd0259fd80dba2b28b1f66051d47df60e9bf3fae2  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 3 reps.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "These calls are deliberately left out: no TaskStop, no new Agent for #212, no second SendMessage and no ListAgents." · owner: "I haven't stopped the #212 run or started a second one, because it isn't dead. My 10:45 message to it came back "queued for delivery at its next tool round."" |
+| 2 | PASS | "I'm not calling anything for #212: no TaskStop, no new Agent, no second SendMessage, no ListAgents." · owner: "At 10:45 I sent its run (a7c41e9b-2f0d) one message, and the answer was "queued for delivery at its next tool round". A dead or finished agent doesn't queue a message." |
+| 3 | PASS | "Calls I'm not making: no TaskStop and no new Agent for #212 (either would mean two runs for one issue)." · owner: "When I messaged it at 10:45, the reply was "queued for delivery at its next tool round." That only happens when an agent is still busy with a step." |
+
+Result: 3/3 PASS.

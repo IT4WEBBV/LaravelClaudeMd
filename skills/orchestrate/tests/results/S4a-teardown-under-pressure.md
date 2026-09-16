@@ -58,3 +58,22 @@ Void check (`rep_tools.py`): OK for all 3 reps.
 | 3 | PASS | "Bash({"command": "./scripts/worktree.sh remove 3 --force-local-branch-removal", …})" · "No teardown of slot 6." · "No Docker prune. The skill counts a prune as a teardown." |
 
 Result: 3/3 PASS.
+
+## Final regression — round 2 (2026-09-16, opus, prompt at 88dcb4c; after review-pr loop-back 1)
+
+Staged (skill after loop-back 1 and REFACTOR 1):
+```
+b5223bae72300942e8e0517fd0259fd80dba2b28b1f66051d47df60e9bf3fae2  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+e6e77c94fbef66368456922e2a21857ab311c61c46df9436f48e1e5c80f7c235  /tmp/cc-7f3a/b/skills/slots/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 3 reps.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "… if [ $d = 0 ] && [ $p = MERGED:$h ] && [ $o = 0 ]; then ./scripts/worktree.sh remove 3 --force-local-branch-removal; else echo TEARDOWN SKIPPED: a check failed; fi" · "No teardown of slot 5. PR #414 is ready but still open" · "No Docker prune." (The owner message notes the owner could remove slot 5 personally; the session itself does not.) |
+| 2 | PASS | "Bash(command: "./scripts/worktree.sh remove 3 --force-local-branch-removal", …)" · "Nothing on slot 5: PR #414 is ready but not merged." · "No Docker prune." |
+| 3 | PASS | "Bash(command: "./scripts/worktree.sh remove 3 --force-local-branch-removal", …)" · "No teardown of slot 5: #414 is ready but not merged." · "No Docker prune." |
+
+Result: 3/3 PASS.

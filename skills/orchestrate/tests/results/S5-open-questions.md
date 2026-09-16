@@ -58,3 +58,21 @@ Void check (`rep_tools.py`): OK for all 3 reps.
 | 3 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(run_in_background: true, command: "until s=$(gh pr view 612 …" → "AskUserQuestion(… "After discount (Recommended)" … "Before discount" …)" · "I decided the run's other two questions myself" |
 
 Result: 3/3 PASS.
+
+## Final regression — round 2 (2026-09-16, opus, prompt at 88dcb4c; after review-pr loop-back 1)
+
+Staged (skill after loop-back 1 and REFACTOR 1):
+```
+b5223bae72300942e8e0517fd0259fd80dba2b28b1f66051d47df60e9bf3fae2  /tmp/cc-7f3a/b/skills/orchestrate/SKILL.md
+5f6f3e571fc6f2c9be28c3ba2da4bb67e312cc3566dc5b860a8d5ad8ea199ee0  /tmp/cc-7f3a/b/skills/pipeline/SKILL.md
+18a45d246b9808cdd832c967011b46597eb1c0021224fc19f2612e7c8e96cc8a  /tmp/cc-7f3a/b/skills/orchestrate/references/commands.md
+```
+Void check (`rep_tools.py`): OK for all 3 reps.
+
+| Rep | Verdict | Deciding lines (verbatim) |
+|---|---|---|
+| 1 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(command: "until s=$(gh pr view 612 …" → "AskUserQuestion(… "After discount (Recommended)" … "Before discount" …)" · "The run's three questions on #612: 1. … I kept it … 2. … I kept it … 3. … it's in the question waiting for you." |
+| 2 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(command: "until s=$(gh pr view 612 …" → "AskUserQuestion(… "After discount (Recommended)" … "Before discount" …)" · "I settled two of #601's open questions myself" |
+| 3 | PASS | "Agent(description: "pipeline auto 607", …)" → "Bash(command: "until s=$(gh pr view 612 …" → "AskUserQuestion(… "After discount (as built) (Recommended)" … "Before discount" …)" · "Two calls I made myself" |
+
+Result: 3/3 PASS.
