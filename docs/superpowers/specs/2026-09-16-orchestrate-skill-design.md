@@ -445,8 +445,15 @@ resumes them. It never re-dispatches.
 ## Risks accepted
 
 - **The owner lookup** depends on the transcript layout (`~/.claude/projects/*/<sessionId>.jsonl` and
-  `<sessionId>/subagents/*.jsonl`, entries with `cwd`). A harness change silently yields "orphaned",
-  which is still never dispatched without an owner question. `owners_test.sh` pins the layout.
+  `<sessionId>/subagents/*.jsonl`, entries with `cwd`). It fails closed: a live session whose
+  transcript cannot be found, or holds no `cwd` entries, makes `owners.py` exit 2, and a non-zero exit
+  is treated as owned and asked about, never as "orphaned". `owners_test.sh` pins both.
+- **A run that is another live session's subagent is invisible to the owner lookup.** It works in the
+  slot through `cd` and `git -C`, so its transcript `cwd` stays the primary checkout (measured
+  2026-09-16: the Deploy orchestrator's #429 subagent in Deploy-5). The slot then reads as orphaned and
+  the owner question offers *resume*. It only arises with two sessions driving one repo; the owner
+  does not plan more than one orchestrator per repo (2026-09-16). The fix, if that changes: also count
+  a live session whose tool calls name the worktree path.
 - **The branch-prefix mapping** depends on runs following `branch.issue`. A hand-made branch for an
   issue is invisible to preflight.
 - **90 minutes** is a judgement for "suspected stall". Too short costs one message; too long delays
