@@ -24,6 +24,8 @@ function proof_render_styles(): string
 body { margin:0; padding:2rem 1.5rem 4rem; background:var(--bg); color:var(--fg);
   font:15px/1.6 ui-sans-serif,-apple-system,"Segoe UI",sans-serif; max-width:60rem; margin-inline:auto; }
 h1 { font-size:1.5rem; margin:0 0 .25rem; }
+.lead { font-size:1.05rem; margin:.75rem 0 0; }
+.caption { display:block; margin-top:.2rem; }
 h2 { font-size:1rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);
   margin:2.5rem 0 .75rem; padding-bottom:.4rem; border-bottom:1px solid var(--line); }
 .meta { color:var(--muted); font-size:.875rem; margin-bottom:.5rem; }
@@ -91,9 +93,13 @@ function proof_render_shots(array $shots): string
                 . proof_e((string) ($badge['note'] ?? '')) . "</li>\n";
         }
 
+        $caption = empty($shot['caption'])
+            ? ''
+            : '<span class="caption">' . proof_e((string) $shot['caption']) . '</span>';
+
         $out .= "<figure>\n"
-            . '<figcaption>' . proof_e((string) ($shot['title'] ?? '')) . ' — <code>'
-            . proof_e((string) ($shot['route'] ?? '')) . "</code></figcaption>\n"
+            . '<figcaption><strong>' . proof_e((string) ($shot['title'] ?? '')) . '</strong> — <code>'
+            . proof_e((string) ($shot['route'] ?? '')) . '</code>' . $caption . "</figcaption>\n"
             . '<span class="shot"><img alt="' . proof_e((string) ($shot['title'] ?? '')) . '" src="'
             . proof_e((string) ($shot['file'] ?? '')) . '">' . $badges . "</span>\n"
             . ($legend === '' ? '' : "<ol class=\"legend\">\n{$legend}</ol>\n")
@@ -191,9 +197,20 @@ function proof_issue_number(array $run): ?int
         : null;
 }
 
+/**
+ * The short name a run goes by in its heading, its tab and the store index.
+ *
+ * Runs filed before `title` existed fall back to their branch, never to `headline`: those
+ * headlines are the summaries that made the index unreadable in the first place.
+ */
+function proof_run_title(array $run): string
+{
+    return (string) ($run['title'] ?? ($run['branch'] ?? 'pipeline run'));
+}
+
 function proof_render_run(array $run): string
 {
-    $title = (string) ($run['headline'] ?? ($run['branch'] ?? 'pipeline run'));
+    $title = proof_run_title($run);
 
     $pr = empty($run['pr'])
         ? 'no PR'
@@ -216,6 +233,10 @@ function proof_render_run(array $run): string
     ]));
 
     $body = "<h1>" . proof_e($title) . "</h1>\n<p class=\"meta\">{$meta}</p>\n";
+
+    if (! empty($run['headline'])) {
+        $body .= '<p class="lead">' . proof_e((string) $run['headline']) . "</p>\n";
+    }
 
     if (! empty($run['problem'])) {
         $body .= "<h2>Problem</h2>\n" . proof_render_prose((string) $run['problem']);
@@ -263,7 +284,7 @@ function proof_render_index(array $runs): string
 
         $rows .= '<tr><td><code>' . proof_e((string) ($run['repo'] ?? '')) . '</code></td>'
             . '<td>' . $pr . '</td>'
-            . '<td><a href="' . proof_e($href) . '">' . proof_e((string) ($run['headline'] ?? ($run['branch'] ?? ''))) . '</a></td>'
+            . '<td><a href="' . proof_e($href) . '">' . proof_e(proof_run_title($run)) . '</a></td>'
             . '<td>' . proof_e((string) count($run['shots'] ?? [])) . '</td>'
             . '<td>' . proof_e(substr((string) ($run['updatedAt'] ?? ''), 0, 10)) . "</td></tr>\n";
     }

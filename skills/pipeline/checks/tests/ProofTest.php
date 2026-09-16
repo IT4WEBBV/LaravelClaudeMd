@@ -120,3 +120,42 @@ it('scans every run in the store, newest first', function () {
 it('scans an empty or missing store without failing', function () {
     expect(proof_scan_runs(sys_get_temp_dir() . '/proof-empty-' . uniqid()))->toBe([]);
 });
+
+it('accepts a run named by a short title, whatever the length of its summary and captions', function () {
+    expect(proof_validate_run([
+        'title' => 'PR #430: service logs that follow',
+        'headline' => str_repeat('A summary sentence of what was verified. ', 20),
+        'shots' => [['title' => 'Unreachable swarm', 'caption' => str_repeat('What the shot proves. ', 20)]],
+    ]))->toBe([]);
+});
+
+it('rejects a run without a title, because the heading, the tab and the index all need one', function () {
+    $problems = proof_validate_run(['headline' => 'Order rows gain a product summary grid']);
+
+    expect($problems)->toHaveCount(1);
+    expect($problems[0])->toContain('title');
+});
+
+it('rejects a run title that is a summary rather than a name', function () {
+    // Each run modelled its payload on the one before, and the headline grew from 84 to 596
+    // characters. The limit is what stops the next copy from growing it again.
+    $problems = proof_validate_run(['title' => str_repeat('x', PROOF_TITLE_MAX + 1)]);
+
+    expect($problems)->toHaveCount(1);
+    expect($problems[0])->toContain((string) (PROOF_TITLE_MAX + 1));
+    expect(proof_validate_run(['title' => str_repeat('é', PROOF_TITLE_MAX)]))->toBe([]);
+});
+
+it('rejects a shot title that belongs in its caption', function () {
+    $problems = proof_validate_run([
+        'title' => 'PR #430: service logs that follow',
+        'shots' => [
+            ['title' => 'Unreachable swarm'],
+            ['title' => str_repeat('x', PROOF_TITLE_MAX + 1)],
+        ],
+    ]);
+
+    expect($problems)->toHaveCount(1);
+    expect($problems[0])->toContain('shot 2');
+    expect($problems[0])->toContain('caption');
+});

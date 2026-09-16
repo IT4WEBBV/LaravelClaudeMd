@@ -44,6 +44,15 @@ function proof_cli_write(string $payloadPath): int
         return 0;
     }
 
+    // Nothing is filed until the payload passes: a page written anyway would carry its title into
+    // the store index for good. The leg sees no page path on stdout, fixes the payload, writes again.
+    $problems = proof_validate_run($payload);
+    if ($problems !== []) {
+        fwrite(STDERR, "proof: payload rejected, nothing written:\n  - " . implode("\n  - ", $problems) . "\n");
+
+        return 0;
+    }
+
     $root = proof_root();
     $repo = (string) ($payload['repo'] ?? 'unknown');
     $branch = (string) ($payload['branch'] ?? 'unknown');

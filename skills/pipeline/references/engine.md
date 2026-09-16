@@ -326,6 +326,26 @@ scope-qualified check result and any open questions, and links out to the PR and
 `review-pr` rewrites it once more to finalise open questions and the ledger. A store-wide
 `index.html` is the join from a PR back to its page.
 
+**The payload** that `proof_cli.php write` files. This table is the schema. **An existing `run.json`
+is not an example**: runs that copied the previous run's payload grew its title from 84 to 596
+characters in five runs.
+
+| Field | What it holds |
+|---|---|
+| `repo`, `nameWithOwner`, `branch`, `pr`, `issue`, `prState`, `mode` | where the run belongs; `nameWithOwner` makes the PR and issue references links |
+| `title` | **required, at most 70 characters.** The run's name: page heading, browser tab, store index. `PR #430: service logs that follow`, not a sentence of findings |
+| `headline` | one or two sentences: what was verified and the outcome. Rendered as the lead under the title |
+| `problem`, `solution` | prose; blank lines become paragraphs |
+| `checks` | `tests`, `staticAnalysis` (scope-qualified), `format`, `suppressions` (list) |
+| `openQuestions` | list, carried verbatim |
+| `ledger` | list of `{gate, outcome, note}` |
+| `shots` | list of `{title, caption, route, badges}`. `title` is at most 70 characters and names the state shown ("Unreachable swarm"); `caption` says what the shot proves and has no limit |
+| `shotSources` | absolute paths of the screenshots, in `shots` order; ingested into the run's `shots/` |
+
+`write` refuses a payload whose `title` is missing or whose `title` or shot title is too long. It
+prints `proof: payload rejected` and the problems on stderr, prints no page path, and files nothing.
+Fix the payload and write again. Runs filed before `title` existed are named by their branch.
+
 **The PR still gets a comment, and it is load-bearing.** The manifest is reconstructable from
 git + gh (`manifest.md` §reconstruction), so the only durable evidence that this non-skippable
 gate ran must live on the PR. The comment records *what* was verified — routes, states, outcome,

@@ -10,6 +10,7 @@ function proof_fixture_run(array $overrides = []): array
         'prState' => 'OPEN',
         'mode' => 'auto',
         'updatedAt' => '2026-08-25T15:30:00+02:00',
+        'title' => 'PR #412: product summary grid',
         'headline' => 'Order rows gain a product summary grid',
         'problem' => 'Order rows showed no product detail.',
         'solution' => 'Added a summary grid to the row partial.',
@@ -22,13 +23,56 @@ function proof_fixture_run(array $overrides = []): array
 
 it('escapes every value it interpolates', function () {
     $html = proof_render_run(proof_fixture_run([
+        'title' => '<b>bold</b>',
         'headline' => '<script>alert(1)</script>',
         'problem' => 'a & b < c',
+        'shots' => [['file' => 'shots/01.png', 'title' => '<i>shot</i>', 'caption' => '<u>caption</u>', 'route' => '/', 'badges' => []]],
     ]));
 
     expect($html)->not->toContain('<script>alert(1)</script>');
     expect($html)->toContain('&lt;script&gt;');
     expect($html)->toContain('a &amp; b &lt; c');
+    expect($html)->toContain('&lt;b&gt;bold&lt;/b&gt;');
+    expect($html)->toContain('&lt;i&gt;shot&lt;/i&gt;');
+    expect($html)->toContain('&lt;u&gt;caption&lt;/u&gt;');
+});
+
+it('names the page by its short title and gives the headline its own lead paragraph', function () {
+    $html = proof_render_run(proof_fixture_run());
+
+    expect($html)->toContain('<title>PR #412: product summary grid</title>');
+    expect($html)->toContain('<h1>PR #412: product summary grid</h1>');
+    expect($html)->toContain('<p class="lead">Order rows gain a product summary grid</p>');
+});
+
+it('names a run filed before titles existed by its branch, not by its long headline', function () {
+    $run = proof_fixture_run(['headline' => str_repeat('A long summary written as a title. ', 15)]);
+    unset($run['title']);
+
+    $page = proof_render_run($run);
+    $index = proof_render_index([['dir' => '/store/ViewieMedia/pr-412-orders-export', 'run' => $run]]);
+
+    expect($page)->toContain('<h1>feature/orders-export</h1>');
+    expect($page)->toContain('<p class="lead">A long summary');
+    expect($index)->toContain('index.html">feature/orders-export</a>');
+});
+
+it('labels each shot by its short title and puts the detail in a caption beneath it', function () {
+    $html = proof_render_run(proof_fixture_run([
+        'shots' => [['file' => 'shots/01-orders.png', 'title' => 'Orders index', 'caption' => 'Every row shows the product grid', 'route' => '/orders', 'badges' => []]],
+    ]));
+
+    expect($html)->toContain('<strong>Orders index</strong>');
+    expect($html)->toContain('alt="Orders index"');
+    expect($html)->toContain('<span class="caption">Every row shows the product grid</span>');
+});
+
+it('renders a shot without a caption without an empty caption line', function () {
+    $html = proof_render_run(proof_fixture_run([
+        'shots' => [['file' => 'shots/01-orders.png', 'title' => 'Orders index', 'route' => '/orders', 'badges' => []]],
+    ]));
+
+    expect($html)->not->toContain('class="caption"');
 });
 
 it('renders a self-contained page with only relative image paths', function () {
@@ -185,6 +229,15 @@ it('renders an empty store without failing', function () {
 
     expect($html)->toStartWith('<!doctype html>');
     expect($html)->toContain('No runs recorded');
+});
+
+it('links each run in the index by its short title', function () {
+    $html = proof_render_index([
+        ['dir' => '/store/ViewieMedia/pr-412-orders-export', 'run' => proof_fixture_run()],
+    ]);
+
+    expect($html)->toContain('index.html">PR #412: product summary grid</a>');
+    expect($html)->not->toContain('Order rows gain a product summary grid');
 });
 
 it('shows the PR number and state for a run that has one', function () {

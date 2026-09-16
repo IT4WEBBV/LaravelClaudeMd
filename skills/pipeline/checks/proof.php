@@ -10,6 +10,43 @@
  */
 
 /**
+ * The longest a run's `title` or a shot's `title` may be. A title *names* something — the page
+ * heading, the browser tab, the store index — and a sentence of findings stops naming it.
+ */
+const PROOF_TITLE_MAX = 70;
+
+/**
+ * Why a payload cannot be filed, one line per problem; an empty list means it can.
+ *
+ * Titles are checked here, at filing time, because nothing else stops them growing: each run
+ * modelled its payload on the one before, and the headline used as the title went from 84 to 596
+ * characters in five runs. The summary belongs in `headline`, a shot's detail in its `caption`,
+ * and neither has a limit.
+ *
+ * @return list<string>
+ */
+function proof_validate_run(array $run): array
+{
+    $problems = [];
+
+    $title = trim((string) ($run['title'] ?? ''));
+    if ($title === '') {
+        $problems[] = 'title is missing: name the run in at most ' . PROOF_TITLE_MAX . ' characters, e.g. "PR #430: service logs that follow"';
+    } elseif (mb_strlen($title) > PROOF_TITLE_MAX) {
+        $problems[] = 'title is ' . mb_strlen($title) . ' characters, at most ' . PROOF_TITLE_MAX . ': move the summary to headline';
+    }
+
+    foreach (array_values($run['shots'] ?? []) as $i => $shot) {
+        $length = mb_strlen(trim((string) ($shot['title'] ?? '')));
+        if ($length > PROOF_TITLE_MAX) {
+            $problems[] = 'shot ' . ($i + 1) . ' title is ' . $length . ' characters, at most ' . PROOF_TITLE_MAX . ': move the detail to caption';
+        }
+    }
+
+    return $problems;
+}
+
+/**
  * The store root. `PIPELINE_PROOF_ROOT` exists so tests never write to the real store —
  * a test that pollutes `~/GitProjects/_proofs` would be indistinguishable from a real run.
  */
