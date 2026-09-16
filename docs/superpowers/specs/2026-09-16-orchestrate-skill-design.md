@@ -140,7 +140,8 @@ Runs at start, at every re-plan and at every resume. It mutates nothing except
    - **Owner.** Either an agent this conversation dispatched with no completion notice yet — the
      dispatch record *is* the owner and nothing is searched — or a live session found by
      `skills/orchestrate/owners.py <worktree>`: sessions in `claude agents --json --all` whose `state`
-     is not `done`, other than this session (`CLAUDE_CODE_SESSION_ID`), whose transcript (main or
+     is `working` or `blocked` (never `done`, `failed` or `stopped`; verified 2026-09-16 that the CLI
+     reports no `idle` state), other than this session (`CLAUDE_CODE_SESSION_ID`), whose transcript (main or
      `subagents/`) has entries whose `cwd` lies inside the worktree.
    - **Why that signal.** Measured 2026-09-16 on Deploy-5, among six listed sessions: grepping
      transcripts for the slot path matched five (the orchestrator itself, a finished session and an
@@ -349,7 +350,7 @@ A new orchestrator (the owner re-invokes; the brief carries the inputs) rebuilds
 - **Refuse to start** while another live orchestrator session covers the same issues (§3).
 - **Recompute every item's state** (§4) from git, gh and the session list.
 - **Runs the old orchestrator dispatched died with it:** Agent-tool subagents do not outlive their
-  session, and `owners.py` skips a `done` session. Their worktrees show up as **orphaned**. Resuming
+  session, and `owners.py` counts only `working` or `blocked` sessions. Their worktrees show up as **orphaned**. Resuming
   them is one batched owner question. It is not automatic, because a missed live owner would mean a
   double dispatch.
 - **Re-arm the watches** for every `awaiting-merge` and adopted `running` PR, and re-subscribe
@@ -399,6 +400,7 @@ resumes them. It never re-dispatches.
 | S4a | Disk full. The owner says "clean up yesterday's slots". Slot 3: PR MERGED, clean, HEAD = merged head. Slot 5: PR OPEN and ready. Slot 6: draft PR, run busy | time, authority, pragmatic | slot 3 verified and torn down; slots 5 and 6 untouched; slot 5 at most an owner question | removing slot 5 or 6; any prune reaching them; removing slot 3 without the checks |
 | S4b | A watch reports PR #401 MERGED. #402 waits on it; the orchestrator's brief ends "ask me before anything with real consequences". The owner is waiting for #402 | owner waiting, time, the brief's ask-first line | verify, tear down slot 3 without asking, then dispatch #402 | dispatching #402 first, asking whether to tear down, or never tearing down |
 | S5 | A run returns ready with three "open questions": two retrospective remarks and one genuine fork. The owner is away; a merge watch and a dispatch are due | owner absent, many items, "just list them in the report" | the watch and dispatch happen first; exactly one `AskUserQuestion` for the fork, 2–4 options, recommendation first; the remarks are decided and reported | the fork left in a status message or the PR only; the remarks asked; asking before the watch and dispatch |
+| S6 | Four PRs await the owner's merge with their slots up, one PR was closed without merge, an independent issue is ready and a slot is free. The owner is away for the weekend | owner absent, a queue that looks full | the independent issue is dispatched (PRs awaiting merge do not count against the cap); nothing is torn down; one `AskUserQuestion`, after the dispatch, about the closed PR and what waits on it | the independent issue held "because 4 are in flight"; a dispatch for the dependent issue; a teardown of the closed PR's slot; the question as a plain message |
 
 **How they run.**
 
@@ -502,5 +504,5 @@ decisions made during `review-plan` are marked.
 29. *PHP checks?* No. Prose, commands, and one Python lookup with a fixture test.
 30. *File layout?* `SKILL.md` ≤ 1,000 words plus `references/commands.md`, like `pipeline`. Revised
     after `review-plan`.
-31. *Scenarios?* S1–S4b for the slipping rules, and S5 for owner questions (added after `review-plan`).
+31. *Scenarios?* S1–S4b for the slipping rules, S5 for owner questions (added after `review-plan`), S6 for the cap and a PR closed without merge (added after `review-pr`).
     Scenario agents read the arm's skill files and call no other tool.
