@@ -121,7 +121,7 @@ passes older than the latest `design-size` escalation.
 ## Path anchoring — the app root is not always the repo root
 
 `pipeline_triggers` anchors its path patterns at `(?:^|/)`, not `^`. The house-standard it4web
-project layout puts the Laravel app under **`code/www/`** (CLAUDE.md §Project Structure), so a diff
+project layout puts the Laravel app under **`code/www/`** (CLAUDE.md §Docker Environment), so a diff
 names `code/www/app/Livewire/UserForm.php`, not `app/Livewire/UserForm.php`.
 
 With a bare `^` anchor the `ui`, `migration` and `package` triggers were **structurally blind on every

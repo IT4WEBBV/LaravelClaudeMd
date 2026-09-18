@@ -137,6 +137,15 @@ Some work needs multiple screenshots (e.g., form → validation error → succes
 
 User says "show me" → navigate to the same state WITHOUT annotations → tell them what page is open, what credentials, what to look at → wait.
 
+## When Playwright will not launch
+
+"Opening in existing browser session" means a stale Playwright Chrome profile conflicts with a
+running Chrome. Delete the profile and retry:
+
+```bash
+rm -rf ~/Library/Caches/ms-playwright/mcp-chrome-*
+```
+
 ## Red Flags — STOP
 
 - "It works in the browser" without a screenshot

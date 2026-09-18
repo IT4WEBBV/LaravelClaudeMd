@@ -13,8 +13,8 @@ function pipeline_triggers(string $diff, ?string $repoPackageName = null): array
     $files = parse_diff($diff);
 
     // Anchor at the repo root OR at a nested app root. The house-standard it4web
-    // project layout puts the Laravel app under `code/www/` (CLAUDE.md §Project
-    // Structure), so a bare `^` matches only repos whose app sits at the top level —
+    // project layout puts the Laravel app under `code/www/` (CLAUDE.md §Docker
+    // Environment), so a bare `^` matches only repos whose app sits at the top level —
     // and silently reports `false` for every project that follows the convention.
     $appRoot = '(?:^|/)';
 
