@@ -563,6 +563,18 @@ Re-run step 3 whenever either repo adds a new skill (existing ones update via `g
 
 ## Memory (SecondBrain vault)
 
+> **Not live yet.** The cut-over — Tasks 5–6 of `docs/superpowers/plans/2026-09-11-vault-auto-memory.md` —
+> has not run: the vault has no `memory/` folder on origin, and `settings.json` sets neither
+> `autoMemoryDirectory` nor the `vault-sync` hooks. Until it runs:
+> - Auto-memory stays in the default `~/.claude/projects/*/memory`, flat — no `repos/<key>/` folders,
+>   and nothing syncs between machines.
+> - The vault is still the basic-memory archival tier: query it through the basic-memory MCP
+>   (`search_notes`, `build_context`) when starting project work or making a decision.
+> - To finish it, start `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 claude` from `~`, execute Tasks 5–6, and
+>   delete this note.
+
+The rest of this section describes the setup after the cut-over.
+
 Auto-memory lives in the SecondBrain vault — `~/GitProjects/SecondBrain/SecondBrain`, private repo
 `jonneroelofs/SecondBrain` — not in machine-local `~/.claude/projects/*/memory`. The
 `autoMemoryDirectory` setting points every session at its `memory/` folder, so memory is versioned in
