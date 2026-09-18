@@ -1340,7 +1340,7 @@ metadata:
 ---
 
 Run once per machine, in a session started with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 claude` from `~`
-(not inside a worktree), after LaravelClaudeMd is pulled and the vault is cloned (CLAUDE.md →
+(not inside a worktree), after LaravelClaudeMd is pulled and the vault is cloned (README.md →
 Bootstrapping a new machine).
 
 1. `git -C ~/GitProjects/SecondBrain/SecondBrain pull --rebase`.
@@ -1349,7 +1349,7 @@ Bootstrapping a new machine).
    `memory/repos/<key>/` (key = the repo's GitHub name, lowercased); otherwise global.
 3. Apply the ledger, add each index line (global `MEMORY.md`, or the repo's `MEMORY.md` plus a pointer
    line for a new repo folder), commit to the vault's `main` with the ledger in the message, push.
-4. Wire `~/.claude/settings.json` as in CLAUDE.md → Bootstrapping a new machine (`autoMemoryDirectory`
+4. Wire `~/.claude/settings.json` as in README.md → Bootstrapping a new machine (`autoMemoryDirectory`
    and the vault-sync hooks), through the update-config skill.
 5. Rename each old `~/.claude/projects/*/memory` to `memory.bak-<date>`.
 6. If basic-memory is installed: `claude mcp remove basic-memory -s user`, `uv tool uninstall basic-memory`,

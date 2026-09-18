@@ -58,7 +58,7 @@ DIFF;
 
 it('detects the same paths when the Laravel app is nested under code/www', function () {
     // The house-standard it4web project layout puts the app at code/www/, not at the
-    // repo root (see CLAUDE.md §Project Structure). Anchoring on ^ made every one of
+    // repo root (see CLAUDE.md §Docker Environment). Anchoring on ^ made every one of
     // these miss, so a Livewire-only change reported ui=false and verify-ui was skipped.
     $livewire = <<<'DIFF'
 +++ b/code/www/app/Livewire/UserForm.php

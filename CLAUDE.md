@@ -1,111 +1,46 @@
 # Claude Code Instructions
 
-> **Note**: This file lives in the `LaravelClaudeMd` repo and is symlinked to `~/.claude/CLAUDE.md`. Personal skills come from **two** repos — `LaravelClaudeMd/skills/` and `DevOps-Claude-Config/skills/` — each skill symlinked individually into a real `~/.claude/skills/` directory (so both repos' skills coexist; see [Skills (multi-machine setup)](#skills-multi-machine-setup) at the bottom). When starting a conversation, pull **both** config repos first so skills and instructions stay current:
-> ```bash
-> git -C ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd pull --ff-only -q
-> git -C ~/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config pull --ff-only -q
-> ```
+> This file lives in the `LaravelClaudeMd` repo and is symlinked to `~/.claude/CLAUDE.md`. I work on
+> two machines: anything that has to reach both belongs in a repo, not in one machine's settings or
+> memory.
 
 ## Docker Environment
 
-All projects run in Docker containers using Docker Compose. Never run application commands directly on the host machine.
-it4web/* package tests can be run with their own make file (if not we should make it so).
-it4web/* packages can usually be worked on locally by starting a project with the ./restart.sh -p flag so they are locally mounted
+Every project runs in Docker Compose. Never run application commands on the host.
 
-### Starting Projects
-
-Always start projects using the `restart.sh` script located in the `/scripts` folder. Do not manually run docker-compose commands.
+- Start or restart a project with `./scripts/restart.sh`, never with `docker compose` by hand. `-p`
+  mounts the it4web packages locally, so they can be worked on from the project.
+- Containers are named `${COMPOSE_PROJECT_NAME}_<service>`. The name is in `container/.env` (next to
+  the compose files), as is the host port the database is mapped to. Services: `web` (artisan,
+  composer, npm, tests), `db` (MariaDB), `db_test`, `worker` (queue).
+- The code in `code/www/` is mounted at `/var/www`. Inside the containers the database host is the
+  container name: `viewiemedia_db`, `viewiemedia_db_test`.
+- it4web/* packages run their own tests through their Makefile; a package without one should get one.
 
 ```bash
-# Start a project
-./scripts/restart.sh
-
-# Start with locally mounted it4web packages
-./scripts/restart.sh -p
+docker exec {project}_web php artisan migrate
+docker exec {project}_web php artisan c:d
+docker exec {project}_web php artisan test
+docker exec -it {project}_web bash
 ```
 
-### Project Structure
+## Programming Philosophy
 
-```
-project/
-├── container/
-│   ├── .env                    # Container environment variables
-│   ├── docker-compose.dev.yml  # Development compose file
-│   └── docker-compose.*.yml    # Other environment configs
-├── code/
-│   └── www/                    # Application code (mounted to /var/www)
-└── scripts/                    # Helper scripts
-```
-
-### Programming Philosophy
-
-- Think first act later. So create a todolist or other plan that can be approved before we start building anything.
+- Think first, act later: while we are still discussing, do not start building. Present a plan I can
+  approve first — what we build, the existing code and patterns it touches, the steps, and how we
+  verify it. Work that already has one needs no second round: an approved issue, spec or plan, or an
+  explicit instruction, counts as approval, so execute without asking again.
 - Feel free to ask questions to clear things up.
 - **Give me actionable multiple-choice questions, not a blob of text.** When something needs my decision, ask it with the `AskUserQuestion` tool: 2-4 concrete options, your recommendation first. Never bury a decision inside a paragraph of findings or in a trailing remark ("say the word and I'll file those", "worth deciding whether…") — I can't tell which lines are FYI and which are blocking, so nothing gets answered and the work stalls. Keep findings that need no decision as prose, and batch pending decisions into one question call instead of dribbling them out. The flip side: decide mechanical implementation details yourself and just tell me the call you made — only ask about things with real consequences.
 - When I ask a question, I'm genuinely curious and want your feedback or explanation. A question does not mean "go change things" — do not start modifying code just because I asked about it. It also does not mean I disagree with the current approach.
 - Testing is important! If possible use TDD. Use the tests to check your own work.
-  - Also check in the browser if things work. If available you can use the mcp playwright to do so. Feel free to create an admin account to login if necessary.
 - We like elegant code that looks like it was written by e.g. Taylor Otwell or Caleb Porzio.
 - Keep it DRY (don't repeat yourself) but do not over optimize, I generally repeat myself once and then when I find myself doing it again I see how I can abstract some concept.
 - We like the general ideas Sandi Metz has about programming.
 - Avoid null-safety checks (`?->`, `?:`, `if (!$x)` guards) as a solution unless there is a good reason for it. Prefer fixing the root cause — e.g. if `auth()->user()` is null in a test, authenticate a user in the test rather than adding null-safe operators in production code.
+- Before building something, check `composer.json` for a package that already does it. Prefer our it4web packages and what is already installed over new code or a new dependency.
 - When we implement a feature for a project that seems useful for more projects then lets ask ourselves whether is belongs in one of our it4web packages or even if it is something we should create a new package for.
 - Prefer polymorphism over conditionals. Use enums with behavior methods, strategy patterns, or other polymorphic approaches instead of scattered if/else or boolean flags.
-
-### Container Naming Convention
-
-Containers are named using the pattern: `${COMPOSE_PROJECT_NAME}_service`
-
-Common services:
-- `web` - Main PHP/web container (run artisan, composer, npm, phpunit here)
-- `db` - Database (MariaDB)
-- `db_test` - Test database
-- `worker` - Queue worker
-
-Example for a project named "viewiemedia":
-- `viewiemedia_web`
-- `viewiemedia_db`
-- `viewiemedia_worker`
-
-### Running Commands
-
-Always execute commands inside the appropriate container:
-
-```bash
-# Enter the web container
-docker exec -it {project}_web bash
-
-# Or run a single command
-docker exec {project}_web php artisan migrate
-docker exec {project}_web composer install
-docker exec {project}_web npm run build
-docker exec {project}_web php artisan test
-```
-
-### Finding the Project Name
-
-Check `container/.env` for `COMPOSE_PROJECT_NAME` to determine the container prefix. You can also find at what port the database container port is mapped from the container to the host.
-
-### Working Directory
-
-The application code is mounted at `/var/www` inside containers. When running commands, you're typically in this directory.
-
-## Common Commands
-
-```bash
-# Laravel/PHP
-docker exec {project}_web php artisan migrate
-docker exec {project}_web php artisan c:d
-
-# Testing
-docker exec {project}_web php artisan test
-```
-
-## Important Notes
-
-- The `web` container is the primary container for running application commands
-- Database connections from within containers use the container name as host (e.g., `viewiemedia_db`)
-- Test databases are available with `_test` suffix (e.g., `viewiemedia_db_test`)
 
 ---
 
@@ -114,26 +49,8 @@ docker exec {project}_web php artisan test
 ### Backend Architecture
 
 #### Action Classes
-Use Action classes for single-purpose business logic:
-- Static `make()` factory method for instantiation
-- Main logic in `handle()` method
-- Constructor dependency injection
-- One action = one responsibility
-
-```php
-class CreateOrderAction
-{
-    public static function make(): self
-    {
-        return new self();
-    }
-
-    public function handle(array $data): Order
-    {
-        // Business logic here
-    }
-}
-```
+Single-purpose business logic lives in an Action: a static `make()` that takes whatever the action
+needs, the work in `handle()`, one responsibility per action.
 
 #### Data Migrations (Deploy Operations)
 We use `dragon-code/laravel-deploy-operations` (or its predecessor `dragon-code/laravel-migration-actions` in older projects) for data migrations. **Never put data manipulation (inserts, updates, backfills) inside schema migrations.** Schema migrations should only contain schema changes (add/drop columns, create/drop tables, add indexes, etc.).
@@ -156,63 +73,29 @@ return new class extends Action {
 ```
 
 #### Enums
-Always use native PHP enums over string constants:
-- Use backed enums (`: int` or `: string`)
-- Add `label()` method for human-readable names
-- Add `getOptions()` for form selectors
-
-```php
-enum OrderStatusEnum: int
-{
-    case PENDING = 0;
-    case PROCESSING = 1;
-    case COMPLETED = 2;
-
-    public function label(): string
-    {
-        return match($this) {
-            self::PENDING => 'Pending',
-            self::PROCESSING => 'Processing',
-            self::COMPLETED => 'Completed',
-        };
-    }
-
-    public static function getOptions(): array
-    {
-        return collect(self::cases())->map(fn ($case) => [
-            'id' => $case->value,
-            'name' => $case->label(),
-        ])->all();
-    }
-}
-```
+Native backed enums (`: int` or `: string`), never string constants. Each gets a `label()` for the
+human-readable name and a static `getOptions()` returning `[['id' => $case->value, 'name' => $case->label()], …]`
+— the shape TallFormbuilder's SelectField expects.
 
 #### Models
-- Use `protected $guarded = [];` (guard nothing, fillable everything)
-- Cast enums in `$casts` array
-- Use `static::booted()` for model event hooks
-- Define relationships with clear naming
+- `protected $guarded = [];` (guard nothing, fillable everything)
+- Cast enums in `$casts`
+- Side effects of a change go in an explicit Action call at the call site, not in a `booted()` hook or
+  an Observer: those are too hidden.
+- Relationships with clear names
 
-#### Services
-Use service classes for complex business logic and external API integrations:
-- Static `make()` factory method
-- Chainable methods for fluent interface
-- Facades for cleaner API access when appropriate
-
-#### Controllers
-Keep controllers thin:
-- Livewire components preferred for interactive UI
-- Validation in Form Requests or inline
-- Business logic delegated to Actions/Services
+#### Services and Controllers
+- Services for complex business logic and external API integrations: static `make()`, chainable
+  methods, and a facade where it makes the call site cleaner.
+- Thin controllers: Livewire components preferred for interactive UI, validation in Form Requests or
+  inline, business logic in Actions and Services.
 
 ### Frontend Stack
 
-#### Livewire 3 (Primary)
-- Use Livewire components for all interactive UI
-- Traits for shared behavior (HasForm, HasModalEvents)
-- Form builder DSL via TallFormbuilder package
-- Datatables via TallDatatable package.
-- If you need form elements outside of the Form builder use those from TallUi or FluxUi before creating anything custom.
+#### Livewire and the it4web packages
+- Livewire 3 components for all interactive UI; traits for shared behavior (HasForm, HasModalEvents).
+- Forms through TallFormbuilder, datatables through TallDataTable. Form elements outside the form
+  builder come from TallUi or Flux before anything custom.
 
 #### TallFormbuilder Pattern
 ```php
@@ -252,16 +135,11 @@ BasicForm::make()
       ->hidden($this->user->role !== UserRoleEnum::CUSTOMER)
   ```
 
-#### Blade
-- Use x-components over @includes
-- Named slots for flexibility
-- Alpinejs components where applicable
+#### Blade and Tailwind
+- x-components over @includes, with named slots
 - Don't use @php in blade. If you think it needed/better ask for permission.
-
-#### Tailwind CSS
-- Utility-first, no custom CSS unless absolutely necessary
-- Color naming: `primary`, `contrast`, `success`, `warning`, `error`
-- Use `@tailwindcss/forms`, `@tailwindcss/typography` plugins
+- No custom CSS unless absolutely necessary. Colors are named `primary`, `contrast`, `success`,
+  `warning`, `error`.
 
 ### Code Style
 
@@ -305,77 +183,20 @@ $data = request()->validate([
 
 ### Testing
 
-#### Running Tests
-- Always run tests with `php artisan test` (inside the web container), e.g. `docker exec {project}_web php artisan test`.
-- Always run tests in the foreground — never run the test suite as a background process. Wait for the run to finish and read its full output before continuing.
-
-#### Framework
-- Pest PHP preferred for new projects (fluent syntax)
-- PHPUnit acceptable for existing projects
-- We almost never write unit tests if the relevant code is or can be covered by a Feature test.
-
-#### Organization
-```
-tests/
-├── Feature/      # Integration tests, HTTP tests
-│   └── Livewire/ # Livewire component tests
-├── Unit/         # Isolated unit tests
-└── Browser/      # Playwright browser tests
-```
-
-#### Patterns
-- Should never talk to external services. Usually achieved by have the code that talks to the external service behind a facade.
-- Use `RefreshDatabase` trait for test isolation
-- Factories extensively for test data
-- Livewire testing with `Livewire::test()`
-- Database assertions: `assertDatabaseHas()`, `assertDatabaseCount()`
-- **Test with related data**: When testing components with dropdowns/selects that depend on other models, always create that related data first. Empty arrays won't catch formatting bugs:
+- Run tests with `php artisan test` inside the web container (`docker exec {project}_web php artisan test`),
+  always in the foreground: wait for the run to finish and read its full output before continuing.
+- Pest for new projects; PHPUnit is fine in existing ones. We almost never write unit tests when a
+  Feature test covers, or can cover, the code.
+- Tests never talk to external services: the code that does sits behind a facade, which the test fakes.
+- `RefreshDatabase` for isolation, factories for data, `Livewire::test()` for components,
+  `assertDatabaseHas()` / `assertDatabaseCount()` for results.
+- **Test with related data.** When a component has dropdowns or selects fed by other models, create
+  that data first — empty arrays hide formatting bugs:
   ```php
-  // This catches SelectField options format bugs
-  public function the_component_can_render_with_customers()
-  {
-      Customer::factory()->count(3)->create();
+  Customer::factory()->count(3)->create();
 
-      Livewire::test(UserForm::class)
-          ->assertStatus(200);
-  }
+  Livewire::test(UserForm::class)->assertStatus(200); // catches SelectField options format bugs
   ```
-
-```php
-// Pest example
-it('creates an order', function () {
-    $user = User::factory()->create();
-
-    Livewire::actingAs($user)
-        ->test(CreateOrderForm::class)
-        ->set('name', 'Test Order')
-        ->call('submit')
-        ->assertHasNoErrors();
-
-    $this->assertDatabaseHas('orders', ['name' => 'Test Order']);
-});
-```
-
-### Common Packages
-
-These packages are commonly used across projects:
-- `livewire/livewire` - Interactive components
-- `it4web/tallui` - UI components
-- `it4web/talldatatable` - Data tables
-- `it4web/tallformbuilder` - Form builder
-- `laravel/jetstream` - Authentication scaffolding
-- `spatie/laravel-ray` - Debugging
-- `maatwebsite/excel` - Excel import/export
-
-### Playwright MCP Browser Fix
-
-If the Playwright MCP fails to launch Chrome with "Opening in existing browser session" errors, delete the stale user-data-dir:
-
-```bash
-rm -rf ~/Library/Caches/ms-playwright/mcp-chrome-*
-```
-
-This clears the Playwright Chrome profile that conflicts with an already-running Chrome instance.
 
 ---
 
@@ -389,91 +210,35 @@ This clears the Playwright Chrome profile that conflicts with an already-running
 - **Never address a human without my explicit permission**: posting on PRs and issues is fine — write up what changed, what was measured, and what still stands, even when it resolves someone's review remark. What is off-limits is writing *to* a person: naming or greeting them, second person ("je"/"you"), agreeing with or praising them ("scherp gezien"), asking them anything, inviting a reply, or reacting (👍 etc.) to their comment. Keep it an impersonal record of the work, not a message. If it only makes sense as a message to someone, draft it in chat and let me send it — colleagues read it as me talking, so I decide what gets said and when. Same on Slack, email and tickets.
   - ❌ "Scherp gezien Damion — dat klopte inderdaad niet. Ik heb optie 1 gedaan … Als je dat ook weg wilt hebben, hoor ik het graag."
   - ✅ "Optie 1 geïmplementeerd: de presentatie blijft gepauzeerd bij vorige/volgende. Gemeten op test: … Blijft staan: na een minuut inactiviteit hervat het scherm (bewust, voor etalageschermen)."
-- **Never work against a stale checkout**: `hooks/git-freshness.sh` in this repo (wired into `~/.claude/settings.json`) fetches and reports staleness automatically. It anchors on **the repo being worked in, not the directory the session was launched in** — it checks the launch directory at session start, then re-checks the first time a file is written in *any* repo, once per repo per session. A `git checkout` clears those cached verdicts so the next edit re-checks.
-
-  The same run also keeps **local `main`/`master`** level with `origin`, so a branch cut later — by hand or by `worktree.sh create` — starts from a current base instead of from wherever main was left the last time anyone pulled. It only ever fast-forwards, and only when it is provably safe: never when the base branch has local commits, and never into a checkout that is dirty or mid-merge/rebase. When the base branch is checked out somewhere (usually the primary checkout, while you work in a slot) it fast-forwards that working tree too — so if the incoming commits moved `composer.lock`, a JS lockfile, migrations or `.env.example`, it says so and tells you to run `scripts/restart.sh` there. Otherwise it stays quiet.
-
-  That sync is the **only** thing the hook is allowed to do on its own. When it *warns* about your working branch, **raise it with me and wait**: do not pull, rebase, or merge on your own initiative. If the hook is not installed (new machine — see [Bootstrapping](#bootstrapping-a-new-machine)), check by hand *before the first edit in a repo*, not just when checking out a branch:
+- **Never work against a stale checkout.** `hooks/git-freshness.sh` reports staleness by itself, for
+  the repo being worked in, and keeps local `main`/`master` fast-forwarded — the only thing it changes
+  on its own. When it warns about your working branch, **raise it with me and wait**: do not pull,
+  rebase or merge on your own initiative. Without the hook, check by hand before the first edit in a repo:
   ```bash
   git fetch origin
   git rev-list --count HEAD..origin/main   # commits on the base branch this checkout lacks
   ```
-  Two traps this replaces, both of which let stale work through:
-  - **`git status` cannot see it.** It compares HEAD only against its *tracking* branch, so a feature branch perfectly in sync with `origin/<same-branch>` reports "up to date" while `origin/main` has moved underneath it. Compare against the base branch explicitly.
-  - **`origin/HEAD` is often wrong.** That symref is cached at clone time and never refreshed, so a clone made when `develop` was default still names `develop` long after the repo moved to `main`. Run `git remote set-head origin --auto` before trusting it.
+  `git status` cannot see this (it only compares against the tracking branch), and `origin/HEAD` is
+  often stale: run `git remote set-head origin --auto` before trusting it.
 - **Update the changelog**: When creating a PR, add a changelog entry using whichever convention the project uses:
   - **Fragment-based (project has a `.changelog/unreleased/` directory):** copy `.changelog/unreleased/TEMPLATE.md` to `.changelog/unreleased/<branch-name>.md` (branch name with `/` replaced by `-`) and fill in the `<details>` block. Do **not** edit `CHANGELOG.md` directly — the release workflow rolls fragments in at release time. See `.changelog/unreleased/README.md`.
   - **Plain changelog (no `.changelog/` directory):** update the project's `CHANGELOG.md` directly with a summary of the changes. Check the latest version tag first with `git tag --sort=-v:refname | head -5` to determine the correct next version number.
 - **Check for vendor hacks**: Before creating a PR, check for modified files in `vendor/it4web/` by running `find vendor/it4web/ -newer vendor/composer/installed.json -name '*.php'` inside the web container. Since `vendor/` is gitignored, git won't track these changes. `installed.json` is written at the end of `composer install/update`, so any PHP file newer than it was manually edited after install. If modifications are found, flag them and remind to port those changes back to the actual package repositories before they get lost on the next `composer install`.
 
-We use feature branches for development. Create a new branch for each feature or fix, then create a pull request when complete.
+### Before calling work done
 
-```bash
-# Create a feature branch
-git checkout -b feature/my-new-feature
-
-# After completing work, push and create a PR
-git push -u origin feature/my-new-feature
-gh pr create
-```
-
-### Research & Plan Phase
-
-Before building anything significant:
-
-1. **Understand the request** - Clarify requirements, ask questions if needed
-2. **Explore the codebase** - Find relevant existing code, patterns, similar implementations
-3. **Identify dependencies** - What existing code will this touch? What needs to change?
-4. **Draft a plan** with these sections:
-
-```markdown
-## Summary
-Brief description of what we're building
-
-## Research Findings
-- Relevant existing code found
-- Patterns to follow
-- Dependencies identified
-
-## Implementation Plan
-1. Step one
-2. Step two
-3. ...
-
-## Validation Strategy
-How we'll verify this works:
-- [ ] Tests to write (or existing tests to check)
-- [ ] Manual checks in browser
-- [ ] Edge cases to consider
-```
-
-5. **Present for approval** before implementation
-
-### Build Phase
-
-After a plan is approved:
-
-1. **Write tests first** (when applicable) - Define expected behavior
-2. **Implement incrementally** - Small, verifiable steps
-3. **Run tests frequently** - `docker exec {project}_web php artisan test`
-4. **Check in browser** - Use Playwright MCP or manual verification, if needed check the databaseseeder for credentials or create your own.
-5. **Mark todos complete** as you go
-6. **Handle failures** - If tests fail, fix before proceeding
-
-### Validation Checklist
-
-Before considering work complete:
-- [ ] Tests pass
-- [ ] Works in browser
-  - When verifying visual work (Livewire, Blade, CSS, frontend JS), invoke the `browser-verification` skill for annotated screenshot proof before claiming it works.
-- [ ] Code follows project conventions
-- [ ] Review the completed work.
+- Tests pass.
+- It works in the browser: check it with the Playwright MCP, creating an admin account (or taking
+  credentials from the DatabaseSeeder) when a login is needed. For visual work — Livewire, Blade,
+  CSS, frontend JS — invoke the `browser-verification` skill for annotated screenshot proof before
+  claiming it works.
+- Review the completed work, including against the project's conventions.
 
 ---
 
 ## Remote servers (SSH)
 
-- **Ask before every SSH session** to production, acceptance or a swarm node — read-only probes included. Ask with `AskUserQuestion` (which host, which command, read-only or not) and offer a local alternative first: reproduce in a slot, read the code at the release tag, or let me check.
+- **Ask before every SSH session** to production, acceptance or a swarm node — read-only probes included. Ask with `AskUserQuestion` (which host, which command, read-only or not) and offer a local alternative first: reproduce in a slot, read the code at the release tag, or let me check. **If I name the host and the command, that is the approval — run it.**
 - **Use the plain form, nothing wrapped around it:**
   ```bash
   ssh -o BatchMode=yes -o ConnectTimeout=15 jroelofs@<host> "<command>"
@@ -486,78 +251,14 @@ Before considering work complete:
 
 ---
 
-## Skills (multi-machine setup)
+## Skills and hooks
 
-Personal skills are pooled from **two** git repos, so `~/.claude/skills/` is a **real directory** (not a symlink to either repo) holding one symlink per skill:
-
-| Repo | Clone location | Provides |
-|------|----------------|----------|
-| `IT4WEBBV/LaravelClaudeMd` | `~/GitProjects/LaravelClaudeMd/LaravelClaudeMd` | `browser-verification`, `counselors`, `critique`, `experiment`, `improve-codebase-architecture`, `orchestrate`, `pipeline`, `slots`, `spinoff`, `visual-parity` |
-| `IT4WEBBV/DevOps-Claude-Config` | `~/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config` | `handoff`, `memory-sync`, `release-changelog`, `retenium-prod`, `review-pr`, `work-on` |
-
-> **Nested clone layout**: both repos are cloned one level deep — `~/GitProjects/<Repo>/<Repo>/` — to match `DevOps-Claude-Config`'s own README and its `memory-sync` skill, which expects that path. Keep this layout so Mark's skills work unmodified.
-
-A single symlink at `~/.claude/skills` can only ever point at one repo — that's why it's a real folder with per-skill symlinks instead, letting both repos' skills coexist.
-
-### Keeping skills up to date
-
-Pull **both** repos at the start of each session (see the note at the top of this file). The `/memory-sync` skill does the same on demand. Because each skill is symlinked back to its repo, a `git pull` updates the skills in place.
-
-### Bootstrapping a new machine
-
-```bash
-# 1. Clone both config repos and the memory vault into nested wrapper dirs (~/GitProjects/<Repo>/<Repo>/)
-mkdir -p ~/GitProjects/LaravelClaudeMd ~/GitProjects/DevOps-Claude-Config ~/GitProjects/SecondBrain
-git clone git@github.com:IT4WEBBV/LaravelClaudeMd.git ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd
-git clone git@github.com:IT4WEBBV/DevOps-Claude-Config.git ~/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config
-git clone git@github.com:jonneroelofs/SecondBrain.git ~/GitProjects/SecondBrain/SecondBrain
-
-# 2. Symlink this file as the global CLAUDE.md
-ln -sfn ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/CLAUDE.md ~/.claude/CLAUDE.md
-
-# 3. Make ~/.claude/skills a REAL directory and link every skill from BOTH repos
-mkdir -p ~/.claude/skills
-for repo in LaravelClaudeMd DevOps-Claude-Config; do
-  for skill in ~/GitProjects/$repo/$repo/skills/*/; do
-    ln -sfn "$skill" ~/.claude/skills/"$(basename "$skill")"
-  done
-done
-
-# 4. Make the hooks executable
-chmod +x ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh \
-         ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/vault-sync.sh
-```
-
-Then point auto-memory at the vault and wire the hooks in `~/.claude/settings.json` — the scripts live in this repo and update with a `git pull`, so only this wiring is per-machine:
-
-```json
-"autoMemoryDirectory": "~/GitProjects/SecondBrain/SecondBrain/memory",
-"hooks": {
-  "SessionStart": [
-    { "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh session", "timeout": 20, "statusMessage": "Checking git freshness…" } ] },
-    { "matcher": "startup|resume|clear", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/vault-sync.sh session", "timeout": 20, "statusMessage": "Syncing memory…" } ] }
-  ],
-  "PostToolUse": [
-    { "matcher": "Edit|Write", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh edit", "timeout": 20, "statusMessage": "Checking git freshness…" } ] },
-    { "matcher": "Bash", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh checkout", "if": "Bash(git checkout:*)", "timeout": 10 } ] }
-  ],
-  "SessionEnd": [
-    { "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/vault-sync.sh end", "timeout": 20 } ] }
-  ]
-}
-```
-
-The three modes are `session` (launch directory, at startup), `edit` (the repo owning the file being written — once per repo per session), and `checkout` (drops cached verdicts after a branch switch).
-
-`vault-sync.sh` has two: `session` (commit `memory/`, then fetch, rebase and push — at startup, resume and clear) and `end` (commit and push when the session ends). See [Memory (SecondBrain vault)](#memory-secondbrain-vault).
-
-Run `bash hooks/tests/git-freshness-sync.test.sh` or `bash hooks/tests/vault-sync.test.sh` after changing the matching hook. Both build throwaway repos under `$TMPDIR`; the first covers every branch of the base-branch sync, including the sibling-worktree case that is easy to get silently wrong, the second every sync path of the memory vault, including two machines writing at once.
-
-Re-run step 3 whenever either repo adds a new skill (existing ones update via `git pull`; a brand-new skill folder needs its own symlink). It is idempotent — see [`README.md` § Linking the skills](README.md#linking-the-skills) for the `-n` caveat and how to sweep the dangling symlink a renamed or removed skill leaves behind.
-
-**Caveats**
-- Only link the `skills/` folders. Do **not** symlink `DevOps-Claude-Config/settings.json` or its `CLAUDE.md` over yours — that repo is a colleague's personal config; its settings/instructions are not ours.
-- Skill names must be unique across the two repos. If both ever ship a folder with the same name, the second `ln` silently wins — rename one before linking.
+Skills come from two repos, this one and `IT4WEBBV/DevOps-Claude-Config`, with one symlink per skill
+in `~/.claude/skills/`. At session start `hooks/git-freshness.sh` fast-forwards both repos and links
+any new skill, on each machine. Skill names must be unique across the two repos.
+`DevOps-Claude-Config` is a colleague's personal config: link only its `skills/`, never its
+`settings.json` or `CLAUDE.md`. After changing a hook, run its tests in `hooks/tests/`. Machine
+setup and hook wiring: `README.md`.
 
 ---
 
@@ -596,44 +297,9 @@ way; there is nothing else to write to.
 - **A memory saved on the other machine is there at the next session start.**
 - The owner's own notes at the vault root are theirs; the hook never stages them.
 
-A new machine gets the vault, the setting and the hooks from [Bootstrapping a new machine](#bootstrapping-a-new-machine).
-If it already has local memories, start one session with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 claude` from `~`
-and have it follow the vault memory `playbook_migrate_machine_memory.md`.
+Setting a machine up for the vault, and migrating its local memories into it: `README.md`.
 
-## Font Awesome Pro icons
+## Icons
 
-Icons are not an npm dependency. The full Font Awesome Pro package is mirrored once per
-workstation in a shared repository, and icons are copied out of it into Blade components by
-hand. No project has a Font Awesome credential, and no project downloads the package.
-
-### One-time setup per workstation
-
-```bash
-git clone git@github.com:IT4WEBBV/FontAwesomeCache.git \
-  ~/GitProjects/FontAwesomeCache/FontAwesomeCache
-```
-
-Keep it current with `git -C ~/GitProjects/FontAwesomeCache/FontAwesomeCache pull`. A pull
-is a force-push fast-forward failure by design — the mirror rewrites `main` on every Font
-Awesome release — so use `git fetch origin && git reset --hard origin/main` when a plain
-pull refuses.
-
-### Adding an icon
-
-Find the SVG in the mirror:
-
-```bash
-cat ~/GitProjects/FontAwesomeCache/FontAwesomeCache/fa/svgs/{style}/{name}.svg
-```
-
-Styles: `solid`, `regular`, `light`, `thin`, `duotone`, `brands`, plus the `sharp-*` and
-`duotone-*` families — 17 in all.
-
-Use `fa/svgs/`, not `fa/svgs-full/`. The trimmed variant carries a per-icon viewBox
-(`0 0 448 512` for `solid/user`), which is what the existing Blade components are built
-from; `svgs-full/` normalises everything to `0 0 640 640` and renders at a different
-effective size.
-
-Then create `resources/views/components/icon/{name}.blade.php`, copying the `viewBox` and
-the `d` attribute from that file. Projects carry their own rules for how the component is
-written — check the project `CLAUDE.md` before adding one.
+Never add Font Awesome through npm or a CDN. Icons are copied by hand from the shared FontAwesomeCache
+mirror: use the `icons` skill.
