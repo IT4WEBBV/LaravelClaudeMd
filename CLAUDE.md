@@ -471,6 +471,21 @@ Before considering work complete:
 
 ---
 
+## Remote servers (SSH)
+
+- **Ask before every SSH session** to production, acceptance or a swarm node — read-only probes included. Ask with `AskUserQuestion` (which host, which command, read-only or not) and offer a local alternative first: reproduce in a slot, read the code at the release tag, or let me check.
+- **Use the plain form, nothing wrapped around it:**
+  ```bash
+  ssh -o BatchMode=yes -o ConnectTimeout=15 jroelofs@<host> "<command>"
+  ```
+  - Never `-o StrictHostKeyChecking=no`. On a host-key mismatch, stop and compare the offered fingerprint with me.
+  - Never wrap it in `perl -e 'alarm …'`, `bash -c` or similar. Permission rules cannot match past such a wrapper, and auto mode reads it as suspicious. `ConnectTimeout` plus the Bash tool's own timeout is enough.
+- **Keep the payload visible.** Tinker goes inline with `--execute="…"`, never as a file piped in over stdin — auto mode cannot see into the file and refuses it. Split a long probe into several small commands.
+- **`docker exec` only works on the node running the task**, which is usually not the swarm manager. Find it first: `docker service ps <svc> --filter desired-state=running --format '{{.Node}}'`.
+- **In a background job a denial is final.** There is no retry prompt, and asking in chat does not lift it. Hand me a `!` one-liner instead of retrying or reshaping the command.
+
+---
+
 ## Skills (multi-machine setup)
 
 Personal skills are pooled from **two** git repos, so `~/.claude/skills/` is a **real directory** (not a symlink to either repo) holding one symlink per skill:
