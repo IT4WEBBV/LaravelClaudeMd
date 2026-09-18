@@ -45,6 +45,12 @@ git config --global init.defaultBranch main
 git config --global user.name test
 git config --global user.email test@example.com
 
+# Session mode also syncs the config repos and links their skills into
+# ~/.claude/skills. No case may reach the real ones: default both to nothing,
+# and let the config cases below point them at fixtures explicitly.
+export GIT_FRESHNESS_CONFIG_REPOS=""
+export GIT_FRESHNESS_SKILLS_DIR="$root/no-skills-dir"
+
 passed=0
 failed=0
 
@@ -268,6 +274,7 @@ contains "$out" '"hookEventName":"SessionStart"' "declares the right hook event"
 contains "$out" 'fast-forwarded main' "context reports the sync"
 contains "$out" '"systemMessage"' "raises a visible message (composer.lock moved)"
 is "$(git -C "$repo" rev-list --count main..origin/main)" "0" "the hook really did fast-forward main"
+lacks "$out" "Config repos" "no config section when no config repos are set"
 echo
 
 echo "case 11: edit mode caches per repo — second write stays silent"
@@ -290,6 +297,67 @@ out=$(printf '%s' "$payload" | VAULT_DIR="$repo" bash "$hook" edit 2>/dev/null)
 is "$out" "" "no report for the vault"
 is "$(git -C "$repo" rev-list --count main..origin/main)" "2" "the vault's main was not fast-forwarded"
 rm -rf "${TMPDIR:-/tmp}/claude-git-freshness/test-vault"
+echo
+
+# Push a commit to a fixture's origin from its "other" clone, then fetch it into
+# the checkout, so the next sync has something to fast-forward.
+push_upstream() { # push_upstream <fixture name> <path> <content>
+    local other="$root/$1/other"
+    [ -d "$other" ] || die "no fixture '$1'"
+    mkdir -p "$(dirname "$other/$2")"
+    echo "$3" > "$other/$2"
+    git -C "$other" add "$2"
+    git -C "$other" commit -qm "add $2"
+    git -C "$other" push -q origin main
+    git -C "$root/$1/work" fetch -q origin
+}
+
+echo "case 13: session start syncs a config repo and links its new skills"
+cfg=$(fixture config 2 skills/newskill/SKILL.md)
+push_upstream config skills/taken/SKILL.md "taken"
+push_upstream config skills/notaskill/README.md "no SKILL.md here"
+skills="$root/config/skills-dir"
+mkdir -p "$skills" "$root/config/elsewhere/taken"
+ln -s "$root/config/elsewhere/taken" "$skills/taken"
+mkdir -p "$root/config/plain"
+payload="{\"session_id\":\"test-config\",\"cwd\":\"$root/config/plain\"}"
+out=$(printf '%s' "$payload" \
+    | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$skills" bash "$hook" session 2>/dev/null)
+is "$(printf '%s' "$out" | grep -c '')" "1" "emits exactly one line, even from outside a repo"
+if json_is_valid "$out"; then ok "output parses as JSON"; else fail "output parses as JSON" "$out"; fi
+is "$(git -C "$cfg" rev-list --count main..origin/main)" "0" "config repo's main fast-forwarded"
+if [ -f "$cfg/skills/newskill/SKILL.md" ]; then ok "config checkout holds the new skill"; else fail "config checkout holds the new skill"; fi
+is "$(readlink "$skills/newskill")" "$cfg/skills/newskill" "new skill linked into the skills dir"
+is "$(readlink "$skills/taken")" "$root/config/elsewhere/taken" "an existing entry with the same name is left alone"
+if [ -e "$skills/notaskill" ]; then fail "a folder without SKILL.md is not linked"; else ok "a folder without SKILL.md is not linked"; fi
+contains "$out" "linked new skill newskill" "the new link is reported"
+lacks "$out" "linked new skill taken" "the collision is not reported as linked"
+contains "$out" '"systemMessage"' "a new skill earns a visible line"
+echo
+
+echo "case 14: a config checkout on a feature branch is flagged"
+cfg=$(fixture config2 2)
+git -C "$cfg" checkout -q -b feature
+sess=$(fixture sessionrepo 0)
+payload="{\"session_id\":\"test-config2\",\"cwd\":\"$sess\"}"
+out=$(printf '%s' "$payload" \
+    | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config2/none" bash "$hook" session 2>/dev/null)
+is "$(printf '%s' "$out" | grep -c '')" "1" "still exactly one line alongside the session repo's own report"
+if json_is_valid "$out"; then ok "output parses as JSON"; else fail "output parses as JSON" "$out"; fi
+contains "$out" "nothing incoming that affects this work" "the session repo's own report is kept"
+contains "$out" "skills from 'feature'" "the feature-branch checkout is flagged"
+is "$(git -C "$cfg" rev-list --count main..origin/main)" "0" "main still fast-forwarded, as a ref-only write"
+is "$(git -C "$cfg" symbolic-ref --short HEAD)" "feature" "the checkout stays on its branch"
+echo
+
+echo "case 15: a skills dir that is itself a symlink gets nothing linked into it"
+cfg=$(fixture config3 1 skills/another/SKILL.md)
+mkdir -p "$root/config3/realskills"
+ln -s "$root/config3/realskills" "$root/config3/skills-link"
+payload="{\"session_id\":\"test-config3\",\"cwd\":\"$root/config3\"}"
+out=$(printf '%s' "$payload" \
+    | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config3/skills-link" bash "$hook" session 2>/dev/null)
+if [ -e "$root/config3/realskills/another" ]; then fail "nothing written through the symlink"; else ok "nothing written through the symlink"; fi
 echo
 
 echo "----------------------------------------"

@@ -4,8 +4,10 @@
 #
 # Wired into ~/.claude/settings.json. Prints Claude Code hook JSON on stdout.
 #
-#   session    SessionStart — check the directory the session was launched in.
-#              The only thing knowable before anything has been touched.
+#   session    SessionStart — bring the config repos up to date (see
+#              sync_config_repos), then check the directory the session was
+#              launched in. The only thing knowable before anything has been
+#              touched.
 #
 #   edit       PostToolUse on Edit|Write — check the repo that owns the file
 #              being written, once per repo per session. This is the one that
@@ -40,6 +42,10 @@
 # checkout, and never by writing a ref out from under a checkout that is sitting
 # on it (see worktree_holding, which is the whole reason that function exists).
 #
+# The config repos get one more: a skill that has no symlink in ~/.claude/skills
+# yet is linked, so a new skill reaches every machine with its next session
+# instead of waiting for a manual relink. An existing entry is never replaced.
+#
 # Beyond that it touches nothing: your branch, your index and your working tree
 # are left alone, merges are predicted in a throwaway index, and deciding whether
 # to rebase or merge *your* work is left to the human.
@@ -58,6 +64,16 @@ max_listed_files=6      # the conflict list is a prompt, not an inventory
 # Resolved with pwd -P so it compares equal to git's --show-toplevel; empty
 # when the vault is not cloned.
 vault_toplevel=$(cd "${VAULT_DIR:-$HOME/GitProjects/SecondBrain/SecondBrain}" 2>/dev/null && pwd -P)
+
+# The repos whose skills are symlinked into the skills dir, colon-separated.
+# Both are overridable, and set to empty, by the tests.
+config_repos="${GIT_FRESHNESS_CONFIG_REPOS-$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd:$HOME/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config}"
+skills_dir="${GIT_FRESHNESS_SKILLS_DIR-$HOME/.claude/skills}"
+config_fetch_seconds=5  # tighter than max_fetch_seconds: the session repo still has to fit in the hook timeout
+
+config_notes=""
+config_tags=""
+emitted=""
 
 payload=""
 [ -t 0 ] || payload=$(cat 2>/dev/null)
@@ -133,8 +149,21 @@ newest_fetch_mtime() {
     printf '%s' "$newest"
 }
 
+# Print this invocation's one hook JSON object. Whatever sync_config_repos found
+# rides along, because Claude Code reads a single object per hook run.
 emit() {
     local event=$1 context=$2 summary=$3
+
+    if [ -n "$config_notes" ]; then
+        context="${context}${context:+
+
+}Config repos:${config_notes}"
+    fi
+    if [ -n "$config_tags" ]; then
+        summary="${summary}${summary:+ }Config repos: ${config_tags}."
+    fi
+    emitted=1
+
     printf '{'
     printf '"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}' \
         "$(json_escape "$event")" "$(json_escape "$context")"
@@ -339,6 +368,118 @@ sync_base_branch() {
     return 0
 }
 
+# Fetch origin in the current repo, unless it fetched within the TTL. The network
+# call is capped at $1 seconds: a dead connection must not hang the session.
+fetch_if_stale() {
+    local cap=$1 now last fetch_pid ticks=0
+
+    now=$(date +%s)
+    last=$(newest_fetch_mtime)
+    [ "$((now - last))" -ge "$fetch_ttl_seconds" ] || return 0
+
+    GIT_TERMINAL_PROMPT=0 \
+    GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes" \
+        git fetch --quiet origin >/dev/null 2>&1 &
+    fetch_pid=$!
+    while kill -0 "$fetch_pid" 2>/dev/null; do
+        if [ "$ticks" -ge "$((cap * 4))" ]; then
+            kill "$fetch_pid" 2>/dev/null
+            break
+        fi
+        sleep 0.25
+        ticks=$((ticks + 1))
+    done
+    wait "$fetch_pid" 2>/dev/null
+
+    # Re-point origin/HEAD at the remote's real default branch. This symref
+    # is cached at clone time and goes stale silently — a clone made when
+    # `develop` was default still claims `develop` years after the repo
+    # moved to `main`, which would have us measure against the wrong branch.
+    git remote set-head origin --auto >/dev/null 2>&1
+}
+
+# The branch the current repo is measured against: origin/HEAD, which
+# fetch_if_stale keeps honest, else whichever of main and master exists.
+resolve_base_ref() {
+    local ref candidate
+
+    ref=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo "")
+    if [ -z "$ref" ]; then
+        for candidate in origin/main origin/master; do
+            if git rev-parse --verify --quiet "$candidate" >/dev/null 2>&1; then
+                ref="$candidate"
+                break
+            fi
+        done
+    fi
+    printf '%s' "$ref"
+}
+
+config_repo_list() {
+    printf '%s\n' "$config_repos" | tr ':' '\n' | grep -v '^$'
+}
+
+# Link each skill in repo $1 that has no entry in the skills dir yet. An
+# existing entry is never replaced: a name taken by the other repo is a
+# collision to fix by renaming, not something to settle silently here.
+link_new_skills() {
+    local repo=$1 skill name
+
+    # A skills dir that is itself a symlink points into one repo; linking into
+    # it would write into that repo's working tree.
+    [ -d "$skills_dir" ] && [ ! -L "$skills_dir" ] || return 0
+
+    for skill in "$repo"/skills/*/; do
+        [ -f "${skill}SKILL.md" ] || continue
+        name=$(basename "$skill")
+        { [ -e "$skills_dir/$name" ] || [ -L "$skills_dir/$name" ]; } && continue
+        ln -s "${skill%/}" "$skills_dir/$name" 2>/dev/null \
+            && config_tags="${config_tags}${config_tags:+, }linked new skill $name"
+    done
+}
+
+# The config repos are where a stale checkout is invisible by design: their
+# skills are symlinked into the skills dir, so a checkout left behind quietly
+# runs old skills on this machine. Fetch them in parallel, fast-forward their
+# base branch exactly as any other repo, flag a checkout that is not on its
+# base branch (its skills run that branch), and link skills that are new.
+#
+# Appends to `config_notes` and `config_tags`, which emit() folds into the
+# session's single hook output.
+sync_config_repos() {
+    local repo name base_ref branch pids=""
+
+    while IFS= read -r repo; do
+        git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || continue
+        ( cd "$repo" && fetch_if_stale "$config_fetch_seconds" ) </dev/null &
+        pids="$pids $!"
+    done <<< "$(config_repo_list)"
+    [ -z "$pids" ] || wait $pids 2>/dev/null
+
+    while IFS= read -r repo; do
+        [ -n "$repo" ] && cd "$repo" 2>/dev/null || continue
+        git rev-parse --git-dir >/dev/null 2>&1 || continue
+        name=$(basename "$repo")
+        base_ref=$(resolve_base_ref)
+
+        sync_notes=""
+        sync_tags=""
+        sync_base_branch "$base_ref"
+        [ -z "$sync_notes" ] || config_notes="${config_notes}
+  $name:${sync_notes}"
+        [ -z "$sync_tags" ] || config_tags="${config_tags}${config_tags:+, }$name $sync_tags"
+
+        branch=$(git symbolic-ref --short -q HEAD 2>/dev/null || echo "detached HEAD")
+        if [ -n "$base_ref" ] && [ "$branch" != "${base_ref#origin/}" ]; then
+            config_notes="${config_notes}
+  - $name is on '$branch', not ${base_ref#origin/}: the skills linked from it run that branch"
+            config_tags="${config_tags}${config_tags:+, }$name skills from '$branch'"
+        fi
+
+        link_new_skills "$repo"
+    done <<< "$(config_repo_list)"
+}
+
 # Report on the repo containing $1. Prints hook JSON, or nothing when the path
 # is not a git repo with an origin.
 check_repo() {
@@ -355,51 +496,17 @@ check_repo() {
         return 0
     fi
 
-    local now last age
-    now=$(date +%s)
-    last=$(newest_fetch_mtime)
-    age=$((now - last))
+    fetch_if_stale "$max_fetch_seconds"
 
-    if [ "$age" -ge "$fetch_ttl_seconds" ]; then
-        GIT_TERMINAL_PROMPT=0 \
-        GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes" \
-            git fetch --quiet origin >/dev/null 2>&1 &
-        local fetch_pid=$! ticks=0
-        while kill -0 "$fetch_pid" 2>/dev/null; do
-            if [ "$ticks" -ge "$((max_fetch_seconds * 4))" ]; then
-                kill "$fetch_pid" 2>/dev/null
-                break
-            fi
-            sleep 0.25
-            ticks=$((ticks + 1))
-        done
-        wait "$fetch_pid" 2>/dev/null
+    local age
+    age=$(( $(date +%s) - $(newest_fetch_mtime) ))
 
-        # Re-point origin/HEAD at the remote's real default branch. This symref
-        # is cached at clone time and goes stale silently — a clone made when
-        # `develop` was default still claims `develop` years after the repo
-        # moved to `main`, which would have us measure against the wrong branch.
-        git remote set-head origin --auto >/dev/null 2>&1
-
-        last=$(newest_fetch_mtime)
-        age=$((now - last))
-    fi
-
-    local branch upstream base_ref candidate
+    local branch upstream base_ref
     branch=$(git symbolic-ref --short -q HEAD 2>/dev/null || echo "")
     [ -z "$branch" ] && branch="(detached HEAD)"
 
     upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo "")
-
-    base_ref=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo "")
-    if [ -z "$base_ref" ]; then
-        for candidate in origin/main origin/master; do
-            if git rev-parse --verify --quiet "$candidate" >/dev/null 2>&1; then
-                base_ref="$candidate"
-                break
-            fi
-        done
-    fi
+    base_ref=$(resolve_base_ref)
 
     insights=""
     tags=""
@@ -538,7 +645,12 @@ case "$mode" in
         # Nothing has been edited yet, so the session's own cwd is all we have.
         repo=$(payload_field cwd)
         [ -n "$repo" ] && [ -d "$repo" ] || repo="$PWD"
+
+        sync_config_repos
         check_repo "$repo" SessionStart
+
+        # check_repo stays silent outside a git repo; config news still gets out.
+        [ -z "$emitted" ] && [ -n "$config_notes$config_tags" ] && emit SessionStart "" ""
         ;;
 esac
 
