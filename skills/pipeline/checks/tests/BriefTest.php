@@ -1,0 +1,94 @@
+<?php
+
+function brief_manifest(string $leg, array $extra = []): array
+{
+    return [
+        'branch' => 'feature/x', 'worktree' => '/tmp/wt', 'mode' => 'auto',
+        'cursor' => ['leg' => $leg, 'status' => 'pending'],
+        'artifacts' => ['idea' => '/tmp/idea.md', 'spec' => 'docs/spec.md', 'plan' => null, 'pr' => 42, 'issue' => null],
+        'decisions' => ['The engine never edits.'],
+        'last_sha' => 'abc1234',
+        'suite' => ['tree' => 't1', 'outcome' => 'green', 'passed' => 104, 'failed' => 0, 'at' => '2026-09-22T10:00:00Z'],
+        'gate_ledger' => [],
+        ...$extra,
+    ];
+}
+
+it('has overrides for every leg and step', function () {
+    foreach (pipeline_legs() as $leg) {
+        foreach (in_array($leg, ['review-plan', 'review-pr'], true) ? ['review', 'resolve'] : ['run'] as $step) {
+            expect(pipeline_leg_overrides())->toHaveKey("{$leg}:{$step}");
+        }
+    }
+});
+
+it('carries the pointers, the settled decisions and the suite line', function () {
+    $brief = pipeline_brief(brief_manifest('implement'), 'implement');
+
+    expect($brief)
+        ->toContain('`implement` leg, `run` step, of a `/pipeline auto` run')
+        ->toContain('/tmp/wt/.claude/pipeline/feature-x.json')
+        ->toContain('- spec: `docs/spec.md`')
+        ->toContain('- pr: `42`')
+        ->not->toContain('- plan:')
+        ->toContain('The engine never edits.')
+        ->toContain('full suite green over tree `t1` at `abc1234`: 104 passed, 0 failed')
+        ->toContain('Leave the PR draft; this overrides any mark-ready instruction')
+        ->toContain('`plan-insufficient`')
+        ->toContain('Never move `cursor.leg`');
+});
+
+it('permits the design size the invocation allowed', function () {
+    expect(pipeline_brief(brief_manifest('design'), 'design'))->toContain('the Architectural path is required');
+    expect(pipeline_brief(brief_manifest('design', ['light' => true]), 'design'))->toContain('the Bounded path is permitted');
+});
+
+it('asks for grow form only after an escalation no plan approval has answered', function () {
+    $escalated = ['gate' => 'design-size', 'leg' => 'implement', 'at' => '2026-09-22T12:00:00Z', 'reason' => 'migration', 'outcome' => 'escalated'];
+    $approved = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'at' => '2026-09-22T13:00:00Z', 'review' => 'ok', 'outcome' => 'continued'];
+
+    expect(pipeline_brief(brief_manifest('design', ['gate_ledger' => [$escalated]]), 'design'))->toContain('Grow form');
+    expect(pipeline_brief(brief_manifest('design', ['gate_ledger' => [$escalated, $approved]]), 'design'))->not->toContain('Grow form');
+});
+
+it('gives the reviewer crafted context: no earlier review, no earlier actions', function () {
+    $earlier = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'OLD REVIEW TEXT', 'actions' => [['claim' => 'x', 'disposition' => 'integrated', 'note' => 'OLD ACTION']], 'outcome' => 'looped-back'];
+    $brief = pipeline_brief(brief_manifest('review-plan', ['gate_ledger' => [$earlier]]), 'review-plan');
+
+    expect($brief)
+        ->toContain('`review` step')
+        ->toContain('/critique plan')
+        ->toContain('this review\'s `cycle`: `2`')
+        ->toContain('The engine never edits.')
+        ->not->toContain('OLD REVIEW TEXT')
+        ->not->toContain('OLD ACTION')
+        ->not->toContain('gate_ledger[0]');
+});
+
+it('points a resolve step at its open review without copying it', function () {
+    $done = ['gate' => 'design-size', 'leg' => 'implement', 'at' => '2026-09-22T09:00:00Z', 'outcome' => 'escalated'];
+    $open = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'NEW REVIEW'];
+    $brief = pipeline_brief(brief_manifest('review-plan', ['gate_ledger' => [$done, $open]]), 'review-plan');
+
+    expect($brief)
+        ->toContain('`resolve` step')
+        ->toContain('the open review: `gate_ledger[1]`')
+        ->toContain('Change nothing the review did not name.')
+        ->not->toContain('NEW REVIEW');
+});
+
+it('points a looped-back leg at the entry that sent it back', function () {
+    $planLoop = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r', 'outcome' => 'looped-back'];
+    $uiLoop = ['gate' => 'verify-ui', 'cycle' => 1, 'at' => '2026-09-22T11:00:00Z', 'outcome' => 'looped-back'];
+
+    expect(pipeline_brief(brief_manifest('design', ['gate_ledger' => [$planLoop]]), 'design'))->toContain('`gate_ledger[0]` looped back');
+    expect(pipeline_brief(brief_manifest('implement', ['gate_ledger' => [$uiLoop]]), 'implement'))->toContain('`gate_ledger[0]` looped back');
+    expect(pipeline_brief(brief_manifest('handoff', ['gate_ledger' => [$planLoop]]), 'handoff'))->not->toContain('looped back');
+});
+
+it('makes the review-pr resolve step the finish step', function () {
+    $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
+    $brief = pipeline_brief(brief_manifest('review-pr', ['gate_ledger' => [$open]]), 'review-pr');
+
+    expect($brief)->toContain('the finish step')->toContain('gh pr ready')->toContain('proof_cli.php open');
+});
