@@ -80,3 +80,189 @@ function pipeline_leg_writable_keys(): array
 {
     return ['artifacts', 'last_sha', 'suite', 'gate_ledger', 'cursor.status', 'cursor.reason'];
 }
+
+/**
+ * What the dispatcher does after a step returns (spec §3). Fail-closed: a return the checks cannot
+ * account for halts the run and says why.
+ *
+ * @return array{action: string, leg?: string, reason?: string}
+ */
+function pipeline_returned(array $before, array $after, array $triggers, DesignSize $size): array
+{
+    [$before, $after] = [pipeline_normalized($before), pipeline_normalized(pipeline_keep_retried($before, $after))];
+    $leg = $before['cursor']['leg'];
+    $step = pipeline_step($before, $leg);
+
+    if ($after === $before) {
+        return $step === 'review' && empty($before['cursor']['retried'])
+            ? ['action' => 'retry']
+            : pipeline_halt("the {$leg} {$step} step returned without writing the manifest");
+    }
+
+    $problem = pipeline_return_problem($before, $after, $leg, $step, $size);
+
+    return $problem === null ? pipeline_route($after, $leg, $step, $triggers, $size) : pipeline_halt($problem);
+}
+
+/**
+ * Key order is not content. Legs rewrite JSON with whatever tool they hold, so every comparison
+ * runs over recursively key-sorted copies; list order (the ledger) is left as it is.
+ */
+function pipeline_normalized(array $value): array
+{
+    if (! array_is_list($value)) {
+        ksort($value);
+    }
+
+    return array_map(fn ($item) => is_array($item) ? pipeline_normalized($item) : $item, $value);
+}
+
+/** `cursor.retried` is the dispatcher's; a leg that rewrites the cursor without it has not changed it. */
+function pipeline_keep_retried(array $before, array $after): array
+{
+    if (isset($before['cursor']['retried']) && is_array($after['cursor'] ?? null) && ! array_key_exists('retried', $after['cursor'])) {
+        $after['cursor']['retried'] = $before['cursor']['retried'];
+    }
+
+    return $after;
+}
+
+function pipeline_return_problem(array $before, array $after, string $leg, string $step, DesignSize $size): ?string
+{
+    $missing = manifest_validate($after);
+    if ($missing !== []) {
+        return 'the manifest lost ' . implode(', ', $missing);
+    }
+
+    $forbidden = array_diff(pipeline_changed_keys($before, $after), pipeline_leg_writable_keys());
+    if ($forbidden !== []) {
+        return 'the leg changed ' . implode(', ', $forbidden) . ', which only the dispatcher writes';
+    }
+
+    $status = LegStatus::tryFrom((string) ($after['cursor']['status'] ?? ''));
+    if ($status === null) {
+        return 'cursor.status is not a leg status: ' . json_encode($after['cursor']['status'] ?? null);
+    }
+    if (! in_array($status, LegStatus::allowedFor($leg, $step), true)) {
+        return "the {$leg} {$step} step cannot return {$status->value}";
+    }
+    if ($status === LegStatus::Halted && trim((string) ($after['cursor']['reason'] ?? '')) === '') {
+        return 'the leg halted without a reason';
+    }
+
+    return pipeline_ledger_problem($before['gate_ledger'] ?? [], $after['gate_ledger'] ?? [], $status, $leg, $step, $size);
+}
+
+/** @return list<string> top-level keys, and `cursor.*` one level down, whose values differ */
+function pipeline_changed_keys(array $before, array $after): array
+{
+    $flat = function (array $manifest): array {
+        $cursor = is_array($manifest['cursor'] ?? null) ? $manifest['cursor'] : [];
+        unset($manifest['cursor']);
+        foreach ($cursor as $key => $value) {
+            $manifest["cursor.{$key}"] = $value;
+        }
+
+        return $manifest;
+    };
+    [$old, $new] = [$flat($before), $flat($after)];
+
+    return array_values(array_filter(
+        array_unique([...array_keys($old), ...array_keys($new)]),
+        fn ($key) => ($old[$key] ?? null) !== ($new[$key] ?? null),
+    ));
+}
+
+/** The ledger only grows, and what it grew by agrees with the step and its status. */
+function pipeline_ledger_problem(array $old, array $new, LegStatus $status, string $leg, string $step, DesignSize $size): ?string
+{
+    $gate = pipeline_gate_of($leg);
+    $open = $step === 'resolve' ? pipeline_open_entry($old, $gate) : null;
+    $kept = ['gate', 'leg', 'cycle', 'at', 'review'];
+
+    foreach ($old as $index => $entry) {
+        $same = $index === $open
+            ? pipeline_pick($new[$index] ?? [], $kept) === pipeline_pick($entry, $kept)
+            : ($new[$index] ?? null) === $entry;
+        if (! $same) {
+            return "the leg rewrote ledger entry {$index}";
+        }
+    }
+
+    $added = array_slice($new, count($old));
+    $addedTo = fn (string $name) => array_values(array_filter($added, fn ($entry) => ($entry['gate'] ?? null) === $name));
+
+    return match (true) {
+        $status === LegStatus::Halted => null,
+        $status === LegStatus::PlanInsufficient => $size === DesignSize::Bounded
+            && array_filter($addedTo('design-size'), fn ($entry) => ($entry['outcome'] ?? null) === 'escalated') === []
+                ? 'plan-insufficient on a Bounded design needs a new design-size entry with outcome escalated'
+                : null,
+        $step === 'review' => count($addedTo($gate)) === 1 && pipeline_is_open($addedTo($gate)[0])
+            ? null
+            : "the review step must add exactly one open {$gate} entry",
+        $step === 'resolve' => ($new[$open]['outcome'] ?? null) === $status->value
+            ? null
+            : "the resolve step must set the open {$gate} entry's outcome to {$status->value}",
+        $leg === 'verify-ui' => count($addedTo('verify-ui')) === 1 && ($addedTo('verify-ui')[0]['outcome'] ?? null) === $status->value
+            ? null
+            : "the verify-ui step must add one verify-ui entry with outcome {$status->value}",
+        default => null,
+    };
+}
+
+function pipeline_pick(array $entry, array $keys): array
+{
+    return array_map(fn (string $key) => $entry[$key] ?? null, $keys);
+}
+
+function pipeline_route(array $after, string $leg, string $step, array $triggers, DesignSize $size): array
+{
+    $reason = (string) ($after['cursor']['reason'] ?? '');
+
+    return match (LegStatus::from($after['cursor']['status'])) {
+        LegStatus::Halted => pipeline_halt($reason),
+        LegStatus::PlanInsufficient => $size === DesignSize::Bounded
+            ? pipeline_dispatch('design')
+            : pipeline_halt('plan insufficient: ' . ($reason === '' ? 'no reason given' : $reason)),
+        LegStatus::LoopedBack => pipeline_loop_back($after['gate_ledger'] ?? [], $leg),
+        LegStatus::Continued => pipeline_continue($leg, $step, $triggers),
+    };
+}
+
+function pipeline_continue(string $leg, string $step, array $triggers): array
+{
+    if ($step === 'review') {
+        return pipeline_dispatch($leg);
+    }
+    $next = pipeline_next_leg($leg, $triggers);
+
+    return $next === null ? ['action' => 'done'] : pipeline_dispatch($next);
+}
+
+/** The bound is read from the ledger, never from memory (`../references/manifest.md` §gate_ledger). */
+function pipeline_loop_back(array $ledger, string $leg): array
+{
+    $gate = pipeline_gate_of($leg);
+    $entries = array_filter($ledger, fn ($entry) => ($entry['gate'] ?? null) === $gate);
+
+    if (in_array('unknown', array_column($entries, 'cycle'), true)) {
+        return pipeline_halt("{$gate}: the loop-back count is unknown after a reconstruction, so no loop-back is allowed");
+    }
+    $loops = count(array_filter($entries, fn ($entry) => ($entry['outcome'] ?? null) === 'looped-back'));
+    if ($loops > 2) {
+        return pipeline_halt("{$gate}: loop-back bound exhausted, {$loops} loop-backs where 2 are allowed");
+    }
+
+    return pipeline_dispatch(pipeline_loop_target($leg));
+}
+
+function pipeline_dispatch(string $leg): array
+{
+    return ['action' => 'dispatch', 'leg' => $leg];
+}
+
+function pipeline_halt(string $reason): array
+{
+    return ['action' => 'halt', 'reason' => $reason];
+}
