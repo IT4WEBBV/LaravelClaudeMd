@@ -18,9 +18,13 @@ read manifest (or reconstruct it)          # manifest_read / manifest_infer_curs
 ```bash
 CHECKS="$HOME/.claude/skills/pipeline/checks"
 php "$CHECKS/dispatch_cli.php" next <manifest>                        # start or resume
-git -C <worktree> diff origin/<base>...HEAD > "$TMPDIR/pipeline.diff"
-php "$CHECKS/dispatch_cli.php" returned <manifest> "$TMPDIR/pipeline.diff"   # after every return
+git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
+php "$CHECKS/dispatch_cli.php" returned <manifest> "<manifest stem>.diff"   # after every return
 ```
+
+`<manifest stem>` is the manifest path without `.json`: the diff, the brief (`.brief.md`) and the
+dispatch snapshot (`.before.json`) sit next to the manifest, one set per run, so concurrent runs
+never share a diff file, and `.claude/pipeline/` keeps them out of git and out of §Suite reuse's key.
 
 Each prints one JSON line. On `dispatch` or `retry`, pass its `prompt` — one line naming the brief
 file `pipeline_brief()` wrote — to a background agent; when `inline` is true, run the step in this
@@ -212,6 +216,15 @@ It adds `.claude/pipeline/` to the repo's shared `info/exclude`. That file is lo
 shared by every worktree, so the PR diff stays clean. It does nothing when the path is already
 ignored.
 
+**The first `manifest_write` carries everything the dispatcher will never look up.** Kickoff — the
+session that holds the invocation, `/pipeline` itself or `orchestrate` for its runs — writes
+`branch`, `worktree`, `mode`, `cursor: {leg: design, status: pending}`, `light: true` when the
+invocation said `light`, the pointers `artifacts.idea` / `artifacts.issue` when the invocation named
+an idea file or an issue, and `decisions` (verbatim) when settled decisions were stated inline. The
+dispatcher never reads an artifact to recover any of these, so a field kickoff leaves out is simply
+absent from every brief: a `light` run would get an Architectural design brief, and inline decisions
+would never reach a reviewer.
+
 ## Dev-stack readiness — pipeline-owned, no hesitation
 
 Several legs need the worktree's stack: `implement` runs the suite after each step, and
@@ -324,13 +337,13 @@ moves the cursor to `design` (`pipeline_returned()`), whose brief asks for the g
 
 ```bash
 CHECKS="$HOME/.claude/skills/pipeline/checks"
-git diff origin/<base>...HEAD > "$TMPDIR/pipeline.diff"
+git diff origin/<base>...HEAD > "<manifest stem>.diff"
 # triggers.php loads the diff parser itself — do not require it a second time
 php -r 'require $argv[1] . "/triggers.php"; require $argv[1] . "/design_size.php";
         $diff = file_get_contents($argv[2]);
         $size = DesignSize::fromSpec(file_get_contents($argv[3]));
         echo $size->escalation(pipeline_triggers($diff), pipeline_code_lines($diff)) ?? "", "\n";' \
-  "$CHECKS" "$TMPDIR/pipeline.diff" "<spec path>"
+  "$CHECKS" "<manifest stem>.diff" "<spec path>"
 # empty line → stays Bounded; otherwise the printed reason is why it must grow
 ```
 
@@ -692,6 +705,9 @@ Under `auto` these are the only stops. **No finding stops a run.**
   answers `retry` once, then `halt`). → **halt.** `returned` writes the failure to the manifest
   (`cursor.status: halted`, `cursor.reason`); a human resumes. **No silent retry** beyond that one — a retry hides
   the failure and the machinery may be in an unknown state.
+  - **A halted manifest is the one the check rejected.** When the reason names a key the leg was not
+    allowed to change, repair it from `<manifest stem>.before.json`, the snapshot taken at dispatch,
+    before the next `next`; otherwise the run resumes with the leg's change in place.
 - **A Fable usage limit is not a hard failure.** `/critique` moves the reviewer to Opus itself
   (`../../critique/SKILL.md` §Stage 2). That switch is not the single retry above: a reviewer that
   then returns nothing still gets its retry, on Opus. Its record is `/critique`'s one chat line; the

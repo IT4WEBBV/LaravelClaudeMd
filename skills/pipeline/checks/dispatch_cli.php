@@ -33,7 +33,7 @@ function dispatch_cli_emit(string $manifestPath, array $manifest, string $action
 
     manifest_write($manifestPath, $manifest);
     manifest_write($files['before'], $manifest);
-    file_put_contents($files['brief'], pipeline_brief($manifest, $leg));
+    file_put_contents($files['brief'], pipeline_brief($manifest, $leg, $manifestPath));
 
     return [
         'action' => $action,
@@ -57,16 +57,22 @@ function dispatch_cli_next(string $manifestPath): array
     if ($manifest === null) {
         return pipeline_halt("no readable manifest at {$manifestPath}");
     }
+    if (dispatch_cli_finished($manifest)) {
+        return ['action' => 'done'];
+    }
     $missing = manifest_validate($manifest);
     $leg = $manifest['cursor']['leg'] ?? null;
     if ($missing !== [] || ! in_array($leg, pipeline_legs(), true)) {
         return pipeline_halt('the manifest is invalid: ' . ($missing === [] ? 'cursor.leg is not a leg' : 'missing ' . implode(', ', $missing)));
     }
-    if (($manifest['cursor']['status'] ?? null) === 'done') {
-        return ['action' => 'done'];
-    }
 
     return dispatch_cli_emit($manifestPath, [...$manifest, 'cursor' => ['leg' => $leg, 'status' => 'pending']]);
+}
+
+/** Finished: `status: done` as this dispatcher writes it, or the old engine's `leg: done`. */
+function dispatch_cli_finished(array $manifest): bool
+{
+    return ($manifest['cursor']['status'] ?? null) === 'done' || ($manifest['cursor']['leg'] ?? null) === 'done';
 }
 
 function dispatch_cli_returned(string $manifestPath, string $diffPath): array

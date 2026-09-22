@@ -178,7 +178,7 @@ function pipeline_ledger_problem(array $old, array $new, LegStatus $status, stri
 {
     $gate = pipeline_gate_of($leg);
     $open = $step === 'resolve' ? pipeline_open_entry($old, $gate) : null;
-    $kept = ['gate', 'leg', 'cycle', 'at', 'review'];
+    $kept = ['gate', 'leg', 'cycle', 'at', 'review', 'annotations'];
 
     foreach ($old as $index => $entry) {
         $same = $index === $open

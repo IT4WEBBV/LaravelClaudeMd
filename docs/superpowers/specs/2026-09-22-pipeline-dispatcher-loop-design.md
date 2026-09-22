@@ -157,7 +157,7 @@ would halt the run.
    next leg.
 3. No top-level key was added or removed outside that list.
 4. The ledger only grew: every entry in `$before` is still there, unchanged — except that the resolve
-   step completes the open entry, keeping its `gate`, `leg`, `cycle`, `at` and `review`.
+   step completes the open entry, keeping its `gate`, `leg`, `cycle`, `at`, `review` and `annotations`.
 5. `cursor.status` is a `LegStatus`; `halted` carries a non-empty `reason`.
 6. The status agrees with the ledger and the step:
 

@@ -1,7 +1,7 @@
 # Gates — modes, content triggers, and the navigation guardrail
 
-Two kinds of thing shape the chain: **mode-driven station gates** (a human turn, or the engine
-resolving a review itself) and **content triggers** (facts about the diff). The forward-navigation guardrail is
+Two kinds of thing shape the chain: **mode-driven station gates** (a human turn, or a resolve step
+acting on a review) and **content triggers** (facts about the diff). The forward-navigation guardrail is
 a third, separate mechanism — it makes the review *legs* un-skippable *by construction*, not by
 memory, and it reads neither the mode nor anything a review said.
 
@@ -38,7 +38,7 @@ What no mode can do is stop a review *leg* from running — that is the navigati
 
 `pipeline_triggers($diff, $repoPackageName)` returns four booleans —
 `['package' => bool, 'migration' => bool, 'auth' => bool, 'ui' => bool]`. Three annotate; `ui`
-gates the `verify-ui` leg (next section). Detection is unchanged; what the engine *does* with the
+gates the `verify-ui` leg (next section). Detection is unchanged; what a run *does* with the
 first three is what this section revises.
 
 | Trigger | Detection (`pipeline_triggers`) | Effect |
@@ -115,8 +115,8 @@ dispatcher writes but never reads:
 
 ```bash
 CHECKS="$HOME/.claude/skills/pipeline/checks"
-git -C <worktree> diff origin/<base>...HEAD > "$TMPDIR/pipeline.diff"
-php "$CHECKS/dispatch_cli.php" returned <manifest> "$TMPDIR/pipeline.diff"
+git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
+php "$CHECKS/dispatch_cli.php" returned <manifest> "<manifest stem>.diff"
 # → {"action":"dispatch","leg":…,"step":…,"inline":…,"prompt":…} | {"action":"retry",…}
 #   | {"action":"halt","reason":…} | {"action":"done"}
 ```
@@ -128,7 +128,7 @@ case:
 ```bash
 php -r 'require "skills/pipeline/checks/triggers.php";
         echo json_encode(pipeline_triggers(
-          file_get_contents(getenv("TMPDIR") . "/pipeline.diff"),
+          file_get_contents("<manifest stem>.diff"),
           json_decode(file_get_contents("composer.json"), true)["name"] ?? null
         )), "\n";'
 # → {"package":…,"migration":…,"auth":…,"ui":…}

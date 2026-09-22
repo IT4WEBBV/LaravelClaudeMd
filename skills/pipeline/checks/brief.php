@@ -48,7 +48,7 @@ function pipeline_leg_overrides(): array
             'Append the thin `verify-ui` entry with outcome `continued`, or `looped-back` when the check fails.',
         ],
         'review-pr:review' => [
-            'Invoke `/critique pr`, stating the suite line above and the mechanical-check result qualified by its scope (engine.md §Mechanical checks).',
+            'Invoke `/critique pr`, stating the suite line above. When the repo declares a `## Checks` block, run its checks first and state their result qualified by its scope (engine.md §Mechanical checks); a repo that declares none says nothing about checks.',
             'Append its review verbatim as a new `pr-review` ledger entry with `gate`, `leg`, `cycle`, `at`, `review` and `annotations`, and no `outcome`.',
             'Act on nothing. Read-only on the checkout; the manifest is the only file you write.',
         ],
@@ -59,28 +59,23 @@ function pipeline_leg_overrides(): array
             'Run the suite unless engine.md §Suite reuse finds this tree green; record `suite`.',
             'Reconcile the closing links (engine.md §Closing links) and write `issue_links` on the entry.',
             'When `artifacts.proof` is set, rewrite the proof page with the final open questions and ledger.',
-            'Run `gh pr ready`. The last action is `proof_cli.php open` on `artifacts.proof` (engine.md §The proof store).',
             $completeEntry,
+            'Run `gh pr ready`. The last action is `proof_cli.php open` on `artifacts.proof` (engine.md §The proof store).',
         ],
     ];
 }
 
-function pipeline_brief(array $manifest, string $leg): string
+function pipeline_brief(array $manifest, string $leg, string $manifestPath): string
 {
     $step = pipeline_step($manifest, $leg);
 
     return implode("\n\n", [
         pipeline_brief_role($manifest, $leg, $step),
-        pipeline_brief_pointers($manifest, $leg, $step),
+        pipeline_brief_pointers($manifest, $manifestPath, $leg, $step),
         pipeline_brief_state($manifest, $leg),
         pipeline_brief_overrides($manifest, $leg, $step),
         pipeline_brief_return($leg, $step),
     ]) . "\n";
-}
-
-function pipeline_manifest_path(array $manifest): string
-{
-    return rtrim($manifest['worktree'], '/') . '/.claude/pipeline/' . str_replace('/', '-', $manifest['branch']) . '.json';
 }
 
 function pipeline_brief_role(array $manifest, string $leg, string $step): string
@@ -91,10 +86,10 @@ function pipeline_brief_role(array $manifest, string $leg, string $step): string
         . 'The engine.md sections this brief names are in `~/.claude/skills/pipeline/references/engine.md`.';
 }
 
-function pipeline_brief_pointers(array $manifest, string $leg, string $step): string
+function pipeline_brief_pointers(array $manifest, string $manifestPath, string $leg, string $step): string
 {
     $ledger = $manifest['gate_ledger'] ?? [];
-    $lines = ['- manifest: `' . pipeline_manifest_path($manifest) . '`'];
+    $lines = ["- manifest: `{$manifestPath}`"];
 
     foreach ($manifest['artifacts'] ?? [] as $name => $value) {
         if ($value !== null && $value !== '') {

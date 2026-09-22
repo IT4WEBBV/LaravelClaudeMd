@@ -181,7 +181,7 @@ issue" for work that has one. So a reconstruction that can find no issue says **
 none — and `review-pr` then reports the reconciliation as not performed rather than as clean.
 
 **One field does not reconstruct, and it fails closed.** The `gate_ledger`'s loop-cycle count has
-no durable source — git and gh record *that* a review happened, not how many times the engine
+no durable source — git and gh record *that* a review happened, not how many times the run
 looped back — and the plan↔review loop runs entirely **before** `handoff`, so there is not even a
 PR to have projected it onto. A reconstructed run therefore treats the count as **unknown**, not
 zero, and an unknown count permits **no** further loop-back: the next one halts (`engine.md`

@@ -146,6 +146,15 @@ it('tolerates a leg that reorders keys or drops cursor.retried', function () use
         ->toBe(['action' => 'dispatch', 'leg' => 'review-plan']);
 });
 
+it('halts when a resolve step rewrites the annotations the review step recorded', function () use ($noUi, $open) {
+    $annotated = [...$open, 'annotations' => ['migration']];
+    $before = returned_before('review-plan', [$annotated]);
+    $decision = pipeline_returned($before, returned_after($before, 'continued', [[...$annotated, 'annotations' => [], 'outcome' => 'continued']]), $noUi, DesignSize::Architectural);
+
+    expect($decision['action'])->toBe('halt');
+    expect($decision['reason'])->toContain('ledger entry 0');
+});
+
 it('halts when a resolve step sets an outcome other than its status', function () use ($noUi, $open) {
     $before = returned_before('review-plan', [$open]);
     $decision = pipeline_returned($before, returned_after($before, 'continued', [[...$open, 'outcome' => 'looped-back']]), $noUi, DesignSize::Architectural);

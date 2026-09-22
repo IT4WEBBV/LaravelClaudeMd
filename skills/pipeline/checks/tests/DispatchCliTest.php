@@ -128,6 +128,23 @@ it('records a finished run as done and does not re-dispatch it', function () {
     expect(dispatch_cli(['next', $fixture['manifest']])['json'])->toBe(['action' => 'done']);
 });
 
+it('answers done for a run the old engine finished', function (string $status) {
+    $fixture = dispatch_fixture(['cursor' => ['leg' => 'done', 'status' => $status]]);
+
+    expect(dispatch_cli(['next', $fixture['manifest']])['json'])->toBe(['action' => 'done']);
+})->with(['done', 'complete']);
+
+it('briefs the leg with the manifest path it was given, nested or flat', function () {
+    $fixture = dispatch_fixture();
+    $nested = $fixture['dir'] . '/.claude/pipeline/feature/x.json';
+    mkdir(dirname($nested), 0777, true);
+    rename($fixture['manifest'], $nested);
+
+    dispatch_cli(['next', $nested]);
+
+    expect(file_get_contents($fixture['dir'] . '/.claude/pipeline/feature/x.brief.md'))->toContain("- manifest: `{$nested}`");
+});
+
 it('refuses a manifest it cannot read, and a bad command', function () {
     expect(dispatch_cli(['next', '/nonexistent/manifest.json'])['json']['action'])->toBe('halt');
     expect(dispatch_cli(['sideways'])['code'])->toBe(1);
