@@ -12,9 +12,12 @@ one to the next so the review gates become un-skippable **by construction** rath
 memory. It is the *spine*, not better station logic — each station already owns its own quality
 (`brainstorming`, `writing-plans`, `/critique`, `handoff`, `work-on`, `browser-verification`).
 
-Core principle: **read the manifest → pick the next leg → run it → write the manifest → stop or
-continue.** No long-lived brain; a lost run reconstructs from git + gh. See the references before
-driving a run — the enforcement lives there, not in this summary:
+Core principle: **a dispatcher that only loops** — read the manifest, ask `dispatch_cli.php` for the
+next step, dispatch it as a fresh agent with the brief `pipeline_brief()` generated, and let the same
+command validate what came back. The dispatcher never reads artifacts, reviews, diffs or test output,
+never edits and never runs the suite; review fixes and finishing the PR belong to fresh resolve
+agents. No long-lived brain; a lost run reconstructs from git + gh. See the references before driving
+a run — the enforcement lives there, not in this summary:
 
 - **`references/engine.md`** — the loop, the work item, kickoff/worktree, dev-stack readiness, the
   per-station briefs, failure policy, navigation. **Read this first.**
@@ -33,6 +36,10 @@ driving a run — the enforcement lives there, not in this summary:
   (`references/engine.md` §The proof store). The finished page **opens in the browser once**, as the
   run's last action; `PIPELINE_NO_OPEN=1` suppresses that for headless and unattended runs.
   Backend-only runs have no page and are unaffected.
+- **The 150k invariant** — `/pipeline auto` runs the dispatcher as one background agent; after its
+  completion notice, the invoking session runs `php checks/engine_peak_cli.php <its agent id>` and
+  reports the line. Over 150k peak context is an annotation, never a halt
+  (`references/engine.md` §The dispatcher).
 
 The deterministic guardrails are tested PHP in `checks/` (run
 `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`).

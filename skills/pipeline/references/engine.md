@@ -7,26 +7,78 @@ are `gates.md`. This file is the operational procedure.
 ## The loop
 
 ```
-read manifest (or reconstruct it)         # manifest_read / manifest_infer_cursor
-  → run the invariant check                # recorded artifact at recorded ref; PR as expected
-  → pick the next leg                       # pipeline_next_leg(cursor, triggers)
-  → run the leg                             # autonomous (subagent) or interactive (stop)
-  → write the manifest                      # manifest_write
-  → stop or continue                        # per mode / gate policy
+read manifest (or reconstruct it)          # manifest_read / manifest_infer_cursor
+  → invariant check                         # recorded artifact at last_sha; PR as expected
+  → dispatch_cli.php next                   # brief + snapshot → one dispatch line
+  → dispatch the step                       # a fresh background agent; wait for its completion notice
+  → dispatch_cli.php returned               # validate the manifest, route, write it
+  → dispatch | retry | halt | done
 ```
+
+```bash
+CHECKS="$HOME/.claude/skills/pipeline/checks"
+php "$CHECKS/dispatch_cli.php" next <manifest>                        # start or resume
+git -C <worktree> diff origin/<base>...HEAD > "$TMPDIR/pipeline.diff"
+php "$CHECKS/dispatch_cli.php" returned <manifest> "$TMPDIR/pipeline.diff"   # after every return
+```
+
+Each prints one JSON line. On `dispatch` or `retry`, pass its `prompt` — one line naming the brief
+file `pipeline_brief()` wrote — to a background agent; when `inline` is true, run the step in this
+session instead (§Interactive). On `halt`, stop (§Failure policy). On `done`, return.
+
+**Wait for the completion notice.** No `sleep`, `date`, file-mtime or `ListAgents` polling while a
+step runs.
 
 **Control rule — the whole model, and it fails closed:**
 
-- **Autonomous leg** → dispatched as a **fresh subagent** briefed from the manifest, which
-  **returns a structured result to the loop**. A subagent returns to its caller, so the loop
-  reliably advances and writes the manifest.
-- **Interactive leg** → the pipeline **stops** and runs the station inline for the present human,
-  then is **re-invoked** to continue (in a live session by saying so — see *Navigation*; after a
-  `/clear`, by `/pipeline`, which reads the branch's manifest and resumes).
-- **Auto-continuation ("run through") spans only autonomous legs.** The loop never tries to
-  "become a skill inline and then regain control": a skill that tail-calls its successor (as
-  `brainstorming` invokes `writing-plans`) would never return, so an inline auto-continuation
-  would silently walk past the next gate. A lost leg **halts the chain; it never skips a gate.**
+- **Every step is a fresh agent** briefed by `pipeline_brief($manifest, $leg)`
+  (`../checks/brief.php`). It writes its results and a status into the manifest (`manifest.md`
+  §What a leg writes) and replies with one line. The dispatcher never reads that reply for content:
+  `returned` compares the manifest with the snapshot taken at dispatch and **halts** on anything it
+  cannot account for.
+- **Legs never pick the next leg and never write a brief.** `pipeline_returned()`
+  (`../checks/dispatch.php`) routes: `continued` → the next step or leg (`pipeline_next_leg`),
+  `looped-back` → `gates.md` §Loop-backs within the bound, `halted` → stop, `plan-insufficient` →
+  grow a Bounded design or halt an Architectural one.
+- **Auto-continuation spans only dispatched steps.** The loop never tries to "become a skill inline
+  and then regain control": a skill that tail-calls its successor (as `brainstorming` invokes
+  `writing-plans`) would never return, so an inline auto-continuation would silently walk past the
+  next gate. A lost step **halts the chain; it never skips a gate.**
+
+## The dispatcher — what it does, and never does
+
+`/pipeline auto` runs the loop in **one background agent, the dispatcher**, launched by the invoking
+session (the main session or `orchestrate`). Its steps are depth 2; `/critique`'s reviewer and the
+independent read are depth 3.
+
+**It keeps:** kickoff (§The work item, §Kickoff, the manifest exclusion, writing `decisions` and
+`light` from the invocation), the invariant check (`manifest.md`), `dispatch_cli.php` (which holds
+`manifest_validate`, `manifest_write`, `pipeline_next_leg`, the loop bound and the return checks),
+navigation through `pipeline_can_navigate`, and the halts (§Failure policy).
+
+**It never** reads an artifact, a review, a diff or test output; never edits; never runs the suite.
+Diffs go to a file that only `dispatch_cli.php` reads. Of this document it needs only §The loop, this
+section, §The work item, §Kickoff, §Failure policy and §Navigation; each step's brief names the
+sections that step needs.
+
+**Its peak context stays under 150k per run.** After the dispatcher's completion notice, the invoking
+session runs
+
+```bash
+php ~/.claude/skills/pipeline/checks/engine_peak_cli.php <the dispatcher's agent id>
+```
+
+and reports its line with the run's result. Over 150k is an **annotation, never a halt**. Baseline
+before this design: median peak 253k; engines 18.1 percent of all usage since 2026-09-14.
+
+## Interactive — the same loop, the human resolves
+
+`interactive` runs the same `next` / `returned` pair. `inline` is true for `design` (the human drives
+the brainstorm) and for every `resolve` step: the session shows the review from the open ledger entry,
+the human decides, the session carries that out — on `review-pr` including the finish work below —
+completes the entry with the human's `actions` and `outcome`, and runs `returned`. Every other step is
+dispatched as in `auto`. After each step the session stops and continues when the human says so
+(§Navigation), as `interactive` always has.
 
 ## The work item — resolved before anything is created
 
@@ -163,11 +215,11 @@ ignored.
 ## Dev-stack readiness — pipeline-owned, no hesitation
 
 Several legs need the worktree's stack: `implement` runs the suite after each step, and
-`verify-ui` drives a real browser. **Before the first such leg (`implement`), the pipeline brings
-the stack up itself, without asking** (`restart.sh`; non-destructive) and leaves it running
-afterwards. Starting the stack is a routine owned action, never a "shall I start docker?" prompt
-— `work-on` deliberately leaves stack *timing* to its caller, and under the pipeline the pipeline
-*is* that caller. This is the house preference [[docker-stack-no-hesitation]]. If the stack
+`verify-ui` drives a real browser. **The `implement` step brings the stack up itself, first thing,
+without asking** (its brief says so; `verify-ui` does the same if it is down) (`restart.sh`;
+non-destructive) and leaves it running afterwards. Starting the stack is a routine owned action,
+never a "shall I start docker?" prompt — `work-on` deliberately leaves stack *timing* to its caller,
+and under the pipeline the step's brief *is* that caller. This is the house preference [[docker-stack-no-hesitation]]. If the stack
 genuinely cannot start, that is a **hard failure** (below), not a reason to hesitate.
 
 *Worktree now, stack later:* creating the worktree is cheap (git); the stack starts lazily, only
@@ -181,11 +233,11 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 | Leg | Invokes | Interactive form | Autonomous form | Manifest I/O |
 |---|---|---|---|---|
 | **design** *(compound)* | `superpowers:brainstorming`, then `superpowers:writing-plans` for an **Architectural** design (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it); for a **Bounded** design, brainstorming's Bounded path with no `writing-plans` (§Design size) | human drives the brainstorm dialogue; if brainstorming classifies Bounded without `light`, the pipeline asks (§Design size); re-invoke `/pipeline` to continue | a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions. The brief says which path is permitted: Bounded only with `light`, otherwise Architectural | writes spec + plan pointers; the size is the spec's `**Design size:**` header, never stored |
-| **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | read-only reviewer subagent writes a review; the engine reads it and acts (§`auto`) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
+| **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | two steps (`pipeline_step`): a **review** agent invokes `/critique plan` and appends the review verbatim as an open `plan-approval` entry; a fresh **resolve** agent acts on it (§`auto`) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth. References the issue **without a closing keyword** (§Closing links) — this PR carries no implementation yet | writes the PR# pointer |
-| **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links (§Closing links — `review-pr` reconciles them before the PR goes ready). **Leaves the PR draft** (below) | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
+| **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links (§Closing links — `review-pr` reconciles them before the PR goes ready). **Leaves the PR draft** (below). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, writes the run's page to the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — the payload carries `nameWithOwner`, `pr` and `issue` so the page can link back to both — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
-| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | read-only reviewer subagent writes a review; the engine reads it and acts (§`auto`). The second write is a full payload, not a patch — `proof_cli.php write` always replaces the page, and `proof_write_run()` preserves `createdAt` across it. Its **last action** is `checks/proof_cli.php open <page>` (§The proof store). Reconciles the closing links **before** `gh pr ready` (§Closing links). | feeds the PR-review gate; writes `issue_links` onto the entry; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
+| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | a **review** agent invokes `/critique pr` and appends an open `pr-review` entry; the **finish** step (its resolve step) acts on it, runs the suite unless reused, reconciles closing links (§Closing links), rewrites the proof page, runs `gh pr ready`, and opens the page last (§The proof store) | feeds the PR-review gate; writes `issue_links` onto the entry; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
 
 ## Design size — Bounded or Architectural
 
@@ -263,9 +315,12 @@ the code they name.
 
 ### Escalation — the design grows, one way
 
-**When to check.** Only while the spec says Bounded:
+**When to check.** Only while the spec says Bounded, by the step itself — its brief says so:
 - after every commit in `implement`, and
-- at the start of every later leg.
+- first thing in every later step.
+
+On escalation the step appends the `design-size` entry and returns `plan-insufficient`; the dispatcher
+moves the cursor to `design` (`pipeline_returned()`), whose brief asks for the grow form.
 
 ```bash
 CHECKS="$HOME/.claude/skills/pipeline/checks"
@@ -292,7 +347,7 @@ php -r 'require $argv[1] . "/triggers.php"; require $argv[1] . "/design_size.php
 
 **On escalation, grow the design; do not re-design it.**
 1. Append a ledger entry: `{gate: 'design-size', leg: <current leg>, at, reason, outcome: 'escalated'}`.
-2. Move the cursor back to `design`; backward navigation is always allowed. In grow form:
+2. The dispatcher moves the cursor back to `design`; backward navigation is always allowed. In grow form:
    - change the spec header to `**Design size:** Architectural`;
    - add a `## Grown from Bounded` section: what changed, why it grew, what already exists (described
      as state, not re-designed), what remains;
@@ -356,12 +411,12 @@ failing to *file* it logs and continues. The engine never reads the store to dec
 deleting all of `_proofs/` changes no run's behaviour, which is what keeps a durable store
 compatible with the non-goal "no persistent state not reconstructable from git + gh".
 
-**The finished page opens itself — once, at the end.** `review-pr`'s last action, after its final
+**The finished page opens itself — once, at the end.** The finish step's last action, after its final
 `write`, is `php checks/proof_cli.php open <page>`, passing the path that `write` printed on stdout.
 `write` runs at least twice per run — `verify-ui` builds the page, `review-pr` finalises it — so
 opening from `write` would open the same page two or more times; a separate subcommand invoked once,
 at completion, is the only shape that opens once. A run that **halts** after the page exists opens it
-on the same rule, because a halted run is exactly the one a human is about to go looking at: one
+on the same rule: the dispatcher runs `proof_cli.php open <artifacts.proof>` when that pointer is set, because a halted run is exactly the one a human is about to go looking at: one
 `open`, at whatever turns out to be the run's last action.
 
 **A run with no page opens nothing.** A backend-only run never triggers `ui`, so `verify-ui` never
@@ -388,7 +443,7 @@ than one who closes a tab. The unattended batch that produces the burst is preci
 
 ## Who takes the PR out of draft — `review-pr`, never `implement`
 
-`handoff` opens the PR **draft** and it stays draft until **`review-pr` has passed**. `implement`
+`handoff` opens the PR **draft** and it stays draft until **`review-pr`'s finish step**. `implement`
 does not run `gh pr ready`, and neither does `verify-ui`.
 
 This is not a preference; it is the same guarantee the navigation guardrail makes. `gates.md` states
@@ -401,8 +456,9 @@ is exactly the outcome the guardrail exists to prevent.
 of its run, and that is correct *standalone* — nothing follows it there. Under the pipeline something
 does. The same applies to the prompt `handoff pr` writes into the PR comment: its template ends with
 *"implementation fully done → take the PR out of draft"*, which is right for a human resuming the work
-alone and **wrong** under the pipeline. When dispatching `implement`, say **"leave the PR draft; this
-overrides any mark-ready instruction in the plan, the PR comment, or `work-on`'s own logic."**
+alone and **wrong** under the pipeline. The `implement` brief carries it verbatim
+(`pipeline_leg_overrides()`): **"Leave the PR draft; this overrides any mark-ready instruction in the
+plan, the PR comment, or `work-on`'s own logic."**
 
 A cold-resume session that picks the PR up from its comment is outside the loop, so nothing mechanical
 can stop it undrafting early — the instruction in the brief is the only control. Keep it there.
@@ -426,7 +482,7 @@ preference: it is the same defect `/critique pr`'s own rubric names, *a PR with 
 plan that closes the issue on merge while nothing is built*, and a run should not hand its reviewer
 a finding it created itself.
 
-**At `review-pr`, before `gh pr ready`, reconcile — this is the last moment it can be settled.**
+**At `review-pr`'s finish step, before `gh pr ready`, reconcile — this is the last moment it can be settled.**
 
 1. **Read what will close:**
    ```bash
@@ -451,7 +507,7 @@ a finding it created itself.
    (`manifest.md`) and in the PR body: *closes on merge* / *stays open (still TODO: …)* /
    *deliberately dropped — closes anyway*.
 
-**A mismatch is corrected, not escalated.** The engine knows what it built — that is the one
+**A mismatch is corrected, not escalated.** The finish step can see what the run built — that is the one
 judgment it is best placed to make — so this never interrupts a run in either mode. What it must
 never do is leave the outcome implicit: an issue that closes by accident and an issue that closes
 by decision are indistinguishable after the merge, which is the whole reason this step is written
@@ -463,16 +519,22 @@ reconciliation ran there and produced an answer, so it is reported like any othe
 
 ## What a leg brief consists of
 
-Every dispatched leg gets a brief, from the engine or from a coordinator running several pipelines.
-A brief consists of:
+Every brief is generated by `pipeline_brief($manifest, $leg)` (`../checks/brief.php`); nobody writes
+one by hand — not the dispatcher, not a leg, not a coordinator. The dispatcher's prompt is one line
+naming the brief file. A brief consists of:
 
-- **pointers** to the artifacts: spec, plan, PR, issue;
-- **the settled decisions** and the manifest state the leg needs, including §Suite reuse's last
-  green tree;
-- **the overrides this file prescribes for that leg**, e.g. *"leave the PR draft"* (§Who takes the PR
-  out of draft) or the permitted design size (§Design size);
-- **nothing a station does not ask for.** No test policy, proof format or process of the brief
-  writer's own invention.
+- **pointers** to the artifacts (idea, spec, plan, PR, issue, proof page), the manifest, and — on a
+  resolve step or after a loop-back — the ledger entry to act on, by index;
+- **the settled decisions** (`decisions`) and the manifest state the step needs, including §Suite
+  reuse's last suite tree and the permitted design size on `design`;
+- **the overrides for that leg and step** from `pipeline_leg_overrides()`, pointing at the section of
+  this file that holds each rule, e.g. *"leave the PR draft"* (§Who takes the PR out of draft);
+- **the return contract**: which keys the step may write and which statuses it may return;
+- **nothing a station does not ask for.** No test policy, proof format or process of anyone's own
+  invention.
+
+**A review step's brief is crafted context** (`../../critique/SKILL.md` §Reviewer contract): pointers,
+decisions and overrides — never an earlier review, an earlier action, or another step's output.
 
 **Plans and specs committed before 2026-09-14 are not exemplars** for test or proof policy. Many carry
 the rules below, and a design subagent that reads them as examples copies the rules forward.
@@ -541,7 +603,7 @@ command) and the suppression count (grep-able from the diff) are recomputable, a
 explicit that storing a recomputable field is a latent drift bug. Nothing about checks enters the
 manifest.
 
-**Into `review-pr`.** The brief states the result **qualified by the analysed scope** — "0 new
+**Into `review-pr`.** The review step states the result, in its `/critique pr` invocation, **qualified by the analysed scope** — "0 new
 findings over `app/`", never an unqualified "0 new findings", since the declared scope does not cover
 `database/`, `routes/`, `config/` or `tests/`. Any suppressions added during the run are listed and
 flagged as **not yet judged**, so one cannot enter reading as already resolved.
@@ -571,58 +633,64 @@ php -r 'require $argv[1] . "/suite.php";
   content that was already tested keeps the key, so a run before `git commit` counts for the commit.
 - **Record.** After every full run, write `suite: {tree, outcome, passed, failed, at}` to the
   manifest. Only `green` is ever reused.
-- **The reviewer is told.** The `review-pr` brief states *"full suite green over tree `<tree>` at
+- **The reviewer is told.** `pipeline_brief()` states, from the manifest, *"full suite green over tree `<tree>` at
   `<sha>`: N passed"*. Whether to re-run stays the reviewer's call.
 - **No baseline.** No suite runs before the change. A red full suite is a failing step, fixed and
   bounded like any other.
-  - When the engine believes a failure predates the change, that is a **machinery failure → halt**
+  - When the leg believes a failure predates the change, that is a **machinery failure → halt**
     with the evidence (§Failure policy), never an annotation.
   - Never switch the run's worktree to the base commit to compare: under a running stack that
     desyncs vendor, migrations and assets, and a wrong red would be filed as pre-existing.
 - **Failure to compute the key** (`pipeline_git` throws) is a machinery failure. Run the suite; never
   assume reuse.
 
-## `auto` — the engine resolves the review itself
+## `auto` — a fresh agent resolves the review
 
-`interactive` stops at every gate: the human reads the review and decides, and none of this section
-runs. Everything below is the `auto` path.
+`interactive` gives every resolve step to the human (§Interactive). Everything below is the `auto`
+resolve step.
 
-**A review is prose, not a verdict.** `/critique` returns the review it wrote — no severity
-ranking, no verdict enum, no structured block (`../../critique/SKILL.md`). The engine reads it the
-way a person would and acts on its own judgment. The risk position behind that: the pipeline never
-merges, so every output is a PR read before merge and the worst case is a discarded branch, while a
-needless interrupt costs the one thing `auto` exists to protect.
+**A review is prose, not a verdict.** `/critique` returns the review it wrote — no severity ranking,
+no verdict enum, no structured block (`../../critique/SKILL.md`). The review step stores it verbatim in
+the open ledger entry; the resolve step reads it the way a person would and acts on its own judgment.
+The risk position behind that: the pipeline never merges, so every output is a PR read before merge
+and the worst case is a discarded branch, while a needless interrupt costs the one thing `auto` exists
+to protect.
 
-**What the engine does with a review:**
+**What the resolve step does with a review** — and its brief says so:
 
-- **Act on what is worth acting on — yourself.** Apply the fixes to the spec, the plan or the code
-  and commit them **in the engine session**. Edits to documents the engine already holds, and small
-  code fixes, never get a subagent of their own: a fresh agent must first re-read what the engine
-  already has. Rework — a review saying the work is fundamentally wrong — is not an edit; it loops
-  back (next bullet). Record the rest — already-mitigated observations, notes for posterity — without
-  an edit.
+- **Act on what is worth acting on.** Edits to the spec, the plan or the code, and small code fixes,
+  are integrated and committed by the resolve step. Rework — a review saying the work is
+  fundamentally wrong — is not an edit; it loops back (next bullet). Record the rest —
+  already-mitigated observations, notes for posterity — without an edit. **Change nothing the review
+  did not name.**
 - **Loop back** where the review says the work is fundamentally wrong: `review-plan` → `design`,
-  `verify-ui` → `implement`, `review-pr` → `implement`. Bounded (§Failure policy).
+  `verify-ui` → `implement`, `review-pr` → `implement` (`gates.md` §Loop-backs). Bounded (§Failure
+  policy).
 - **Never interrupt on a finding.** Anything unresolved goes into the PR body as an open question,
   carried **verbatim**. Ambiguity buys a line in the PR, not an interrupt.
-- **Log** the review, the actions taken and the outcome to the manifest's `gate_ledger`
-  (`manifest.md`), projected onto the PR. *Overruling a reviewer is fine; overruling one invisibly
-  is what turns a gate into decoration.*
+- **Log** the actions and the outcome on the open entry (`manifest.md`), projected onto the PR.
+  *Overruling a reviewer is fine; overruling one invisibly is what turns a gate into decoration.*
 
-**An independent read is available, and is not a routing rule.** At `review-plan` the engine is
-judging a critique of a plan it just wrote — the self-review bias `/critique` exists as a separate
-agent to avoid. So where acting on a point is expensive and the engine doubts it, dispatch a
-**fresh subagent that never saw the design leg**, give it the point plus the code, and ask it to
-refute the claim citing `file:line`. That is judgment exercised where it pays, not a mandatory step
-with an outcome enum — and it cannot stop the run; it only informs what the engine does next.
+**Why a fresh agent, not the dispatcher.** The rule this replaces kept review fixes inside the
+engine because a fresh agent must first re-read what the engine held (spec 2026-09-14 §5, n=2). The
+2026-09-22 audit measured the other side: in-engine review-fix phases cost a median 0.92M weighted
+tokens at 250k+ context, against about 0.4–0.5M for a fresh agent doing the same work.
+
+**An independent read is available, and is not a routing rule.** At `review-plan` the resolve step is
+judging a critique of a plan another agent wrote, with the author's framing in the spec. So where
+acting on a point is expensive and the resolve step doubts it, it dispatches a **fresh agent that never
+saw the design leg**, gives it the point plus the code, and asks it to refute the claim citing
+`file:line`. That is judgment exercised where it pays, not a mandatory step with an outcome enum — and
+it cannot stop the run; it only informs what the resolve step does next.
 
 ## Failure policy — what still stops
 
 Under `auto` these are the only stops. **No finding stops a run.**
 
 - **Hard failure** — a station errors: tests won't go green, a tool dies, the stack won't start,
-  `work-on` hits a blocker, or the reviewer returns nothing after a single retry. → **halt.** Write
-  the failure to the manifest; a human resumes. **No silent retry** beyond that one — a retry hides
+  `work-on` hits a blocker, or a review step returns nothing after a single retry (`dispatch_cli.php`
+  answers `retry` once, then `halt`). → **halt.** `returned` writes the failure to the manifest
+  (`cursor.status: halted`, `cursor.reason`); a human resumes. **No silent retry** beyond that one — a retry hides
   the failure and the machinery may be in an unknown state.
 - **A Fable usage limit is not a hard failure.** `/critique` moves the reviewer to Opus itself
   (`../../critique/SKILL.md` §Stage 2). That switch is not the single retry above: a reviewer that
@@ -642,9 +710,12 @@ Under `auto` these are the only stops. **No finding stops a run.**
   - **Before `handoff`** (`review-plan`) → **no branch push, no draft PR.** Twice-rejected work is
     not worth a PR round-trip; the human reads it live.
   - **After `handoff`** (`verify-ui`, `review-pr`) → the draft PR already exists, so there is
-    nothing to not-push. Leave it **draft**, write the reason into the PR body, stop.
-  - Record `outcome: halted`.
-  - Count the cycles as the number of that gate's `gate_ledger` entries whose `outcome` is
+    nothing to not-push. Leave it **draft**, append the reason to the PR body without reading it
+    (`gh pr view <pr> --json body --jq .body > "$TMPDIR/body.md"`, append the reason,
+    `gh pr edit <pr> --body-file "$TMPDIR/body.md"`), stop.
+  - The entry is not marked halted: the resolve step records `outcome: looped-back` as it returns,
+    and the dispatcher halts through the cursor (`cursor.status: halted`, `cursor.reason`).
+  - `pipeline_returned()` does the counting: count the cycles as the number of that gate's `gate_ledger` entries whose `outcome` is
     **`looped-back`** (`manifest.md`) — not its entries in total, which also include human-ordered
     re-reviews and would over-count into a spurious stop — and never from an in-memory counter.
   - **A count that cannot be read is not a count of zero.** The ledger lives in the disposable
@@ -658,6 +729,9 @@ Under `auto` these are the only stops. **No finding stops a run.**
 - **Mechanical-check exhaustion** (§Mechanical checks) — a check failure that survives its 2 fix
   attempts, or more than two `@phpstan-ignore` suppressions in one run → **the same
   bound-exhaustion halt.**
+- **A return the dispatcher cannot account for** — a moved cursor, a key only the dispatcher writes,
+  a rewritten ledger entry, a status the ledger does not support (`manifest.md` §What a leg writes) →
+  **halt**, with `returned`'s reason.
 - **Playwright genuinely unavailable** → **halt.** No visual claim without proof.
 
 In `interactive` mode every gate stops anyway, so the human sees the review and none of the `auto`

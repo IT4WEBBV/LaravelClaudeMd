@@ -19,7 +19,7 @@ not value, so a manifest with a mangled `mode` must still fail safe.
 | Mode | Behaviour |
 |---|---|
 | **`interactive`** *(default)* | you are present; run one leg, show you the review, wait. Every point in it is yours to judge. Advance by saying so (see navigation). |
-| **`auto`** | run the autonomous legs unattended. The reviews still run; the engine reads them and acts, looping back where the work is wrong and never interrupting on a finding (`engine.md` §`auto`). Hard failures and bound exhaustion still stop. |
+| **`auto`** | run the autonomous legs unattended. The reviews still run; a fresh resolve step reads each and acts, looping back where the work is wrong and never interrupting on a finding (`engine.md` §`auto`). Hard failures and bound exhaustion still stop. |
 
 There is no third mode and no per-gate override — both gates behave the same way within a mode.
 The **report-only override** that once existed (`auto` with `plan-approval` flipped to `report` in
@@ -46,7 +46,7 @@ first three is what this section revises.
 | touches an `it4web/*` package | `$repoPackageName` starts `it4web/` (the change is *in* a package repo), **or** an added `composer.json` line names an `it4web/*` constraint | annotation |
 | writes a DB migration | an added/changed file path matches `database/migrations/…\.php` | annotation |
 | touches authorization | an added line matches `authorize(` / `Gate::` / `Policy` / `can:` / `->can(` / `middleware('can:` | annotation |
-| the project-vs-package call | **none mechanical** — a `/critique plan` judgment, made in prose (the `plan` rubric asks for it) | the engine acts on it like any other part of the review (`engine.md` §`auto`) |
+| the project-vs-package call | **none mechanical** — a `/critique plan` judgment, made in prose (the `plan` rubric asks for it) | the resolve step acts on it like any other part of the review (`engine.md` §`auto`) |
 
 **On a Bounded design, `migration` and `auth` escalate** instead of only annotating: the design grows
 to Architectural and is re-reviewed (`engine.md` §Design size). The auth match ignores comment and

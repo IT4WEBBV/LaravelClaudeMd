@@ -16,11 +16,11 @@ Read/written by the Phase A helpers in `../checks/manifest.php`:
 | `branch` | **required** | run identity (also the manifest filename) |
 | `worktree` | **required** | absolute path of the run's worktree — where every leg operates |
 | `mode` | **required** | `interactive` or `auto` |
-| `cursor` | **required** | `{leg, status, reason?, retried?}` — the current leg; `status` is `pending` (set by the dispatcher) or the status the leg returned; `reason` only with `halted`; `retried` only after a review step's single retry |
+| `cursor` | **required** | `{leg, status, reason?, retried?}` — the current leg; `status` is `pending` (set by the dispatcher), the status the leg returned, or `done` (set by the dispatcher on a finished run; `next` then answers `done` and dispatches nothing); `reason` only with `halted`; `retried` only after a review step's single retry |
 | `pipeline_id` | optional | stable id alongside `branch` |
 | `artifacts` | optional | pointers: idea, spec path, plan path, PR number, issue number (`engine.md` §The work item), `proof` — the proof page `verify-ui` wrote |
 | `last_sha` | optional | HEAD at the last completed leg |
-| `gate_ledger` | optional | the audit trail — each gate's review, what the engine or the human did about it, and the content-trigger annotations (shape below) |
+| `gate_ledger` | optional | the audit trail — each gate's review, what the resolve step or the human did about it, and the content-trigger annotations (shape below) |
 | `lease` | optional | session id + timestamp (single-driver guard) |
 | `suite` | optional | the last full suite: `{tree, outcome: green\|red, passed, failed, at}` — see *Two rules* for why a recomputable field is stored |
 | `decisions` | optional | the settled decisions from the invocation, verbatim, as a list. Every brief carries them (`engine.md` §What a leg brief consists of) |
@@ -47,7 +47,7 @@ in lock-step: the four required rows above are exactly the four keys the functio
 
 ## `gate_ledger` — the audit trail that keeps a gate from being decoration
 
-Under `auto` the engine overrules reviewers routinely (`engine.md` §`auto`). That is fine; doing it
+Under `auto` the resolve step overrules reviewers routinely (`engine.md` §`auto`). That is fine; doing it
 *invisibly* is not. So each pass through a gate appends one entry, and the entry is projected onto
 the PR.
 
@@ -78,7 +78,7 @@ the PR.
 | `at` | timestamp; the audit trail's only ordering |
 | `review` | the reviewer's text, verbatim — the one named exception to *Pointers, never content* above |
 | `annotations` | the content triggers that fired (`package`, `migration`, `auth`) — facts, not findings |
-| `actions[].claim` | the point from the review the engine or human acted on |
+| `actions[].claim` | the point from the review the resolve step or human acted on |
 | `actions[].disposition` | `integrated` (edited and committed) \| `recorded` (logged, no edit) \| `open-question` (carried verbatim into the PR body) |
 | `actions[].note` | what was done, or why it was not |
 | `issue_links` | **`pr-review` entries only** — the closing-link reconciliation, one entry per related issue: `{"issue": 1926, "outcome": "closes" \| "stays-open" \| "dropped-but-closes"}` (`engine.md` §Closing links). Absent on a run with no linked issue |
@@ -104,7 +104,7 @@ third cycle, halting for no reason. That count is the one place the ledger is *r
 than appended to, and it does not violate the recomputable-fields rule above: it is a fact about
 history, not a cached derivation of current state.
 
-An `interactive` entry is the same shape with the human in the engine's place: `review` and
+An `interactive` entry is the same shape with the human in the resolve step's place: `review` and
 `annotations` still recorded, `actions` holding what the human decided, and their decision as the
 `outcome`.
 
@@ -146,7 +146,7 @@ Rebuild the cursor by probing **durable state**, then feed the probes to
 |---|---|
 | `spec` | spec file present on the branch (`docs/superpowers/specs/…`) |
 | `plan` | plan file present on the branch (`docs/superpowers/plans/…`) |
-| `planApproved` | the `gate_ledger` holds a `plan-approval` entry with `outcome: continued` newer than the latest `design-size` escalation — a human approval, or the engine's own continue under `auto` — else re-run `review-plan` (a re-review is cheap and stateless) |
+| `planApproved` | the `gate_ledger` holds a `plan-approval` entry with `outcome: continued` newer than the latest `design-size` escalation — a human approval, or the resolve step's own continue under `auto` — else re-run `review-plan` (a re-review is cheap and stateless) |
 | `pr` | `gh pr list --head <branch>` → PR number, else null |
 | `implemented` | PR marked ready / implementation commits present |
 | `uiNeeded` | `pipeline_triggers(<diff>)['ui']` over `git diff origin/<base>...HEAD` |
