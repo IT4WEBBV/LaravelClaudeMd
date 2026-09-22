@@ -16,13 +16,15 @@ Read/written by the Phase A helpers in `../checks/manifest.php`:
 | `branch` | **required** | run identity (also the manifest filename) |
 | `worktree` | **required** | absolute path of the run's worktree — where every leg operates |
 | `mode` | **required** | `interactive` or `auto` |
-| `cursor` | **required** | current leg + status |
+| `cursor` | **required** | `{leg, status, reason?, retried?}` — the current leg; `status` is `pending` (set by the dispatcher) or the status the leg returned; `reason` only with `halted`; `retried` only after a review step's single retry |
 | `pipeline_id` | optional | stable id alongside `branch` |
-| `artifacts` | optional | pointers: spec path, plan path, PR number, issue number (`engine.md` §The work item) |
+| `artifacts` | optional | pointers: idea, spec path, plan path, PR number, issue number (`engine.md` §The work item), `proof` — the proof page `verify-ui` wrote |
 | `last_sha` | optional | HEAD at the last completed leg |
 | `gate_ledger` | optional | the audit trail — each gate's review, what the engine or the human did about it, and the content-trigger annotations (shape below) |
 | `lease` | optional | session id + timestamp (single-driver guard) |
 | `suite` | optional | the last full suite: `{tree, outcome: green\|red, passed, failed, at}` — see *Two rules* for why a recomputable field is stored |
+| `decisions` | optional | the settled decisions from the invocation, verbatim, as a list. Every brief carries them (`engine.md` §What a leg brief consists of) |
+| `light` | optional | the invocation's `light`; read only while `design` has not run |
 
 `manifest_validate($data)` returns the list of **missing required keys** — `branch`,
 `worktree`, `mode`, `cursor`. An empty list means valid. Keep this table and that function
@@ -34,7 +36,8 @@ in lock-step: the four required rows above are exactly the four keys the functio
   PR *number*, not the PR. The reviewed diff never carries orchestration bookkeeping. The exception
   is `gate_ledger[].review`: a review has no durable source (`/critique` stores nothing by design)
   and the plan↔review loop runs entirely **before** `handoff`, so there is no PR body to recover it
-  from. Everything else stays a pointer.
+  from. `decisions` is the second exception, for the same reason: the invocation that carried them
+  is gone once the run starts. Everything else stays a pointer.
 - **Recomputable fields are derived at leg start, never trusted from the file.** A field that
   git/gh can recompute (the diff's triggers, whether the PR is ready) is recomputed each leg.
   Storing it is a latent drift bug.
@@ -79,7 +82,7 @@ the PR.
 | `actions[].disposition` | `integrated` (edited and committed) \| `recorded` (logged, no edit) \| `open-question` (carried verbatim into the PR body) |
 | `actions[].note` | what was done, or why it was not |
 | `issue_links` | **`pr-review` entries only** — the closing-link reconciliation, one entry per related issue: `{"issue": 1926, "outcome": "closes" \| "stays-open" \| "dropped-but-closes"}` (`engine.md` §Closing links). Absent on a run with no linked issue |
-| `outcome` | `continued` \| `looped-back` \| `halted` \| `escalated` (only on `design-size`) |
+| `outcome` | `continued` \| `looped-back` \| `halted` \| `escalated` (only on `design-size`). **Absent on an open entry**: a review step writes the review without an outcome, and only the resolve step sets it |
 
 **A `verify-ui` entry is the thin shape**: `gate`, `cycle`, `at`, `outcome`, and nothing else —
 no `review`, no `actions`, because nothing reviews it. It exists for two reasons, and both are
@@ -104,6 +107,25 @@ history, not a cached derivation of current state.
 An `interactive` entry is the same shape with the human in the engine's place: `review` and
 `annotations` still recorded, `actions` holding what the human decided, and their decision as the
 `outcome`.
+
+## What a leg writes — checked on every return
+
+A leg writes only its results: `artifacts`, `last_sha`, `suite`, its `gate_ledger` entry, and
+`cursor.status` — plus `cursor.reason` when it halts. It never moves `cursor.leg` and never writes a
+brief. After every return the dispatcher compares the manifest with its snapshot
+(`pipeline_returned()`, `../checks/dispatch.php`) and **halts** when any other key changed, when an
+existing ledger entry was rewritten (the resolve step may only complete the open entry), or when the
+status does not agree with the ledger.
+
+| `cursor.status` | Meaning |
+|---|---|
+| `continued` | the step did its work; a review step has appended one open entry |
+| `looped-back` | a resolve step or `verify-ui` sends the work back (`gates.md` §Loop-backs); its entry says so |
+| `halted` | a hard failure; `cursor.reason` says what |
+| `plan-insufficient` | the plan does not cover what the change needs. Bounded: a `design-size` entry with `outcome: escalated` is appended and the design grows. Architectural: the run halts |
+
+Keep this section in lock-step with `LegStatus` and `pipeline_leg_writable_keys()`; `LockStepTest`
+fails when they drift.
 
 ## Invariant check — every leg opens with one
 

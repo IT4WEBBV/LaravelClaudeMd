@@ -95,19 +95,40 @@ a triggered `verify-ui` has not run, and "jump to implement" is refused while `r
 not run. **This refusal is the un-skippable-review promise** — there is no path to a non-draft
 PR that has not passed `review-plan` and `review-pr` against the recorded artifact.
 
-## How the engine calls Phase A
+## Loop-backs — where a looped-back leg goes
 
-The diff for gate detection is the whole change against the base branch; the package trigger
-also needs the repo's own `composer.json` `name`:
+`pipeline_loop_target($leg)` (`../checks/dispatch.php`):
+
+- `review-plan` → `design`
+- `verify-ui` → `implement`
+- `review-pr` → `implement`
+
+Each is bounded to 2 per gate, counted from the gate's `looped-back` ledger entries; the third halts,
+and so does any loop-back once the count is `unknown` (`manifest.md` §Reconstruction). The dispatcher
+evaluates both in `pipeline_returned()`. Keep this list in lock-step with the function; `LockStepTest`
+fails when they drift.
+
+## How the dispatcher calls Phase A
+
+Once per step, one command (`engine.md` §The loop). It computes the triggers from a diff file the
+dispatcher writes but never reads:
 
 ```bash
-# the change under review
-git diff origin/<base>...HEAD > /tmp/pipeline.diff
+CHECKS="$HOME/.claude/skills/pipeline/checks"
+git -C <worktree> diff origin/<base>...HEAD > "$TMPDIR/pipeline.diff"
+php "$CHECKS/dispatch_cli.php" returned <manifest> "$TMPDIR/pipeline.diff"
+# → {"action":"dispatch","leg":…,"step":…,"inline":…,"prompt":…} | {"action":"retry",…}
+#   | {"action":"halt","reason":…} | {"action":"done"}
+```
 
-# triggers over that diff, with the repo's package name for the in-package case
+A leg that needs the triggers itself — the package annotation, the Bounded escalation check — calls
+`pipeline_triggers()` over the same diff, with the repo's `composer.json` `name` for the in-package
+case:
+
+```bash
 php -r 'require "skills/pipeline/checks/triggers.php";
         echo json_encode(pipeline_triggers(
-          file_get_contents("/tmp/pipeline.diff"),
+          file_get_contents(getenv("TMPDIR") . "/pipeline.diff"),
           json_decode(file_get_contents("composer.json"), true)["name"] ?? null
         )), "\n";'
 # → {"package":…,"migration":…,"auth":…,"ui":…}
@@ -116,7 +137,7 @@ php -r 'require "skills/pipeline/checks/triggers.php";
 Navigation is pure functions — call `pipeline_can_navigate` / `pipeline_next_leg` /
 `pipeline_gate_legs` directly (they take no I/O). The manifest's `gate_ledger` records which gates
 have run; `pipeline_can_navigate`'s `$doneLegs` is `pipeline_done_legs()` over it, which drops gate
-passes older than the latest `design-size` escalation.
+passes older than the latest `design-size` escalation and never counts an open entry.
 
 ## Path anchoring — the app root is not always the repo root
 
