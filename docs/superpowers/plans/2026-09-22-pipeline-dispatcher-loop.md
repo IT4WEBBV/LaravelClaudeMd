@@ -381,6 +381,15 @@ it('halts on every return it cannot account for', function (array $after, string
     ];
 });
 
+it('tolerates a leg that reorders keys or drops cursor.retried', function () use ($noUi, $open) {
+    $before = returned_before('review-plan', [], ['retried' => true]);
+    $after = returned_after($before, 'continued', [array_reverse($open, true)]);
+    $after = array_reverse([...$after, 'cursor' => ['status' => 'continued', 'leg' => 'review-plan']], true);
+
+    expect(pipeline_returned($before, $after, $noUi, DesignSize::Architectural))
+        ->toBe(['action' => 'dispatch', 'leg' => 'review-plan']);
+});
+
 it('halts when a resolve step sets an outcome other than its status', function () use ($noUi, $open) {
     $before = returned_before('review-plan', [$open]);
     $decision = pipeline_returned($before, returned_after($before, 'continued', [[...$open, 'outcome' => 'looped-back']]), $noUi, DesignSize::Architectural);
@@ -407,6 +416,7 @@ Append to `skills/pipeline/checks/dispatch.php`:
  */
 function pipeline_returned(array $before, array $after, array $triggers, DesignSize $size): array
 {
+    [$before, $after] = [pipeline_normalized($before), pipeline_normalized(pipeline_keep_retried($before, $after))];
     $leg = $before['cursor']['leg'];
     $step = pipeline_step($before, $leg);
 
@@ -419,6 +429,29 @@ function pipeline_returned(array $before, array $after, array $triggers, DesignS
     $problem = pipeline_return_problem($before, $after, $leg, $step, $size);
 
     return $problem === null ? pipeline_route($after, $leg, $step, $triggers, $size) : pipeline_halt($problem);
+}
+
+/**
+ * Key order is not content. Legs rewrite JSON with whatever tool they hold, so every comparison
+ * runs over recursively key-sorted copies; list order (the ledger) is left as it is.
+ */
+function pipeline_normalized(array $value): array
+{
+    if (! array_is_list($value)) {
+        ksort($value);
+    }
+
+    return array_map(fn ($item) => is_array($item) ? pipeline_normalized($item) : $item, $value);
+}
+
+/** `cursor.retried` is the dispatcher's; a leg that rewrites the cursor without it has not changed it. */
+function pipeline_keep_retried(array $before, array $after): array
+{
+    if (isset($before['cursor']['retried']) && is_array($after['cursor'] ?? null) && ! array_key_exists('retried', $after['cursor'])) {
+        $after['cursor']['retried'] = $before['cursor']['retried'];
+    }
+
+    return $after;
 }
 
 function pipeline_return_problem(array $before, array $after, string $leg, string $step, DesignSize $size): ?string
@@ -651,6 +684,7 @@ it('gives the reviewer crafted context: no earlier review, no earlier actions', 
     expect($brief)
         ->toContain('`review` step')
         ->toContain('/critique plan')
+        ->toContain('this review\'s `cycle`: `2`')
         ->toContain('The engine never edits.')
         ->not->toContain('OLD REVIEW TEXT')
         ->not->toContain('OLD ACTION')
@@ -799,6 +833,9 @@ function pipeline_brief_pointers(array $manifest, string $leg, string $step): st
             $lines[] = "- {$name}: `{$value}`";
         }
     }
+    if ($step === 'review') {
+        $lines[] = '- this review\'s `cycle`: `' . pipeline_next_cycle($ledger, pipeline_gate_of($leg)) . '`';
+    }
     if ($step === 'resolve') {
         $lines[] = '- the open review: `gate_ledger[' . pipeline_open_entry($ledger, pipeline_gate_of($leg)) . ']`';
     }
@@ -808,6 +845,14 @@ function pipeline_brief_pointers(array $manifest, string $leg, string $step): st
     }
 
     return "## Pointers\n\n" . implode("\n", $lines);
+}
+
+/** 1-based pass number for the next entry of this gate; `unknown` stays unknown (`../references/manifest.md` §reconstruction). */
+function pipeline_next_cycle(array $ledger, string $gate): int|string
+{
+    $cycles = array_column(array_filter($ledger, fn ($entry) => ($entry['gate'] ?? null) === $gate), 'cycle');
+
+    return in_array('unknown', $cycles, true) ? 'unknown' : count($cycles) + 1;
 }
 
 /** The newest ledger entry, when it looped back to this leg. */
@@ -1028,6 +1073,21 @@ it('reads the design size from the spec to route plan-insufficient', function (s
     'Architectural halts' => ['**Design size:** Architectural', 'halt'],
 ]);
 
+it('records a finished run as done and does not re-dispatch it', function () {
+    $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
+    $fixture = dispatch_fixture(['cursor' => ['leg' => 'review-pr', 'status' => 'pending'], 'gate_ledger' => [$open]]);
+    dispatch_cli(['next', $fixture['manifest']]);
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [
+        ...$m,
+        'cursor' => [...$m['cursor'], 'status' => 'continued'],
+        'gate_ledger' => [[...$open, 'actions' => [], 'outcome' => 'continued']],
+    ]);
+
+    expect(dispatch_cli(['returned', $fixture['manifest'], $fixture['diff']])['json'])->toBe(['action' => 'done']);
+    expect(manifest_read($fixture['manifest'])['cursor']['status'])->toBe('done');
+    expect(dispatch_cli(['next', $fixture['manifest']])['json'])->toBe(['action' => 'done']);
+});
+
 it('refuses a manifest it cannot read, and a bad command', function () {
     expect(dispatch_cli(['next', '/nonexistent/manifest.json'])['json']['action'])->toBe('halt');
     expect(dispatch_cli(['sideways'])['code'])->toBe(1);
@@ -1108,6 +1168,9 @@ function dispatch_cli_next(string $manifestPath): array
     if ($missing !== [] || ! in_array($leg, pipeline_legs(), true)) {
         return pipeline_halt('the manifest is invalid: ' . ($missing === [] ? 'cursor.leg is not a leg' : 'missing ' . implode(', ', $missing)));
     }
+    if (($manifest['cursor']['status'] ?? null) === 'done') {
+        return ['action' => 'done'];
+    }
 
     return dispatch_cli_emit($manifestPath, [...$manifest, 'cursor' => ['leg' => $leg, 'status' => 'pending']]);
 }
@@ -1127,8 +1190,16 @@ function dispatch_cli_returned(string $manifestPath, string $diffPath): array
         'dispatch' => dispatch_cli_emit($manifestPath, [...$after, 'cursor' => ['leg' => $decision['leg'], 'status' => 'pending']]),
         'retry' => dispatch_cli_emit($manifestPath, [...$before, 'cursor' => [...$before['cursor'], 'retried' => true]], 'retry'),
         'halt' => dispatch_cli_halt($manifestPath, $after, $before['cursor']['leg'], $decision['reason']),
-        'done' => $decision,
+        'done' => dispatch_cli_done($manifestPath, $after),
     };
+}
+
+/** A finished run says so in its cursor, so a later `next` does not re-dispatch review-pr. */
+function dispatch_cli_done(string $manifestPath, array $manifest): array
+{
+    manifest_write($manifestPath, [...$manifest, 'cursor' => ['leg' => $manifest['cursor']['leg'], 'status' => 'done']]);
+
+    return ['action' => 'done'];
 }
 
 /** Read from the committed spec, never stored; a spec that cannot be read is Architectural. */
@@ -1347,7 +1418,7 @@ Expected: PASS, all tests.
 
 - [ ] **Step 5: Cross-check once against the audit**
 
-Pick one pre-change engine transcript from the audit's `rows.json` and compare:
+`rows.json` is generated, not committed: when it is missing, build it first with `cd ~/.claude/token-audit/2026-09-22 && python3 usage.py` (running the audit scripts is fine; they are never modified). Then pick one pre-change engine transcript from the audit's `rows.json` and compare:
 
 ```bash
 php -r '$rows = json_decode(file_get_contents(getenv("HOME") . "/.claude/token-audit/2026-09-22/rows.json"), true);
@@ -1545,7 +1616,7 @@ No test of its own: this text mirrors the PHP tested in Tasks 1–6. Line number
 **Files:**
 - Modify: `skills/pipeline/references/engine.md`
 - Modify: `skills/pipeline/SKILL.md:15-17`, `:37-38`
-- Modify: `skills/orchestrate/SKILL.md:25`
+- Modify: `skills/orchestrate/SKILL.md:26`
 
 **Interfaces:**
 - Consumes: the CLIs and function names from Tasks 1–5, exactly as named there.
@@ -1761,14 +1832,14 @@ After the *Visual proof* bullet add:
   (`references/engine.md` §The dispatcher).
 ```
 
-- [ ] **Step 11: Update `skills/orchestrate/SKILL.md` Step 5 (line 25)**
+- [ ] **Step 11: Update `skills/orchestrate/SKILL.md` Step 5 (line 26)**
 
 After *"**A run returns.**"* insert: *"Run `php ~/.claude/skills/pipeline/checks/engine_peak_cli.php <its agent id>` and put the line in whichever report follows (pipeline `engine.md` §The dispatcher)."* Change nothing else in the file.
 
 - [ ] **Step 12: Check the removed rule is gone and nothing names the old engine behaviour**
 
-Run: `grep -n "in the engine session\|the engine reads it and acts\|When dispatching \`implement\`" skills/pipeline/references/engine.md skills/pipeline/SKILL.md`
-Expected: no output.
+Run: `grep -n "in the engine session\|the engine reads it and acts\|the engine reads them and acts\|When dispatching \`implement\`\|The engine knows what it built\|When the engine believes\|Record \`outcome: halted\`" skills/pipeline/references/engine.md skills/pipeline/references/gates.md skills/pipeline/references/manifest.md skills/pipeline/SKILL.md`
+Expected: no output. Each of these named the old in-engine behaviour (gates.md:22 and :49, engine.md:454, :578 and :646, manifest.md:47 at the base commit): reword each to name the step that now does it (the resolve step, the finish step, or the leg). Bound exhaustion no longer records `outcome: halted` on the entry — the resolve step writes `looped-back` and the dispatcher halts via `cursor` — so engine.md:646 says that instead. Also document the dispatcher-written cursor status `done` (a finished run; `next` answers `done` and dispatches nothing) wherever manifest.md lists cursor statuses.
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`
 Expected: PASS (`LockStepTest` still green).

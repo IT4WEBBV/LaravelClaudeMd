@@ -143,6 +143,11 @@ manifest as dispatched (`$before`, a snapshot) with the manifest as returned, an
 `['action' => 'dispatch', 'leg' => …]`, `['action' => 'retry']`, `['action' => 'halt', 'reason' => …]`
 or `['action' => 'done']`. It is pure; the CLI (§5) applies the decision.
 
+**Key order is not content.** Both manifests are compared as recursively key-sorted copies (list order,
+the ledger's, is kept), and a leg that rewrites the cursor without the dispatcher's `cursor.retried`
+has not changed it. Legs rewrite JSON with whatever tool they hold; without this a cosmetic rewrite
+would halt the run.
+
 **Fail-closed checks, each a halt naming what failed:**
 
 1. `manifest_validate($after)` is empty.
@@ -177,7 +182,7 @@ unchanged manifest halts at once.
 | Status | Next |
 |---|---|
 | `continued` after `review` | the same leg, `resolve` step |
-| `continued` otherwise | `pipeline_next_leg($leg, $triggers)`; `null` → `done` |
+| `continued` otherwise | `pipeline_next_leg($leg, $triggers)`; `null` → `done`, which the CLI writes as `cursor.status: done` so a later `next` answers `done` instead of re-dispatching `review-pr` |
 | `looped-back` | `pipeline_loop_target($leg)`: `review-plan` → `design`, `verify-ui` → `implement`, `review-pr` → `implement`. **Halt** when the gate now has more than 2 `looped-back` entries (bound exhausted), or any of its entries has `cycle: "unknown"` (reconstructed run) |
 | `halted` | halt, with `cursor.reason` |
 | `plan-insufficient` | Bounded spec → `design` (grow form, `engine.md` §Design size). Architectural spec → halt: *"plan insufficient: <reason>"* |
@@ -389,17 +394,30 @@ Questions the brainstorm would have asked the owner, and the answer this design 
    tokens (weight 5) on every dispatch.
 4. **Where do settled decisions and `light` come from?** — New optional manifest fields `decisions`
    (verbatim list) and `light`, written at kickoff from the invocation. `decisions` is a second named
-   exception to *Pointers, never content*.
+   exception to *Pointers, never content*. **Kickoff writes them, not the dispatcher:** the session
+   that runs kickoff (the `/pipeline` invoker, or `orchestrate` for its runs) already holds the
+   invocation, so the dispatcher never reads an artifact to find them. When the invocation points at
+   an idea or issue that holds the decisions, kickoff records only the pointer (`artifacts.idea`,
+   `artifacts.issue`) and every brief carries it; `decisions` is load-bearing only for a run invoked
+   from chat with its decisions stated inline.
 5. **What does `plan-insufficient` do on an Architectural plan?** — Halt with the reason. Today the
    status is defined only for Bounded escalation; improvising past a full plan's gap is what the status
-   exists to prevent, and a human should decide whether to re-design.
+   exists to prevent, and a human should decide whether to re-design. This is the only `auto` stop that
+   is neither machinery failure nor bound exhaustion, on a trigger implementers hit often. The
+   unattended alternative is the Bounded route (grow the design, re-review, continue), which would
+   need its own cap because an escalation is not a loop-back (engine.md §Escalation). Halting is
+   the fail-closed choice; left as an open question for the owner.
 6. **Who runs the Bounded escalation check at the start of each later leg?** — The leg, first thing, per
    its brief; it returns `plan-insufficient` with a `design-size` entry. The dispatcher never computes
    code lines from a diff.
 7. **Who starts the dev stack?** — `implement` (and `verify-ui` if it is down), per the brief. The
    stack's output is exactly the Bash output the dispatcher must not hold.
 8. **Interactive: are review steps dispatched or inline?** — Dispatched, as in `auto`; only `design` and
-   the resolve step are the human's. The human reads the review from the open ledger entry.
+   the resolve step are the human's. The human reads the review from the open ledger entry. Cost:
+   in interactive mode the review-step agent buys no context isolation (the session shows the human
+   the review anyway) and costs one agent startup (~37k context) per review; uniformity with `auto`
+   is the only argument for it. Making `pipeline_runs_inline` return true for review steps outside
+   `auto` is a one-clause change. Left as an open question for the owner.
 9. **Who runs the 150k measurement, and how does it find the transcript?** — The session that dispatched
    the dispatcher, after its completion notice, by agent id. No heuristic over worktree paths, which
    slot recycling would defeat.
