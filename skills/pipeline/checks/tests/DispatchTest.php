@@ -31,7 +31,7 @@ it('derives review or resolve from the open ledger entry', function () {
     expect(pipeline_step(dispatch_manifest('implement', [$open]), 'implement'))->toBe('run');
 });
 
-it('runs design and the resolve step inline outside auto', function () {
+it('runs design and the resolve step inline outside auto and autoflow', function () {
     expect(pipeline_runs_inline('interactive', 'design', 'run'))->toBeTrue();
     expect(pipeline_runs_inline('interactive', 'review-pr', 'resolve'))->toBeTrue();
     expect(pipeline_runs_inline('interactive', 'review-pr', 'review'))->toBeFalse();
@@ -39,6 +39,9 @@ it('runs design and the resolve step inline outside auto', function () {
     expect(pipeline_runs_inline('mangled', 'design', 'run'))->toBeTrue();
     expect(pipeline_runs_inline('auto', 'design', 'run'))->toBeFalse();
     expect(pipeline_runs_inline('auto', 'review-plan', 'resolve'))->toBeFalse();
+    expect(pipeline_runs_inline('autoflow', 'design', 'run'))->toBeFalse();
+    expect(pipeline_runs_inline('autoflow', 'review-pr', 'resolve'))->toBeFalse();
+    expect(pipeline_runs_inline('mangled', 'review-plan', 'resolve'))->toBeTrue();
 });
 
 it('allows each step only the statuses it can honestly return', function () {

@@ -60,6 +60,21 @@ it('compares a reported plan gap with the ledger\'s newest gap', function () use
         ->toBe("plan gaps: the steps reported [implement], the ledger's newest entries say [] — MISMATCH");
 });
 
+it('counts a review-plan step\'s plan gap or escalation as a review-plan loop-back, where the ledger has it', function () use ($entry) {
+    $reports = [['review-plan:review', ['status' => 'plan-insufficient', 'reason' => 'needs a queue']], ['design:run', null]];
+    $architectural = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-23T05:00:00Z', 'reason' => 'needs a queue', 'outcome' => 'looped-back'];
+    $bounded = ['gate' => 'design-size', 'leg' => 'review-plan', 'at' => '2026-09-23T05:00:00Z', 'reason' => 'migration', 'outcome' => 'escalated'];
+
+    foreach ([$architectural, $bounded] as $recorded) {
+        expect(array_slice(explode("\n", audit_run([$recorded], '', $reports)['stdout']), 1))->toBe([
+            "review-plan: the steps reported [looped-back], the ledger's newest entries say [looped-back] — agree",
+            "verify-ui: the steps reported [], the ledger's newest entries say [] — agree",
+            "review-pr: the steps reported [], the ledger's newest entries say [] — agree",
+            "plan gaps: the steps reported [], the ledger's newest entries say [] — agree",
+        ]);
+    }
+});
+
 it('says so when an input is missing, and exits 0', function () {
     expect(checks_cli('run_audit.php', ['/nonexistent/m.json', '/nonexistent/d.diff', '/nonexistent/wf_x']))
         ->toBe(['code' => 0, 'stdout' => 'run audit: not performed (usage: run_audit.php <manifest> <final PR diff> <run transcript dir>; each must exist)']);

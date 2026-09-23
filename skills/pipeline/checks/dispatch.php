@@ -81,7 +81,7 @@ function pipeline_step(array $manifest, string $leg): string
 /** Anything that is neither `auto` nor `autoflow` behaves as interactive (`gates.md` §Modes): the human designs and resolves. */
 function pipeline_runs_inline(string $mode, string $leg, string $step): bool
 {
-    return $mode !== 'auto' && ($leg === 'design' || $step === 'resolve');
+    return ! in_array($mode, ['auto', 'autoflow'], true) && ($leg === 'design' || $step === 'resolve');
 }
 
 /** @return list<string> the only manifest keys a leg may change; `cursor.*` is one level down */

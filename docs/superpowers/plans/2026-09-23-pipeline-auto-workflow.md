@@ -2742,15 +2742,15 @@ Expected: all green; the grep prints nothing.
 - Invoke `/critique pr` on PR #50. Act on each point per the house rules (integrate what is worth it, test-first; record the rest); rerun Step 1 after any change; push.
 - Add to the PR body: what the review raised and what was done with each point, and the twelve smoke-run outcomes from Task 6 (scenario, labels as expected, return, cursor after `finish`).
 
-- [ ] **Step 3: One real `/pipeline auto` run**
+- [ ] **Step 3: One real `/pipeline autoflow` run**
 
-Before merge, `~/.claude/skills/pipeline` still points at the main checkout (the old `SKILL.md` and `engine.md`) and `~/.claude/workflows/` holds no `pipeline-auto.js`. So:
+Before merge, `~/.claude/skills/pipeline` still points at the main checkout (the old `SKILL.md` and `engine.md`) and `~/.claude/workflows/` holds no `pipeline-autoflow.js`. So:
 
 - Ask the owner (one `AskUserQuestion`) which small issue in which slot-enabled Laravel project to run, recommending one that touches the UI so `verify-ui` runs.
-- Link the script for this run only: `ln -s /Users/jroelofs/GitProjects/LaravelClaudeMd/LaravelClaudeMd/.claude/worktrees/pipeline-dispatcher-loop/skills/pipeline/workflow/pipeline-auto.js ~/.claude/workflows/pipeline-auto.js` — only when that entry does not exist (a Workflow `scriptPath` outside the project's working directory is refused).
-- In a session in that project, in auto permission mode, follow **this branch's** `skills/pipeline/SKILL.md` §`auto` steps 1–6 by hand, with `CHECKS=/Users/jroelofs/GitProjects/LaravelClaudeMd/LaravelClaudeMd/.claude/worktrees/pipeline-dispatcher-loop/skills/pipeline/checks` for `launch` and `finish`. `launch` then passes that directory as `checks`, so every step's `brief` runs this branch's code; the `engine.md` sections a brief cites are still read from the main checkout.
+- Link the script for this run only: `ln -s /Users/jroelofs/GitProjects/LaravelClaudeMd/LaravelClaudeMd/.claude/worktrees/pipeline-dispatcher-loop/skills/pipeline/workflow/pipeline-autoflow.js ~/.claude/workflows/pipeline-autoflow.js` — only when that entry does not exist (a Workflow `scriptPath` outside the project's working directory is refused).
+- In a session in that project, in auto permission mode, follow **this branch's** `skills/pipeline/SKILL.md` §`autoflow` section's steps 1–6 by hand, with `CHECKS=/Users/jroelofs/GitProjects/LaravelClaudeMd/LaravelClaudeMd/.claude/worktrees/pipeline-dispatcher-loop/skills/pipeline/checks` for `launch` and `finish`. `launch` then passes that directory as `checks`, so every step's `brief` runs this branch's code; the `engine.md` sections a brief cites are still read from the main checkout.
 - Record, for the PR body: the issue and PR, the workflow's return, wall time, every permission prompt or denial seen (none expected; `gh pr ready` runs in the invoking session), `run_cost_cli.php`'s lines against the baseline median, the run's code lines (`pipeline_code_lines()` over the final PR diff), and `run_audit.php`'s lines. It is run 1 of the 6 the keep criterion counts.
-- Remove the temporary link: `rm ~/.claude/workflows/pipeline-auto.js` (after merge, `hooks/git-freshness.sh` links the main checkout's copy).
+- Remove the temporary link: `rm ~/.claude/workflows/pipeline-autoflow.js` (after merge, `hooks/git-freshness.sh` links the main checkout's copy).
 - Still open from spec step 1: `gh pr ready` from an orchestrator's own `claude --bg` session; the first orchestrated run shows it. Note it in the PR body.
 
 - [ ] **Step 4: Vendor hacks and the final check**

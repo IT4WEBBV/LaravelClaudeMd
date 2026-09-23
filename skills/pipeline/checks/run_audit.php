@@ -30,7 +30,10 @@ function run_audit_ui(array $triggers, array $ledger): string
 
 /**
  * Per gate, what the run's steps reported against that many of the gate's newest ledger entries, so
- * the entries of an earlier run on the same manifest are never compared.
+ * the entries of an earlier run on the same manifest are never compared. A `review-plan` step's
+ * `plan-insufficient` counts as a `review-plan` loop-back on both sides: the entry it writes (a
+ * `plan-approval` loop-back, or on a Bounded spec a `design-size` escalation) names the leg
+ * `review-plan`, which `pipeline_is_plan_gap` does not count as a gap.
  *
  * @param list<array{label: string, result: mixed}> $steps
  * @return list<string>
@@ -41,7 +44,9 @@ function run_audit_gates(array $steps, array $ledger): array
     foreach ($steps as $step) {
         [$leg, $name] = explode(':', $step['label'], 2) + [1 => ''];
         $status = is_array($step['result']) ? ($step['result']['status'] ?? null) : null;
-        if ($status === 'plan-insufficient') {
+        if ($status === 'plan-insufficient' && $leg === 'review-plan') {
+            $reported['review-plan'][] = 'looped-back';
+        } elseif ($status === 'plan-insufficient') {
             $reported['plan gaps'][] = $leg;
         } elseif (in_array($status, ['continued', 'looped-back'], true) && ($name === 'resolve' || $leg === 'verify-ui')) {
             $reported[$leg][] = $status;
@@ -52,7 +57,9 @@ function run_audit_gates(array $steps, array $ledger): array
     foreach ($ledger as $entry) {
         $outcome = $entry['outcome'] ?? null;
         $leg = pipeline_leg_of_gate((string) ($entry['gate'] ?? ''));
-        if ($outcome === 'escalated' || pipeline_is_plan_gap($entry)) {
+        if ($outcome === 'escalated' && ($entry['leg'] ?? null) === 'review-plan') {
+            $recorded['review-plan'][] = 'looped-back';
+        } elseif ($outcome === 'escalated' || pipeline_is_plan_gap($entry)) {
             $recorded['plan gaps'][] = (string) ($entry['leg'] ?? '');
         } elseif ($leg !== null && in_array($outcome, ['continued', 'looped-back'], true)) {
             $recorded[$leg][] = $outcome;
