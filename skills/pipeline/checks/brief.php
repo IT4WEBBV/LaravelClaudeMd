@@ -6,12 +6,12 @@
  */
 
 /**
- * @return array<string, list<string>> keyed `<leg>:<step>`. An `auto` step is a workflow agent: it
+ * @return array<string, list<string>> keyed `<leg>:<step>`. An `autoflow` step is a workflow agent: it
  * cannot start agents, so where a station would dispatch one it does that work itself.
  */
 function pipeline_leg_overrides(string $mode): array
 {
-    $auto = $mode === 'auto';
+    $auto = $mode === 'autoflow';
     $actOnReview = [
         'Act on the open review with the edit/rework boundary (engine.md §`auto`): integrate and commit edits and small fixes; where the review says the work is fundamentally wrong, loop back.',
         'Change nothing the review did not name.',
@@ -174,7 +174,7 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step): s
     if ($leg !== 'design') {
         $lines = [...$lines, ...pipeline_plan_gap_lines($step)];
     }
-    if ($manifest['mode'] === 'auto') {
+    if ($manifest['mode'] === 'autoflow') {
         $lines[] = "Run every command from `cd {$manifest['worktree']}` or with `git -C {$manifest['worktree']}`: the session that started this run may sit in another checkout.";
         $lines[] = 'The owner authorised this run, including pushing the branch and opening the draft PR; the pipeline never merges.';
     }
@@ -216,7 +216,7 @@ function pipeline_brief_return(string $leg, string $step, string $mode): string
 {
     $keys = implode(', ', array_map(fn (string $key) => "`{$key}`", pipeline_leg_writable_keys()));
     $statuses = implode(', ', array_map(fn (LegStatus $status) => "`{$status->value}`", LegStatus::allowedFor($leg, $step)));
-    $reply = $mode === 'auto'
+    $reply = $mode === 'autoflow'
         ? 'then return `{status, reason}` as your structured result (with `reason` whenever you have one) instead of replying with a line'
         : 'and reply with one line naming it';
 

@@ -9,7 +9,7 @@ function audit_run(array $ledger, string $diff, array $reports): array
     }
     $dir = cost_run($agents);
     $manifest = dirname($dir) . '/feature-x.json';
-    manifest_write($manifest, ['branch' => 'feature/x', 'worktree' => dirname($dir), 'mode' => 'auto', 'cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'gate_ledger' => $ledger]);
+    manifest_write($manifest, ['branch' => 'feature/x', 'worktree' => dirname($dir), 'mode' => 'autoflow', 'cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'gate_ledger' => $ledger]);
     file_put_contents(dirname($dir) . '/final.diff', $diff);
 
     return checks_cli('run_audit.php', [$manifest, dirname($dir) . '/final.diff', $dir]);

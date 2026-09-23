@@ -29,14 +29,23 @@ it('completes the open entry before the finish step\'s last action', function ()
     expect(strpos($brief, 'Complete the open entry'))->toBeLessThan(strpos($brief, 'The last action is `proof_cli.php open`'));
 });
 
-it('has overrides for every leg and step, in both modes', function () {
-    foreach (['auto', 'interactive'] as $mode) {
+it('has overrides for every leg and step, in autoflow and interactive', function () {
+    foreach (['autoflow', 'interactive'] as $mode) {
         foreach (pipeline_legs() as $leg) {
             foreach (in_array($leg, ['review-plan', 'review-pr'], true) ? ['review', 'resolve'] : ['run'] as $step) {
                 expect(pipeline_leg_overrides($mode))->toHaveKey("{$leg}:{$step}");
             }
         }
     }
+});
+
+it('briefs an auto run exactly as an interactive one: the dispatcher\'s steps can dispatch', function () {
+    expect(pipeline_leg_overrides('auto'))->toBe(pipeline_leg_overrides('interactive'));
+    expect(pipeline_brief_return('implement', 'run', 'auto'))->toBe(pipeline_brief_return('implement', 'run', 'interactive'));
+    expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))
+        ->not->toContain('The owner authorised this run')
+        ->not->toContain('`cd /tmp/wt`')
+        ->toContain('and reply with one line naming it');
 });
 
 it('carries the pointers, the settled decisions and the suite line', function () {
@@ -129,11 +138,11 @@ it('takes the step from its caller when given one, and derives it otherwise', fu
     expect(pipeline_brief(brief_manifest('review-plan'), 'review-plan', '/tmp/m.json'))->toContain('`review-plan` leg, `review` step');
 });
 
-it('has an auto reviewer apply /critique itself, and an interactive one invoke it', function (string $leg, string $procedure) {
-    $auto = pipeline_brief(brief_manifest($leg), $leg, '/tmp/m.json', 'review');
+it('has an autoflow reviewer apply /critique itself, and an interactive one invoke it', function (string $leg, string $procedure) {
+    $autoflow = pipeline_brief(brief_manifest($leg, ['mode' => 'autoflow']), $leg, '/tmp/m.json', 'review');
     $interactive = pipeline_brief(brief_manifest($leg, ['mode' => 'interactive']), $leg, '/tmp/m.json', 'review');
 
-    expect($auto)
+    expect($autoflow)
         ->toContain("Apply `/critique`'s `{$procedure}` procedure")
         ->toContain('rubric in `~/.claude/skills/critique/references/rubrics.md`')
         ->toContain('You are the reviewer; do not dispatch one')
@@ -141,12 +150,12 @@ it('has an auto reviewer apply /critique itself, and an interactive one invoke i
     expect($interactive)->toContain("Invoke `/critique {$procedure}`")->not->toContain('do not dispatch one');
 })->with([['review-plan', 'plan'], ['review-pr', 'pr']]);
 
-it('drops the independent read and the subagents in auto', function () {
+it('drops the independent read and the subagents in autoflow', function () {
     $open = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
 
-    expect(pipeline_brief(brief_manifest('review-plan', ['gate_ledger' => [$open]]), 'review-plan', '/tmp/m.json'))->not->toContain('independent read');
+    expect(pipeline_brief(brief_manifest('review-plan', ['mode' => 'autoflow', 'gate_ledger' => [$open]]), 'review-plan', '/tmp/m.json'))->not->toContain('independent read');
     expect(pipeline_brief(brief_manifest('review-plan', ['mode' => 'interactive', 'gate_ledger' => [$open]]), 'review-plan', '/tmp/m.json'))->toContain('independent read');
-    expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))->toContain('Execute the plan inline, task by task; no subagents.');
+    expect(pipeline_brief(brief_manifest('implement', ['mode' => 'autoflow']), 'implement', '/tmp/m.json'))->toContain('Execute the plan inline, task by task; no subagents.');
     expect(pipeline_brief(brief_manifest('implement', ['mode' => 'interactive']), 'implement', '/tmp/m.json'))->not->toContain('no subagents');
 });
 
@@ -157,9 +166,9 @@ it('tells implement to add the ci label before the push whose CI it watches, in 
         ->toContain('Add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch.');
 });
 
-it('leaves the PR draft at the auto finish step for the session that launched the run', function () {
+it('leaves the PR draft at the autoflow finish step for the session that launched the run', function () {
     $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
-    $brief = pipeline_brief(brief_manifest('review-pr', ['gate_ledger' => [$open]]), 'review-pr', '/tmp/m.json');
+    $brief = pipeline_brief(brief_manifest('review-pr', ['mode' => 'autoflow', 'gate_ledger' => [$open]]), 'review-pr', '/tmp/m.json');
 
     expect($brief)
         ->toContain('Leave the PR draft; the session that launched the run marks it ready.')
@@ -168,13 +177,13 @@ it('leaves the PR draft at the auto finish step for the session that launched th
     expect(strpos($brief, 'Complete the open entry'))->toBeLessThan(strpos($brief, 'The last action is `proof_cli.php open`'));
 });
 
-it('tells every auto step where to work, that the run is authorised, and to return a structured result', function () {
+it('tells every autoflow step where to work, that the run is authorised, and to return a structured result', function () {
     foreach (pipeline_legs() as $leg) {
         foreach (in_array($leg, ['review-plan', 'review-pr'], true) ? ['review', 'resolve'] : ['run'] as $step) {
-            $auto = pipeline_brief(brief_manifest($leg), $leg, '/tmp/m.json', $step);
+            $autoflow = pipeline_brief(brief_manifest($leg, ['mode' => 'autoflow']), $leg, '/tmp/m.json', $step);
             $interactive = pipeline_brief(brief_manifest($leg, ['mode' => 'interactive']), $leg, '/tmp/m.json', $step);
 
-            expect($auto)
+            expect($autoflow)
                 ->toContain('Run every command from `cd /tmp/wt`')
                 ->toContain('The owner authorised this run, including pushing the branch and opening the draft PR; the pipeline never merges.')
                 ->toContain('then return `{status, reason}` as your structured result');

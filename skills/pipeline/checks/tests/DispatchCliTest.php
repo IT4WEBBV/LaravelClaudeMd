@@ -164,7 +164,7 @@ it('refuses a manifest it cannot read, and a bad command', function () {
 it('launches from the cursor with the ledger\'s loop-backs, the design size and ui', function () {
     $looped = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r', 'outcome' => 'looped-back'];
     $open = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 2, 'at' => '2026-09-22T11:00:00Z', 'review' => 'r'];
-    $fixture = dispatch_fixture(['gate_ledger' => [$looped, $open], 'artifacts' => ['spec' => 'spec.md', 'plan' => null, 'pr' => null, 'issue' => null]]);
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'gate_ledger' => [$looped, $open], 'artifacts' => ['spec' => 'spec.md', 'plan' => null, 'pr' => null, 'issue' => null]]);
     file_put_contents($fixture['dir'] . '/spec.md', "# x — design\n\n**Design size:** Bounded\n");
     file_put_contents($fixture['diff'], dispatch_ui_diff());
 
@@ -184,7 +184,7 @@ it('launches from the cursor with the ledger\'s loop-backs, the design size and 
 });
 
 it('marks noOpen when the launch runs unattended', function () {
-    $fixture = dispatch_fixture();
+    $fixture = dispatch_fixture(['mode' => 'autoflow']);
 
     expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']], ['PIPELINE_NO_OPEN' => '1'])['json']['noOpen'])->toBeTrue();
 });
@@ -192,7 +192,7 @@ it('marks noOpen when the launch runs unattended', function () {
 it('answers done for a finished run, and re-arms it with --from through the navigation guardrail', function () {
     $passed = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r', 'outcome' => 'continued'];
     $reviewed = [...$passed, 'gate' => 'pr-review', 'leg' => 'review-pr', 'at' => '2026-09-22T11:00:00Z'];
-    $fixture = dispatch_fixture(['cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'gate_ledger' => [$passed, $reviewed]]);
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'gate_ledger' => [$passed, $reviewed]]);
 
     expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json'])->toBe(['action' => 'done']);
 
@@ -200,7 +200,7 @@ it('answers done for a finished run, and re-arms it with --from through the navi
         ->toMatchArray(['action' => 'start', 'startLeg' => 'review-pr', 'startStep' => 'review']);
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-pr', 'status' => 'pending']);
 
-    $fresh = dispatch_fixture(['cursor' => ['leg' => 'design', 'status' => 'pending']]);
+    $fresh = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'design', 'status' => 'pending']]);
     $refused = dispatch_cli(['launch', $fresh['manifest'], $fresh['diff'], '--from', 'implement'])['json'];
     expect($refused['action'])->toBe('halt');
     expect($refused['reason'])->toContain('cannot re-arm the run at implement');
@@ -211,7 +211,7 @@ it('halts a launch whose recorded spec is missing at last_sha, and records it', 
     $repo = suite_repo();
     $manifest = $repo . '/.claude/pipeline/feature-x.json';
     manifest_write($manifest, [
-        'branch' => 'feature/x', 'worktree' => $repo, 'mode' => 'auto',
+        'branch' => 'feature/x', 'worktree' => $repo, 'mode' => 'autoflow',
         'cursor' => ['leg' => 'review-plan', 'status' => 'pending'],
         'artifacts' => ['spec' => 'docs/spec.md', 'plan' => null, 'pr' => null, 'issue' => null],
         'last_sha' => pipeline_git($repo, ['rev-parse', 'HEAD']), 'gate_ledger' => [],
@@ -233,15 +233,27 @@ it('halts a launch whose recorded spec is missing at last_sha, and records it', 
 });
 
 it('halts a launch without a manifest or a diff file', function () {
-    $fixture = dispatch_fixture();
+    $fixture = dispatch_fixture(['mode' => 'autoflow']);
 
     expect(dispatch_cli(['launch', '/nonexistent/m.json', $fixture['diff']])['json']['action'])->toBe('halt');
     expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['dir'] . '/missing.diff'])['json']['action'])->toBe('halt');
 });
 
+it('launches only autoflow runs, and next refuses one', function () {
+    $auto = dispatch_fixture();
+    expect(dispatch_cli(['launch', $auto['manifest'], $auto['diff']])['json'])
+        ->toBe(['action' => 'halt', 'reason' => "launch starts autoflow runs; this run's mode is auto (resume it with /pipeline, which uses next)"]);
+    expect(manifest_read($auto['manifest'])['cursor'])->toBe(['leg' => 'review-plan', 'status' => 'pending']);
+
+    $flow = dispatch_fixture(['mode' => 'autoflow']);
+    expect(dispatch_cli(['next', $flow['manifest']])['json'])
+        ->toBe(['action' => 'halt', 'reason' => 'an autoflow run resumes with launch, not next']);
+    expect(is_file($flow['brief']))->toBeFalse();
+});
+
 it('prints the brief for the step it is given and records that step as running', function () {
     $open = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
-    $fixture = dispatch_fixture(['cursor' => ['leg' => 'design', 'status' => 'halted', 'reason' => 'x'], 'gate_ledger' => [$open]]);
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'design', 'status' => 'halted', 'reason' => 'x'], 'gate_ledger' => [$open]]);
 
     $result = dispatch_cli(['brief', $fixture['manifest'], 'review-plan', 'resolve']);
 
@@ -254,7 +266,7 @@ it('prints the brief for the step it is given and records that step as running',
 });
 
 it('halts a step the ledger does not support, and leaves the manifest alone', function () {
-    $fixture = dispatch_fixture(['cursor' => ['leg' => 'review-plan', 'status' => 'continued']]);
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'review-plan', 'status' => 'continued']]);
 
     expect(dispatch_cli(['brief', $fixture['manifest'], 'review-plan', 'resolve'])['json'])
         ->toBe(['action' => 'halt', 'reason' => 'no open plan-approval review to resolve']);
@@ -262,7 +274,7 @@ it('halts a step the ledger does not support, and leaves the manifest alone', fu
 });
 
 it('records the workflow\'s return with finish', function (string $decision, array $cursor) {
-    $fixture = dispatch_fixture(['cursor' => ['leg' => 'implement', 'status' => 'pending']]);
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'implement', 'status' => 'pending']]);
 
     expect(dispatch_cli(['finish', $fixture['manifest'], $decision])['code'])->toBe(0);
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe($cursor);

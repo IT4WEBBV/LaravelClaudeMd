@@ -5,7 +5,7 @@
  *
  *   interactive:  php dispatch_cli.php next <manifest>
  *                 php dispatch_cli.php returned <manifest> <diff-file>
- *   auto:         php dispatch_cli.php launch <manifest> <diff-file> [--from <leg>]
+ *   autoflow:     php dispatch_cli.php launch <manifest> <diff-file> [--from <leg>]
  *                 php dispatch_cli.php brief <manifest> <leg> <step>
  *                 php dispatch_cli.php finish <manifest> <decision-json>
  *
@@ -60,6 +60,9 @@ function dispatch_cli_next(string $manifestPath): array
     $manifest = manifest_read($manifestPath);
     if ($manifest === null) {
         return pipeline_halt("no readable manifest at {$manifestPath}");
+    }
+    if (($manifest['mode'] ?? null) === 'autoflow') {
+        return pipeline_halt('an autoflow run resumes with launch, not next');
     }
     if (dispatch_cli_finished($manifest)) {
         return ['action' => 'done'];
@@ -130,6 +133,9 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
     $manifest = manifest_read($manifestPath);
     if ($manifest === null || ! is_file($diffPath)) {
         return pipeline_halt("cannot launch: the manifest {$manifestPath} or the diff file {$diffPath} is missing");
+    }
+    if (($manifest['mode'] ?? null) !== 'autoflow') {
+        return pipeline_halt("launch starts autoflow runs; this run's mode is {$manifest['mode']} (resume it with /pipeline, which uses next)");
     }
     $triggers = pipeline_triggers((string) file_get_contents($diffPath));
 
