@@ -8,9 +8,13 @@
  *   autoflow:     php dispatch_cli.php launch <manifest> <diff-file> [--from <leg>]
  *                 php dispatch_cli.php brief <manifest> <leg> <step>
  *                 php dispatch_cli.php finish <manifest> <decision-json>
+ *                 php dispatch_cli.php size <manifest>
+ *                 php dispatch_cli.php ui <diff-file>
  *
- * `brief` prints the brief as Markdown; every other answer, and a `brief` that halts, is one JSON
- * line. Exits 0 on every decision, a halt included. Exits 1 on a usage error.
+ * `brief` prints the brief as Markdown; `size` and `ui` print a bare value for a step to copy
+ * (`Bounded` / `Architectural`, `true` / `false`); every other answer, and a `brief` that halts, is
+ * one JSON line. Exits 0 on every decision, a halt included. Exits 1 on a usage error, and when
+ * `size` has no readable manifest or `ui` no diff file.
  */
 
 require_once __DIR__ . '/triggers.php';
@@ -85,6 +89,12 @@ function dispatch_cli_invalid(array $manifest): ?string
     return in_array($manifest['cursor']['leg'] ?? null, pipeline_legs(), true) ? null : 'the manifest is invalid: cursor.leg is not a leg';
 }
 
+/** `launch`, `brief` and `finish` serve `autoflow` runs only; a valid manifest of any other mode resumes with `next`. */
+function dispatch_cli_mode_problem(string $refusal, array $manifest): ?string
+{
+    return $manifest['mode'] === 'autoflow' ? null : "{$refusal}; this run's mode is {$manifest['mode']} (resume it with /pipeline, which uses next)";
+}
+
 /** Finished: `status: done` as this dispatcher writes it, or the old engine's `leg: done`. */
 function dispatch_cli_finished(array $manifest): bool
 {
@@ -134,13 +144,17 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
     if ($manifest === null || ! is_file($diffPath)) {
         return pipeline_halt("cannot launch: the manifest {$manifestPath} or the diff file {$diffPath} is missing");
     }
-    if (($manifest['mode'] ?? null) !== 'autoflow') {
-        return pipeline_halt("launch starts autoflow runs; this run's mode is {$manifest['mode']} (resume it with /pipeline, which uses next)");
+    $problem = dispatch_cli_invalid($manifest) ?? dispatch_cli_mode_problem('launch starts autoflow runs', $manifest);
+    if ($problem !== null) {
+        return pipeline_halt($problem);
     }
     $triggers = pipeline_triggers((string) file_get_contents($diffPath));
 
     if ($from !== null) {
-        if (! pipeline_can_navigate((string) ($manifest['cursor']['leg'] ?? ''), $from, pipeline_done_legs($manifest['gate_ledger'] ?? []), $triggers)) {
+        if (! in_array($from, pipeline_legs(), true)) {
+            return pipeline_halt("cannot re-arm the run at '{$from}': not a leg");
+        }
+        if (! pipeline_can_navigate($manifest['cursor']['leg'], $from, pipeline_done_legs($manifest['gate_ledger'] ?? []), $triggers)) {
             return pipeline_halt("cannot re-arm the run at {$from}: a gate before it has not run");
         }
         $manifest = [...$manifest, 'cursor' => ['leg' => $from, 'status' => 'pending']];
@@ -148,10 +162,6 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
     }
     if (dispatch_cli_finished($manifest)) {
         return ['action' => 'done'];
-    }
-    $invalid = dispatch_cli_invalid($manifest);
-    if ($invalid !== null) {
-        return pipeline_halt($invalid);
     }
     $leg = $manifest['cursor']['leg'];
     $problem = dispatch_cli_invariant_problem($manifest);
@@ -215,7 +225,9 @@ function dispatch_cli_brief(string $manifestPath, string $leg, string $step): ar
     if ($manifest === null) {
         return pipeline_halt("no readable manifest at {$manifestPath}");
     }
-    $problem = dispatch_cli_invalid($manifest) ?? pipeline_step_problem($manifest, $leg, $step);
+    $problem = dispatch_cli_invalid($manifest)
+        ?? dispatch_cli_mode_problem('brief serves autoflow steps', $manifest)
+        ?? pipeline_step_problem($manifest, $leg, $step);
     if ($problem !== null) {
         return pipeline_halt($problem);
     }
@@ -236,7 +248,11 @@ function dispatch_cli_finish(string $manifestPath, string $decisionJson): array
     if ($manifest === null) {
         return pipeline_halt("no readable manifest at {$manifestPath}");
     }
-    $leg = (string) ($manifest['cursor']['leg'] ?? '');
+    $problem = dispatch_cli_invalid($manifest) ?? dispatch_cli_mode_problem('finish records autoflow runs', $manifest);
+    if ($problem !== null) {
+        return pipeline_halt($problem);
+    }
+    $leg = $manifest['cursor']['leg'];
     $decision = json_decode($decisionJson, true);
     $decision = is_array($decision) ? $decision : [];
     if (($decision['action'] ?? null) === 'done') {
@@ -255,6 +271,20 @@ function dispatch_cli_finish(string $manifestPath, string $decisionJson): array
     );
 }
 
+/** An `autoflow` design step's `size`: the committed spec's, as `launch` reads it. */
+function dispatch_cli_size(string $manifestPath): ?string
+{
+    $manifest = manifest_read($manifestPath);
+
+    return $manifest === null ? null : dispatch_cli_design_size($manifest)->value . "\n";
+}
+
+/** An `autoflow` implement step's `ui`: `pipeline_triggers()` over the diff it wrote. */
+function dispatch_cli_ui(string $diffPath): ?string
+{
+    return is_file($diffPath) ? json_encode(pipeline_triggers((string) file_get_contents($diffPath))['ui']) . "\n" : null;
+}
+
 $flag = array_search('--from', $argv, true);
 $result = match ($argv[1] ?? '') {
     'next' => dispatch_cli_next((string) ($argv[2] ?? '')),
@@ -262,11 +292,13 @@ $result = match ($argv[1] ?? '') {
     'launch' => dispatch_cli_launch((string) ($argv[2] ?? ''), (string) ($argv[3] ?? ''), $flag === false ? null : (string) ($argv[$flag + 1] ?? '')),
     'brief' => dispatch_cli_brief((string) ($argv[2] ?? ''), (string) ($argv[3] ?? ''), (string) ($argv[4] ?? '')),
     'finish' => dispatch_cli_finish((string) ($argv[2] ?? ''), (string) ($argv[3] ?? '')),
+    'size' => dispatch_cli_size((string) ($argv[2] ?? '')),
+    'ui' => dispatch_cli_ui((string) ($argv[2] ?? '')),
     default => null,
 };
 
 if ($result === null) {
-    fwrite(STDERR, "usage: dispatch_cli.php next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] | brief <manifest> <leg> <step> | finish <manifest> <decision-json>\n");
+    fwrite(STDERR, "usage: dispatch_cli.php next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] | brief <manifest> <leg> <step> | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> (size needs a readable manifest, ui an existing diff file)\n");
     exit(1);
 }
 

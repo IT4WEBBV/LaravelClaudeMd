@@ -79,8 +79,11 @@ The deterministic guardrails are tested PHP in `checks/` (run
 
 ## `autoflow` — how a run starts and ends
 
-The two unattended modes run side by side until the keep/revert decision in PR #50: after 6
-`autoflow` runs, measured against the criteria there, the loser is deleted.
+The two unattended modes run side by side until the keep/revert decision: after 6 `autoflow` runs,
+measured against `docs/superpowers/specs/2026-09-23-pipeline-auto-workflow-design.md` §Measurement,
+the decision is "keep `autoflow` and delete `auto`" or "delete `autoflow`"
+(`docs/superpowers/plans/2026-09-23-pipeline-auto-workflow.md` Amendment A). PR #50 carries the
+numbers.
 
 The invoking session (this one, or `orchestrate`) holds only the two edges of an `autoflow` run
 (`references/engine.md` §`autoflow`):

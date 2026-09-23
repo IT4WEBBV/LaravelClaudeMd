@@ -13,8 +13,9 @@ export const meta = {
 }
 
 // Repeated from pipeline.php (pipeline_legs, pipeline_next_leg) and dispatch.php (pipeline_loop_target,
-// LegStatus::allowedFor, PIPELINE_LOOP_BOUND), which interactive mode uses. The smoke run in
-// docs/superpowers/plans/2026-09-23-pipeline-auto-workflow.md (Task 6) is this script's test.
+// LegStatus::allowedFor, PIPELINE_LOOP_BOUND), which interactive mode uses; LockStepTest fails when
+// LEGS, LOOP_TARGET, ALLOWED or BOUND drift from them. The smoke run in
+// docs/superpowers/plans/2026-09-23-pipeline-auto-workflow.md (Task 6) tests the routing.
 const LEGS = ['design', 'review-plan', 'handoff', 'implement', 'verify-ui', 'review-pr']
 const STEPS = { 'review-plan': ['review', 'resolve'], 'review-pr': ['review', 'resolve'] }
 const LOOP_TARGET = { 'review-plan': 'design', 'verify-ui': 'implement', 'review-pr': 'implement' }
@@ -65,10 +66,10 @@ function stepPrompt(leg, step) {
     "3. Finish as the brief's `## Return` says.",
   ]
   if (leg === 'design') {
-    lines.push(`4. After the last commit, run \`php -r '$m = json_decode(file_get_contents($argv[2]), true); $s = (string) ($m["artifacts"]["spec"] ?? ""); $p = $s === "" || $s[0] === "/" ? $s : rtrim($m["worktree"], "/") . "/" . $s; require $argv[1]; echo DesignSize::fromSpec($p !== "" && is_file($p) ? file_get_contents($p) : "")->value;' ${args.checks}/design_size.php ${args.manifest}\`, and return what it prints as \`size\`: copy it, do not judge it.`)
+    lines.push(`4. After the last commit, run \`php ${args.checks}/dispatch_cli.php size ${args.manifest}\` and return what it prints as \`size\`: copy it, do not judge it. Every return carries \`size\`; on a halt its value is ignored.`)
   }
   if (leg === 'implement') {
-    lines.push(`4. After the last commit, run \`git -C ${args.worktree} diff origin/<base>...HEAD > ${diff}\` with <base> the PR's base branch (\`gh pr view <pr> --json baseRefName --jq .baseRefName\`, <pr> being \`artifacts.pr\` in ${args.manifest}), then \`php -r 'require $argv[1]; echo json_encode(pipeline_triggers(file_get_contents($argv[2]))["ui"]);' ${args.checks}/triggers.php ${diff}\`, and return what it prints as \`ui\`: copy it, do not judge it.`)
+    lines.push(`4. After the last commit, run \`git -C ${args.worktree} diff origin/<base>...HEAD > ${diff}\` with <base> the PR's base branch (\`gh pr view <pr> --json baseRefName --jq .baseRefName\`, <pr> being \`artifacts.pr\` in ${args.manifest}), then \`php ${args.checks}/dispatch_cli.php ui ${diff}\`, and return what it prints as \`ui\`: copy it, do not judge it. Every return carries \`ui\`; on a halt its value is ignored.`)
   }
   if (leg === 'review-pr' && step === 'resolve') {
     lines.push(`4. Run the proof page's \`open\` as \`PIPELINE_NO_OPEN=${args.noOpen ? 1 : 0} php ${args.checks}/proof_cli.php open …\`.`)
@@ -123,8 +124,8 @@ while (leg) {
     if (result.status !== 'continued') break
   }
   if (result.status === 'halted') return halt(leg, result.reason)
-  if (result.ui !== undefined) ui = result.ui
-  if (result.size) size = result.size
+  if (leg === 'implement') ui = result.ui
+  if (leg === 'design') size = result.size
   if (result.status === 'continued') {
     leg = nextLeg(leg)
     continue

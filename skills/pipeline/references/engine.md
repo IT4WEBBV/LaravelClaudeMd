@@ -113,14 +113,16 @@ The invoking session — the main session or `orchestrate` — is an agent only 
 one tested command at each. Nothing reads a step's work in between; a halt lands in the session that
 launched the run, with its reason.
 
-- **`launch`** does once what the run needs at its start: `manifest_validate`, the finished rules (a
-  cursor whose status is `done`, or the old engine's `leg: done`, answers `done`), the invariant check
+- **`launch`** does once what the run needs at its start: `manifest_validate` and a cursor on a leg,
+  `mode: autoflow` (`launch`, `brief` and `finish` each halt on any other mode, and touch nothing), the
+  finished rule (a cursor whose status is `done` answers `done`), the invariant check
   (`manifest.md` §Invariant check), the step to start at (`pipeline_step()`), the loop-backs so far
   per looping leg (`pipeline_loop_counts()`; an `unknown` cycle gives that gate the bound, which
   permits no loop-back), `ui` from the diff and the design size from the spec's header. `--from <leg>`
-  re-arms a run at that leg through `pipeline_can_navigate()`: a PR that needs new commits gets a new
-  run with `--from review-pr`, without editing a file. `checks` is the directory `launch` ran from, so
-  every step's `brief` runs the same code.
+  re-arms a run at that leg through `pipeline_can_navigate()`, after those checks and only for one of
+  `pipeline_legs()`: a PR that needs new commits gets a new run with `--from review-pr`, without
+  editing a file. `checks` is the directory `launch` ran from, so every step's `brief` runs the same
+  code.
 - **The script** gives each step a schema whose `status` allows only what that step may return
   (`LegStatus::allowedFor()`), continues, loops back or returns on that status, counts each loop-back
   against the bound of 2 per gate (`gates.md` §Loop-backs), and returns `{action: done}` or
@@ -136,8 +138,10 @@ launched the run, with its reason.
   step that was running — and prints the brief, or prints a halt when the ledger does not support the
   step (`resolve` with no open review, `review` with one already open). The step writes its results
   into the manifest (`manifest.md` §What a leg writes) and returns `{status, reason}`; `implement`
-  also returns `ui`, copied from `pipeline_triggers()` over its diff, and `design` returns `size`,
-  copied from `DesignSize::fromSpec()` over the spec it committed.
+  also returns `ui`, copied from `dispatch_cli.php ui <diff>` (`pipeline_triggers()` over its diff),
+  and `design` returns `size`, copied from `dispatch_cli.php size <manifest>` (`DesignSize::fromSpec()`
+  over the spec it committed). Both are required on every return of their step and ignored on a halt;
+  the script takes `ui` only from `implement` and `size` only from `design`.
 - **`finish`** records the return: `done` sets `cursor.status: done`, but only with the cursor on
   `review-pr` — anywhere else it records the halt "the workflow returned done at <leg>"; a halt sets
   `cursor: {leg, status: halted, reason}`, keeping the cursor's leg when the return names none of the
@@ -477,6 +481,10 @@ past the re-review.
 **Once, and one way.** An Architectural spec never shrinks, and an escalation is not a loop-back:
 - it does not count toward `review-plan`'s cycle bound;
 - once the PR exists, bound exhaustion follows the after-`handoff` rule (§Failure policy).
+
+In `auto` and `interactive`, `pipeline_route` sends every Bounded `plan-insufficient` to `design`
+without counting repeats, and relies on the grow-form brief to make the spec Architectural; `autoflow`
+exempts one per run and counts the rest toward `review-plan`'s bound.
 
 ### A plan gap on an Architectural design — a loop-back, not a halt
 

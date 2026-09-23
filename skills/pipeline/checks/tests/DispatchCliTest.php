@@ -286,3 +286,68 @@ it('records the workflow\'s return with finish', function (string $leg, string $
     'a halt from the invoking session' => ['implement', '{"action":"halt","reason":"the workflow errored"}', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'the workflow errored']],
     'no decision' => ['implement', 'not json', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'the workflow returned no decision: not json']],
 ]);
+
+it('halts a launch on a manifest without a mode, printing only the JSON line', function () {
+    $fixture = dispatch_fixture();
+    $manifest = manifest_read($fixture['manifest']);
+    unset($manifest['mode']);
+    manifest_write($fixture['manifest'], $manifest);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['stdout'])
+        ->toBe(json_encode(['action' => 'halt', 'reason' => 'the manifest is invalid: missing mode']) . "\n");
+});
+
+it('refuses --from with a leg that is not one, and leaves the manifest alone', function (string $from) {
+    $fixture = dispatch_fixture(['mode' => 'autoflow']);
+    $before = file_get_contents($fixture['manifest']);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff'], '--from', $from])['json'])
+        ->toBe(['action' => 'halt', 'reason' => "cannot re-arm the run at '{$from}': not a leg"]);
+    expect(file_get_contents($fixture['manifest']))->toBe($before);
+})->with(['an unknown leg' => ['reveiw-pr'], 'no leg' => ['']]);
+
+it('re-arms nothing on a manifest that is not an autoflow run\'s', function () {
+    $fixture = dispatch_fixture(['cursor' => ['leg' => 'review-pr', 'status' => 'done']]);
+    $before = file_get_contents($fixture['manifest']);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff'], '--from', 'design'])['json']['action'])->toBe('halt');
+    expect(file_get_contents($fixture['manifest']))->toBe($before);
+});
+
+it('serves brief and finish on autoflow runs only, and leaves the manifest alone', function (array $arguments, string $reason) {
+    $fixture = dispatch_fixture(['cursor' => ['leg' => 'implement', 'status' => 'pending']]);
+    $before = file_get_contents($fixture['manifest']);
+
+    expect(dispatch_cli([$arguments[0], $fixture['manifest'], ...array_slice($arguments, 1)])['json'])
+        ->toBe(['action' => 'halt', 'reason' => $reason]);
+    expect(file_get_contents($fixture['manifest']))->toBe($before);
+})->with([
+    'brief' => [['brief', 'implement', 'run'], "brief serves autoflow steps; this run's mode is auto (resume it with /pipeline, which uses next)"],
+    'finish' => [['finish', '{"action":"done"}'], "finish records autoflow runs; this run's mode is auto (resume it with /pipeline, which uses next)"],
+]);
+
+it('prints the committed spec\'s design size, bare', function (string $spec, string $size) {
+    $fixture = dispatch_fixture(['artifacts' => ['spec' => 'spec.md', 'plan' => null, 'pr' => null, 'issue' => null]]);
+    file_put_contents($fixture['dir'] . '/spec.md', $spec);
+
+    expect(dispatch_cli(['size', $fixture['manifest']]))->toMatchArray(['code' => 0, 'stdout' => "{$size}\n"]);
+})->with([
+    'Bounded' => ["# x — design\n\n**Design size:** Bounded\n", 'Bounded'],
+    'Architectural' => ["# x — design\n\n**Design size:** Architectural\n", 'Architectural'],
+    'no header' => ["# x — design\n", 'Architectural'],
+]);
+
+it('prints whether a diff touches UI, bare', function (string $diff, string $ui) {
+    $fixture = dispatch_fixture();
+    file_put_contents($fixture['diff'], $diff);
+
+    expect(dispatch_cli(['ui', $fixture['diff']]))->toMatchArray(['code' => 0, 'stdout' => "{$ui}\n"]);
+})->with([
+    'a view' => [dispatch_ui_diff(), 'true'],
+    'no view' => ["+++ b/app/X.php\n@@ -1,0 +1,1 @@\n+<?php\n", 'false'],
+]);
+
+it('refuses size without a readable manifest and ui without a diff file', function () {
+    expect(dispatch_cli(['size', '/nonexistent/m.json']))->toMatchArray(['code' => 1, 'stdout' => '']);
+    expect(dispatch_cli(['ui', '/nonexistent/x.diff']))->toMatchArray(['code' => 1, 'stdout' => '']);
+});

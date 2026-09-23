@@ -108,8 +108,8 @@ Each is bounded to 2 per gate, counted from the gate's `looped-back` ledger entr
 and so does any loop-back once the count is `unknown` (`manifest.md` §Reconstruction). In `auto` and
 `interactive` `pipeline_returned()` evaluates both; in `autoflow` the workflow script does
 (`LOOP_TARGET` and `BOUND` in `../workflow/pipeline-autoflow.js`, starting from `launch`'s ledger
-counts). Keep this list in lock-step with the function and the script: `LockStepTest` fails when the
-function drifts, the smoke run when the script does.
+counts). Keep this list in lock-step with the function and the script: `LockStepTest` fails when
+either drifts from the function.
 
 ## How a run calls Phase A
 
@@ -133,6 +133,8 @@ php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from 
 # → {"action":"start",…} | {"action":"done"} | {"action":"halt","reason":…}
 php "$CHECKS/dispatch_cli.php" brief <manifest> <leg> <step>      # each step's first command
 # → the brief, or {"action":"halt","reason":…}
+php "$CHECKS/dispatch_cli.php" size <manifest>                   # design's last command → Bounded | Architectural
+php "$CHECKS/dispatch_cli.php" ui "<manifest stem>.diff"         # implement's last command → true | false
 php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
 ```
 
