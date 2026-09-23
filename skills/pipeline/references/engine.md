@@ -407,9 +407,9 @@ overrides any mark-ready instruction in the plan, the PR comment, or `work-on`'s
 A cold-resume session that picks the PR up from its comment is outside the loop, so nothing mechanical
 can stop it undrafting early — the instruction in the brief is the only control. Keep it there.
 
-**A draft stays untested until it carries the `ci` label** — in a repo that has one; a repo without it
-tests every push. The PR stays draft through `verify-ui` and `review-pr`, so every fix pushed there is
-only tested once the label is on, and until then `gh pr checks` reads the skipped CI check as green.
+**A PR stays untested until it carries the `ci` label** — in a repo that has one; a repo without it
+tests every push. Every fix pushed during `verify-ui` and `review-pr` is only tested once the label is
+on, and until then `gh pr checks` reads the skipped CI check as green.
 `work-on`'s leg 8 adds it before the push whose CI it watches; say it in the `implement` brief as
 well: **"add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch."**
 
