@@ -73,7 +73,7 @@ function pipeline_leg_overrides(string $mode): array
     ];
 }
 
-/** `$step` is given in `auto` (the workflow script names it) and derived from the ledger in `interactive`. */
+/** `$step` is given in `autoflow` (the workflow script names it) and derived from the ledger in `interactive`. */
 function pipeline_brief(array $manifest, string $leg, string $manifestPath, ?string $step = null): string
 {
     $step ??= pipeline_step($manifest, $leg);

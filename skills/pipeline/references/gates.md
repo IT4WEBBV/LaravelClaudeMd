@@ -8,10 +8,10 @@ memory, and it reads neither the mode nor anything a review said.
 All three are backed by tested Phase A functions in `../checks/pipeline.php` and
 `../checks/triggers.php`. This doc mirrors those functions; keep them in lock-step.
 
-## Modes — one choice, two behaviours
+## Modes — one choice, three modes
 
-`mode` is the only knob, and **anything that is not `auto` behaves as `interactive`** — the
-stricter of the two. That fallback used to be asserted mechanically by `pipeline_resolve_policy()`;
+`mode` is the only knob, and **anything that is neither `auto` nor `autoflow` behaves as
+`interactive`** — the strictest of them. That fallback used to be asserted mechanically by `pipeline_resolve_policy()`;
 the function is gone (its two gates were always identical to each other and a pure function of
 mode), so the rule lives here and has to stay explicit: `manifest_validate` checks key *presence*,
 not value, so a manifest with a mangled `mode` must still fail safe.
@@ -20,8 +20,9 @@ not value, so a manifest with a mangled `mode` must still fail safe.
 |---|---|
 | **`interactive`** *(default)* | you are present; run one leg, show you the review, wait. Every point in it is yours to judge. Advance by saying so (see navigation). |
 | **`auto`** | run the autonomous legs unattended. The reviews still run; a fresh resolve step reads each and acts, looping back where the work is wrong and never interrupting on a finding (`engine.md` §`auto`). Hard failures and bound exhaustion still stop. |
+| **`autoflow`** | as `auto`, but the loop is the workflow `pipeline-autoflow`, not an agent (`engine.md` §`autoflow`); for the side-by-side comparison, until the keep/revert decision. |
 
-There is no third mode and no per-gate override — both gates behave the same way within a mode.
+There is no per-gate override — both gates behave the same way within a mode.
 The **report-only override** that once existed (`auto` with `plan-approval` flipped to `report` in
 a stored `gate_policy`) is **deleted by decision, not oversight**: two of its three documented
 effects — adjudicate nothing, escalate nothing — are now the default everywhere, which left only
@@ -104,14 +105,16 @@ PR that has not passed `review-plan` and `review-pr` against the recorded artifa
 - `review-pr` → `implement`
 
 Each is bounded to 2 per gate, counted from the gate's `looped-back` ledger entries; the third halts,
-and so does any loop-back once the count is `unknown` (`manifest.md` §Reconstruction). The dispatcher
-evaluates both in `pipeline_returned()`. Keep this list in lock-step with the function; `LockStepTest`
-fails when they drift.
+and so does any loop-back once the count is `unknown` (`manifest.md` §Reconstruction). In `auto` and
+`interactive` `pipeline_returned()` evaluates both; in `autoflow` the workflow script does
+(`LOOP_TARGET` and `BOUND` in `../workflow/pipeline-autoflow.js`, starting from `launch`'s ledger
+counts). Keep this list in lock-step with the function and the script: `LockStepTest` fails when the
+function drifts, the smoke run when the script does.
 
-## How the dispatcher calls Phase A
+## How a run calls Phase A
 
-Once per step, one command (`engine.md` §The loop). It computes the triggers from a diff file the
-dispatcher writes but never reads:
+`auto` and `interactive` call it once per step, one command (`engine.md` §The loop). It computes the
+triggers from a diff file the dispatcher (or the session) writes but never reads:
 
 ```bash
 CHECKS="$HOME/.claude/skills/pipeline/checks"
@@ -119,6 +122,18 @@ git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
 php "$CHECKS/dispatch_cli.php" returned <manifest> "<manifest stem>.diff"
 # → {"action":"dispatch","leg":…,"step":…,"inline":…,"prompt":…} | {"action":"retry",…}
 #   | {"action":"halt","reason":…} | {"action":"done"}
+```
+
+`autoflow` calls it at the two edges of a run and once per step (`engine.md` §`autoflow`):
+
+```bash
+CHECKS="$HOME/.claude/skills/pipeline/checks"
+git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
+php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>]
+# → {"action":"start",…} | {"action":"done"} | {"action":"halt","reason":…}
+php "$CHECKS/dispatch_cli.php" brief <manifest> <leg> <step>      # each step's first command
+# → the brief, or {"action":"halt","reason":…}
+php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
 ```
 
 A leg that needs the triggers itself — the package annotation, the Bounded escalation check — calls

@@ -208,7 +208,7 @@ function dispatch_cli_pr_view(string $worktree, int|string $pr): ?array
     return is_array($view) ? $view : null;
 }
 
-/** An `auto` step's first command: the step the script chose becomes the cursor, then its brief. */
+/** An `autoflow` step's first command: the step the script chose becomes the cursor, then its brief. */
 function dispatch_cli_brief(string $manifestPath, string $leg, string $step): array|string
 {
     $manifest = manifest_read($manifestPath);

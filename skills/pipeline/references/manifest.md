@@ -15,8 +15,8 @@ Read/written by the Phase A helpers in `../checks/manifest.php`:
 |---|---|---|
 | `branch` | **required** | run identity (also the manifest filename) |
 | `worktree` | **required** | absolute path of the run's worktree — where every leg operates |
-| `mode` | **required** | `interactive` or `auto` |
-| `cursor` | **required** | `{leg, status, reason?, retried?}` — the current leg; `status` is `pending` (set by the dispatcher), the status the leg returned, or `done` (set by the dispatcher on a finished run; `next` then answers `done` and dispatches nothing); `reason` only with `halted`; `retried` only after a review step's single retry |
+| `mode` | **required** | `interactive`, `auto` or `autoflow` |
+| `cursor` | **required** | `{leg, status, reason?, retried?}` — the current leg; `status` is `pending` (written by `next`, or by `brief` as an `autoflow` step starts), the status the leg returned, `halted` (with `reason`), or `done` (written by `returned` or `finish` on a finished run; `next` and `launch` then answer `done` and dispatch nothing); `reason` only with `halted`; `retried` only after a review step's single retry in `auto` or `interactive` |
 | `pipeline_id` | optional | stable id alongside `branch` |
 | `artifacts` | optional | pointers: idea, spec path, plan path, PR number, issue number (`engine.md` §The work item), `proof` — the proof page `verify-ui` wrote |
 | `last_sha` | optional | HEAD at the last completed leg |
@@ -113,31 +113,38 @@ An `interactive` entry is the same shape with the human in the resolve step's pl
 `annotations` still recorded, `actions` holding what the human decided, and their decision as the
 `outcome`.
 
-## What a leg writes — checked on every return
+## What a leg writes — and who checks it
 
 A leg writes only its results: `artifacts`, `last_sha`, `suite`, its `gate_ledger` entry, and
 `cursor.status` — plus `cursor.reason` when it halts. It never moves `cursor.leg` and never writes a
-brief. After every return the dispatcher compares the manifest with its snapshot
-(`pipeline_returned()`, `../checks/dispatch.php`) and **halts** when any other key changed, when an
-existing ledger entry was rewritten (the resolve step may only complete the open entry), or when the
-status does not agree with the ledger.
+brief. In `auto` and `interactive`, after every return `returned` compares the manifest with its
+snapshot (`pipeline_returned()`, `../checks/dispatch.php`) and **halts** when any other key changed,
+when an existing ledger entry was rewritten (the resolve step may only complete the open entry), or
+when the status does not agree with the ledger. In `autoflow` nothing compares: the workflow script
+trusts the status the step returns, `brief` halts a step the ledger does not support, and
+`run_audit.php` reports after the run whether the ledger agrees with what the steps reported
+(`engine.md` §`autoflow`).
 
 | `cursor.status` | Meaning |
 |---|---|
 | `continued` | the step did its work; a review step has appended one open entry |
 | `looped-back` | a resolve step or `verify-ui` sends the work back (`gates.md` §Loop-backs); its entry says so |
 | `halted` | a hard failure; `cursor.reason` says what |
-| `plan-insufficient` | the plan does not cover what the change needs. Bounded: a `design-size` entry with `outcome: escalated` is appended and the design grows. Architectural: a `plan-approval` entry with `outcome: looped-back` is appended and the run loops back to `design` within `review-plan`'s bound (`engine.md` §Design size) |
+| `plan-insufficient` | the plan does not cover what the change needs. Bounded: a `design-size` entry with `outcome: escalated` is appended and the design grows. Architectural: a `plan-approval` entry with `outcome: looped-back` is appended and the run loops back to `design` within `review-plan`'s bound (`engine.md` §Design size). Never from a resolve step, which returns `looped-back` instead; a review step that returns it appends no review entry |
 
 Keep this section in lock-step with `LegStatus` and `pipeline_leg_writable_keys()`; `LockStepTest`
 fails when they drift.
 
-## Invariant check — every leg opens with one
+## Invariant check — before a run continues
 
 Before running a leg, confirm the file still matches reality:
 
 - the recorded artifact (spec/plan) exists at the recorded ref (`last_sha`),
 - the PR is in the expected state (draft/ready, exists).
+
+In `auto` and `interactive` every leg opens with one. In `autoflow`, `dispatch_cli.php launch` runs
+it once per launch, not per leg — the PR, once there is one, must be an open draft — and halts with
+the mismatch in `cursor.reason`.
 
 **Mismatch → halt**, do not trust the file. A halt is a human resume point, not a silent retry.
 

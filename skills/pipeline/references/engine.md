@@ -6,6 +6,16 @@ are `gates.md`. This file is the operational procedure.
 
 ## The loop
 
+All three modes walk the same legs with the same briefs. They differ in who holds the loop:
+
+| Mode | Who holds the loop | Commands |
+|---|---|---|
+| `auto` | the dispatcher, one background agent (§The dispatcher) | `next` / `returned`, below |
+| `interactive` | the session; the human resolves each review (§Interactive) | `next` / `returned`, below |
+| `autoflow` | the saved workflow `pipeline-autoflow`, a program (§`autoflow`) | `launch` / `brief` / `finish` |
+
+`launch` refuses a manifest whose mode is not `autoflow`, and `next` refuses one whose mode is.
+
 ```
 read manifest (or reconstruct it)          # manifest_read / manifest_infer_cursor
   → invariant check                         # recorded artifact at last_sha; PR as expected
@@ -75,6 +85,88 @@ php ~/.claude/skills/pipeline/checks/engine_peak_cli.php <the dispatcher's agent
 
 and reports its line with the run's result. Over 150k is an **annotation, never a halt**. Baseline
 before this design: median peak 253k; engines 18.1 percent of all usage since 2026-09-14.
+
+## `autoflow` — a program that calls agents
+
+The loop is `../workflow/pipeline-autoflow.js`, the saved workflow `pipeline-autoflow`: the order of
+steps, the loop-backs, their bounds and the halts are JavaScript, and agents exist only inside steps.
+
+```
+invoking session   kickoff → dispatch_cli.php launch → Workflow pipeline-autoflow (args: launch's JSON)
+                   … on its return: dispatch_cli.php finish → gh pr ready | halt duties → report
+workflow script    per step: agent(prompt, {schema}) → {status, reason, ui} → next step, loop-back or return
+step agent         dispatch_cli.php brief <manifest> <leg> <step> → the leg's work → the manifest → {status, reason}
+```
+
+```bash
+CHECKS="$HOME/.claude/skills/pipeline/checks"
+git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
+PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>]
+# → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"noOpen":…,"checks":…}
+#   | {"action":"done"} | {"action":"halt","reason":…}
+# start: the workflow pipeline-autoflow with that JSON as args, in the background; wait for its completion notice
+php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
+```
+
+The invoking session — the main session or `orchestrate` — is an agent only at the two edges, and runs
+one tested command at each. Nothing reads a step's work in between; a halt lands in the session that
+launched the run, with its reason.
+
+- **`launch`** does once what the run needs at its start: `manifest_validate`, the finished rules (a
+  cursor whose status is `done`, or the old engine's `leg: done`, answers `done`), the invariant check
+  (`manifest.md` §Invariant check), the step to start at (`pipeline_step()`), the loop-backs so far
+  per looping leg (`pipeline_loop_counts()`; an `unknown` cycle gives that gate the bound, which
+  permits no loop-back), `ui` from the diff and the design size from the spec's header. `--from <leg>`
+  re-arms a run at that leg through `pipeline_can_navigate()`: a PR that needs new commits gets a new
+  run with `--from review-pr`, without editing a file. `checks` is the directory `launch` ran from, so
+  every step's `brief` runs the same code.
+- **The script** gives each step a schema whose `status` allows only what that step may return
+  (`LegStatus::allowedFor()`), continues, loops back or returns on that status, counts each loop-back
+  against the bound of 2 per gate (`gates.md` §Loop-backs), and returns `{action: done}` or
+  `{action: halt, leg, reason}`. Nothing ends a run as `done` except `review-pr`'s resolve step
+  continuing. A Bounded escalation is not a loop-back; on an Architectural spec every
+  `plan-insufficient` counts toward `review-plan`'s bound. A review step runs on Fable, and once more on
+  Opus when it returns nothing; `handoff` runs at low effort; a step that throws or returns nothing
+  halts the run.
+- **A step** first runs `dispatch_cli.php brief <manifest> <leg> <step>`. It writes
+  `cursor: {leg, status: pending}` — so after a `TaskStop` or a dead session the cursor still names the
+  step that was running — and prints the brief, or prints a halt when the ledger does not support the
+  step (`resolve` with no open review, `review` with one already open). The step writes its results
+  into the manifest (`manifest.md` §What a leg writes) and returns `{status, reason}`; `implement`
+  also returns `ui`, copied from `pipeline_triggers()` over its diff.
+- **`finish`** records the return: `done` sets `cursor.status: done`; a halt sets
+  `cursor: {leg, status: halted, reason}`. When the workflow itself errored, pass
+  `{"action":"halt","reason":"<the error>"}`: the cursor keeps the step that was running. On `done` the
+  invoking session then runs **`gh pr ready <pr>`** (§Who takes the PR out of draft); on a halt after
+  `handoff`, §Failure policy's duties.
+- **Resume** is `/pipeline` as always: `launch` starts from the cursor, and the step it names runs
+  again.
+
+**No check on what a step reports.** The script trusts each step's `status`. A step that claims work it
+did not do is caught by the next gate (`review-plan` reads the spec and plan, `review-pr` the code), and
+`implement`'s `ui` is a copy of `pipeline_triggers()`' output, not a judgement. After every run the
+invoking session reports two facts with the result:
+
+```bash
+php "$CHECKS/run_cost_cli.php" <the run's transcript dir>
+git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
+php "$CHECKS/run_audit.php" <manifest> "<manifest stem>.diff" <the run's transcript dir>
+```
+
+The transcript dir is `~/.claude/projects/<project>/<session>/subagents/workflows/wf_<id>/`, named in
+the Workflow result. `run_cost_cli.php` prints the weighted cost per step and the largest step peak.
+`run_audit.php` prints whether `ui` over the final diff agrees with a `verify-ui` entry, and whether
+each gate's newest ledger entries agree with what the steps reported. A `MISMATCH` is the trigger for
+adding a check on step returns, never a halt.
+
+**Where a step works.** The worktree travels in the brief (*"Work only in `<worktree>`"*) and in
+absolute paths, never in the launch directory: `orchestrate` launches up to four runs from its primary
+checkout. Commands that key on the working directory (§Suite reuse's tree key) run from `cd <worktree>`
+or with `git -C <worktree>`, as the `autoflow` brief says.
+
+**What a workflow agent cannot do.** It cannot start agents, so no step dispatches one; its brief says
+how each station's dispatch is done by the step itself. And the auto-mode classifier denies it
+`gh pr ready`, so that write stays with the invoking session.
 
 ## Interactive — the same loop, the human resolves
 
@@ -217,14 +309,14 @@ It adds `.claude/pipeline/` to the repo's shared `info/exclude`. That file is lo
 shared by every worktree, so the PR diff stays clean. It does nothing when the path is already
 ignored.
 
-**The first `manifest_write` carries everything the dispatcher will never look up.** Kickoff — the
+**The first `manifest_write` carries everything no step will look up.** Kickoff — the
 session that holds the invocation, `/pipeline` itself or `orchestrate` for its runs — writes
 `branch`, `worktree`, `mode`, `cursor: {leg: design, status: pending}`, `light: true` when the
 invocation said `light`, the pointers `artifacts.idea` / `artifacts.issue` when the invocation named
-an idea file or an issue, and `decisions` (verbatim) when settled decisions were stated inline. The
-dispatcher never reads an artifact to recover any of these, so a field kickoff leaves out is simply
-absent from every brief: a `light` run would get an Architectural design brief, and inline decisions
-would never reach a reviewer.
+an idea file or an issue, and `decisions` (verbatim) when settled decisions were stated inline.
+Nothing that runs the loop, in any mode, reads an artifact to recover any of these, so a field
+kickoff leaves out is simply absent from every brief: a `light` run would get an Architectural design
+brief, and inline decisions would never reach a reviewer.
 
 ## Dev-stack readiness — pipeline-owned, no hesitation
 
@@ -247,11 +339,11 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 | Leg | Invokes | Interactive form | Autonomous form | Manifest I/O |
 |---|---|---|---|---|
 | **design** *(compound)* | `superpowers:brainstorming`, then `superpowers:writing-plans` for an **Architectural** design (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it); for a **Bounded** design, brainstorming's Bounded path with no `writing-plans` (§Design size) | human drives the brainstorm dialogue; if brainstorming classifies Bounded without `light`, the pipeline asks (§Design size); re-invoke `/pipeline` to continue | a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions. The brief says which path is permitted: Bounded only with `light`, otherwise Architectural | writes spec + plan pointers; the size is the spec's `**Design size:**` header, never stored |
-| **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | two steps (`pipeline_step`): a **review** agent invokes `/critique plan` and appends the review verbatim as an open `plan-approval` entry; a fresh **resolve** agent acts on it (§`auto`) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
+| **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | two steps (`pipeline_step`): a **review** agent invokes `/critique plan` (in `autoflow` it applies `/critique plan`'s procedure itself: it cannot start a reviewer) and appends the review verbatim as an open `plan-approval` entry; a fresh **resolve** agent acts on it (§`auto`) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth. References the issue **without a closing keyword** (§Closing links) — this PR carries no implementation yet | writes the PR# pointer |
 | **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links (§Closing links — `review-pr` reconciles them before the PR goes ready). **Leaves the PR draft** (below). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, writes the run's page to the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — the payload carries `nameWithOwner`, `pr` and `issue` so the page can link back to both — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
-| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | a **review** agent invokes `/critique pr` and appends an open `pr-review` entry; the **finish** step (its resolve step) acts on it, runs the suite unless reused, reconciles closing links (§Closing links), rewrites the proof page, runs `gh pr ready`, and opens the page last (§The proof store) | feeds the PR-review gate; writes `issue_links` onto the entry; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
+| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | a **review** agent invokes `/critique pr` (in `autoflow` it applies `/critique pr`'s procedure itself) and appends an open `pr-review` entry; the **finish** step (its resolve step) acts on it, runs the suite unless reused, reconciles closing links (§Closing links), rewrites the proof page, runs `gh pr ready`, and opens the page last (§The proof store). In `autoflow` the finish step leaves the PR draft, and the invoking session runs `gh pr ready` after `finish` (§Who takes the PR out of draft) | feeds the PR-review gate; writes `issue_links` onto the entry; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
 
 ## Design size — Bounded or Architectural
 
@@ -270,14 +362,14 @@ the exact header line and `Architectural` for anything else, so every older spec
 
 ### Who picks the size — always a human
 
-`/pipeline [interactive|auto] [light] <idea | number | spec-path>`. The word `light` **permits** Bounded.
+`/pipeline [interactive|auto|autoflow] [light] <idea | number | spec-path>`. The word `light` **permits** Bounded.
 It matters only while `design` has not run; on a resume the size comes from the spec and `light` is
 ignored, with a note saying so.
 
 | | with `light` | without `light` |
 |---|---|---|
 | `interactive` | brainstorming runs normally; Bounded when it classifies Bounded | when brainstorming classifies Bounded, **ask** as one multiple-choice question: *"This looks like a small change: continue with a short design (Bounded), or write the full spec and plan?"* Yes → Bounded. No → tell brainstorming to take the Architectural path |
-| `auto` | the design brief permits the Bounded path | the design brief requires the Architectural path |
+| `auto`, `autoflow` | the design brief permits the Bounded path | the design brief requires the Architectural path |
 
 brainstorming's own rule applies in every cell: *when in doubt between two paths, take the heavier
 one.* A classification never selects Bounded on its own authority.
@@ -307,7 +399,7 @@ The spec:
 <the observable result>
 
 ## Assumptions
-<auto only: each question that would have been asked, and the answer assumed>
+<auto and autoflow only: each question that would have been asked, and the answer assumed>
 ```
 
 The plan:
@@ -331,10 +423,11 @@ the code they name.
 
 **When to check.** Only while the spec says Bounded, by the step itself — its brief says so:
 - after every commit in `implement`, and
-- first thing in every later step.
+- first thing in every later step, except a resolve step, which loops back instead (below).
 
-On escalation the step appends the `design-size` entry and returns `plan-insufficient`; the dispatcher
-moves the cursor to `design` (`pipeline_returned()`), whose brief asks for the grow form.
+On escalation the step appends the `design-size` entry and returns `plan-insufficient`; the run goes
+back to `design` (`pipeline_returned()` in `auto` and `interactive`, the workflow script in
+`autoflow`), whose brief asks for the grow form.
 
 ```bash
 CHECKS="$HOME/.claude/skills/pipeline/checks"
@@ -361,7 +454,7 @@ php -r 'require $argv[1] . "/triggers.php"; require $argv[1] . "/design_size.php
 
 **On escalation, grow the design; do not re-design it.**
 1. Append a ledger entry: `{gate: 'design-size', leg: <current leg>, at, reason, outcome: 'escalated'}`.
-2. The dispatcher moves the cursor back to `design`; backward navigation is always allowed. In grow form:
+2. The run goes back to `design`; backward navigation is always allowed. In grow form:
    - change the spec header to `**Design size:** Architectural`;
    - add a `## Grown from Bounded` section: what changed, why it grew, what already exists (described
      as state, not re-designed), what remains;
@@ -387,8 +480,9 @@ of the plan approval**: the plan passed `review-plan` and turned out not to cove
 
 1. The step appends `{gate: 'plan-approval', leg: <its leg>, cycle, at, reason, outcome: 'looped-back'}`
    and returns `plan-insufficient`. A return without that entry halts.
-2. The dispatcher sends the cursor to `design` through the same bound as a `review-plan` loop-back
-   (`pipeline_loop_back()`): the entry counts toward the 2 cycles, and the third halts — before
+2. The run goes back to `design` through the same bound as a `review-plan` loop-back
+   (`pipeline_loop_back()` in `auto` and `interactive`, the script's `BOUND` in `autoflow`): the entry
+   counts toward the 2 cycles, and the third halts — before
    `handoff` with no push, after it with the PR left draft (§Failure policy).
 3. `design` extends the plan, and the spec where it must say more, to cover the entry's `reason`;
    what is already built is described as state, not re-designed. Then `review-plan`, `handoff pr`
@@ -396,6 +490,13 @@ of the plan approval**: the plan passed `review-plan` and turned out not to cove
 
 The entry resets `pipeline_done_legs()` like an escalation does, so the earlier plan approval cannot
 carry navigation past the re-review.
+
+**A resolve step never returns `plan-insufficient`.** A resolve step that finds a plan gap or a Bounded
+escalation returns `looped-back`: its open entry is completed and no bound is charged twice. If
+`implement` then finds the plan short, it reports the gap itself. **A review step that returns
+`plan-insufficient` appends no review entry**, so an escalation found after the review was written
+cannot leave a stale open review behind. In `autoflow` a resolve step's schema has no
+`plan-insufficient`; in `auto` and `interactive` `pipeline_returned()` halts on either.
 
 ## The proof store — where the visual record actually lives
 
@@ -448,7 +549,7 @@ compatible with the non-goal "no persistent state not reconstructable from git +
 `write` runs at least twice per run — `verify-ui` builds the page, `review-pr` finalises it — so
 opening from `write` would open the same page two or more times; a separate subcommand invoked once,
 at completion, is the only shape that opens once. A run that **halts** after the page exists opens it
-on the same rule: the dispatcher runs `proof_cli.php open <artifacts.proof>` when that pointer is set, because a halted run is exactly the one a human is about to go looking at: one
+on the same rule: the dispatcher runs `proof_cli.php open <artifacts.proof>` when that pointer is set (in `autoflow`, the invoking session after `finish`), because a halted run is exactly the one a human is about to go looking at: one
 `open`, at whatever turns out to be the run's last action.
 
 **A run with no page opens nothing.** A backend-only run never triggers `ui`, so `verify-ui` never
@@ -477,6 +578,12 @@ than one who closes a tab. The unattended batch that produces the burst is preci
 
 `handoff` opens the PR **draft** and it stays draft until **`review-pr`'s finish step**. `implement`
 does not run `gh pr ready`, and neither does `verify-ui`.
+
+**In `autoflow` the finish step leaves it draft too.** The auto-mode classifier denies a workflow agent
+`gh pr ready`, and it is the most consequential outward write a run makes, so it stays with the
+session that answers to the owner: after the workflow returns `done` and `finish` records it, the
+invoking session runs `gh pr ready <pr>`. The guarantee is unchanged: nothing marks the PR ready
+before `review-pr`'s finish step has run.
 
 This is not a preference; it is the same guarantee the navigation guardrail makes. `gates.md` states
 that *"there is no path to a non-draft PR that has not passed `review-plan` and `review-pr`"* — and
@@ -557,9 +664,11 @@ reconciliation ran there and produced an answer, so it is reported like any othe
 
 ## What a leg brief consists of
 
-Every brief is generated by `pipeline_brief($manifest, $leg)` (`../checks/brief.php`); nobody writes
-one by hand — not the dispatcher, not a leg, not a coordinator. The dispatcher's prompt is one line
-naming the brief file. A brief consists of:
+Every brief is generated by `pipeline_brief($manifest, $leg, $manifestPath, $step)`
+(`../checks/brief.php`); nobody writes one by hand — not the dispatcher, not the invoking session, not
+a leg, not a coordinator. In `auto` and `interactive` `next` writes it to `<manifest stem>.brief.md`
+and the dispatch prompt is one line naming that file; in `autoflow` the step prints its own with
+`dispatch_cli.php brief`. A brief consists of:
 
 - **pointers** to the artifacts (idea, spec, plan, PR, issue, proof page), the manifest, and — on a
   resolve step or after a loop-back — the ledger entry to act on, by index;
@@ -570,6 +679,14 @@ naming the brief file. A brief consists of:
 - **the return contract**: which keys the step may write and which statuses it may return;
 - **nothing a station does not ask for.** No test policy, proof format or process of anyone's own
   invention.
+
+**An `autoflow` brief adds what a workflow agent needs** (`pipeline_leg_overrides('autoflow')`): a
+review step applies `/critique`'s procedure itself — Stage 0, Stage 1 and the rubric — because it
+cannot start the reviewer, so `--verify` and `alternatives` are unavailable; `review-plan`'s resolve
+step has no independent read; `implement` executes the plan inline, with no subagents; the finish step
+leaves the PR draft; every step works from `cd <worktree>` and is told the owner authorised the run;
+and `## Return` asks for a structured `{status, reason}` instead of a line. `auto` and `interactive`
+briefs are identical.
 
 **A review step's brief is crafted context** (`../../critique/SKILL.md` §Reviewer contract): pointers,
 decisions and overrides — never an earlier review, an earlier action, or another step's output.
@@ -657,8 +774,8 @@ that runs the full suite asks first:
 
 ```bash
 CHECKS="$HOME/.claude/skills/pipeline/checks"
-MANIFEST=".claude/pipeline/<branch>.json"
-TREE=$(php -r 'require $argv[1] . "/suite.php"; echo pipeline_tree_key(getcwd());' "$CHECKS")
+MANIFEST="<the manifest path the brief names>"
+TREE=$(php -r 'require $argv[1] . "/suite.php"; echo pipeline_tree_key($argv[2]);' "$CHECKS" "<worktree>")
 # manifest `suite` is {tree, outcome: green|red, passed, failed, at}
 php -r 'require $argv[1] . "/suite.php";
         $manifest = json_decode(file_get_contents($argv[2]), true);
@@ -684,8 +801,8 @@ php -r 'require $argv[1] . "/suite.php";
 
 ## `auto` — a fresh agent resolves the review
 
-`interactive` gives every resolve step to the human (§Interactive). Everything below is the `auto`
-resolve step.
+`interactive` gives every resolve step to the human (§Interactive). Everything below is the resolve
+step of `auto` and `autoflow`, which differ only where this section says so.
 
 **A review is prose, not a verdict.** `/critique` returns the review it wrote — no severity ranking,
 no verdict enum, no structured block (`../../critique/SKILL.md`). The review step stores it verbatim in
@@ -714,16 +831,18 @@ engine because a fresh agent must first re-read what the engine held (spec 2026-
 2026-09-22 audit measured the other side: in-engine review-fix phases cost a median 0.92M weighted
 tokens at 250k+ context, against about 0.4–0.5M for a fresh agent doing the same work.
 
-**An independent read is available, and is not a routing rule.** At `review-plan` the resolve step is
-judging a critique of a plan another agent wrote, with the author's framing in the spec. So where
+**In `auto` an independent read is available, and is not a routing rule.** At `review-plan` the
+resolve step is judging a critique of a plan another agent wrote, with the author's framing in the
+spec. So where
 acting on a point is expensive and the resolve step doubts it, it dispatches a **fresh agent that never
 saw the design leg**, gives it the point plus the code, and asks it to refute the claim citing
 `file:line`. That is judgment exercised where it pays, not a mandatory step with an outcome enum — and
-it cannot stop the run; it only informs what the resolve step does next.
+it cannot stop the run; it only informs what the resolve step does next. In `autoflow` there is none:
+a workflow agent cannot start one, and its brief says so.
 
 ## Failure policy — what still stops
 
-Under `auto` these are the only stops. **No finding stops a run.**
+Under `auto` and `autoflow` these are the only stops. **No finding stops a run.**
 
 - **Hard failure** — a station errors: tests won't go green, a tool dies, the stack won't start,
   `work-on` hits a blocker, or a review step returns nothing after a single retry (`dispatch_cli.php`
@@ -733,12 +852,19 @@ Under `auto` these are the only stops. **No finding stops a run.**
   - **A halted manifest is the one the check rejected.** When the reason names a key the leg was not
     allowed to change, repair it from `<manifest stem>.before.json`, the snapshot taken at dispatch,
     before the next `next`; otherwise the run resumes with the leg's change in place.
+  - **In `autoflow`** a review step that returns nothing runs once more, on Opus; any other step that
+    returns nothing or throws, or a station that would need an agent the step cannot start, halts at
+    once. The halt reaches the invoking session as the workflow's return, and `finish` writes it to
+    the manifest.
 - **A Fable usage limit is not a hard failure.** `/critique` moves the reviewer to Opus itself
   (`../../critique/SKILL.md` §Stage 2). That switch is not the single retry above: a reviewer that
   then returns nothing still gets its retry, on Opus. Its record is `/critique`'s one chat line; the
   ledger entry and the PR carry the review and what was done about it, as for any review. A usage
   limit on the Opus dispatch too is the hard failure: halt, and put the reset time in the failure
-  written to the manifest so the human knows when a resume can work.
+  written to the manifest so the human knows when a resume can work. In `autoflow` the review step
+  itself runs on Fable; when it returns nothing — a usage limit in a background session — the script
+  runs it once more on Opus (in an interactive session a usage limit pauses the workflow, which
+  continues by itself), and a usage limit on that run too is the same hard failure.
 - **Kickoff halts** (§The work item) — these fire *before* the worktree exists, so they leave
   nothing behind and there is no manifest yet to write to; report and stop.
   - **An open blocker** on the run's issue → halt in both modes. Which of wait / work around /
@@ -753,18 +879,23 @@ Under `auto` these are the only stops. **No finding stops a run.**
   - **After `handoff`** (`verify-ui`, `review-pr`) → the draft PR already exists, so there is
     nothing to not-push. Leave it **draft**, append the reason to the PR body without reading it
     (`gh pr view <pr> --json body --jq .body > "$TMPDIR/body.md"`, append the reason,
-    `gh pr edit <pr> --body-file "$TMPDIR/body.md"`), stop.
+    `gh pr edit <pr> --body-file "$TMPDIR/body.md"`), stop. In `autoflow` the invoking session does
+    this after `finish`, and opens the proof page once when `artifacts.proof` is set (§The proof store).
   - The entry is not marked halted: the resolve step records `outcome: looped-back` as it returns,
-    and the dispatcher halts through the cursor (`cursor.status: halted`, `cursor.reason`).
+    and the dispatcher halts through the cursor (`cursor.status: halted`, `cursor.reason`) — in
+    `autoflow`, `finish` does.
   - `pipeline_returned()` does the counting: count the cycles as the number of that gate's `gate_ledger` entries whose `outcome` is
     **`looped-back`** (`manifest.md`) — not its entries in total, which also include human-ordered
-    re-reviews and would over-count into a spurious stop — and never from an in-memory counter.
+    re-reviews and would over-count into a spurious stop — and never from an in-memory counter. In
+    `autoflow` the script starts from `launch`'s per-gate counts of the same entries
+    (`pipeline_loop_counts()`) and adds each loop-back it routes.
   - **A count that cannot be read is not a count of zero.** The ledger lives in the disposable
     manifest, and no durable probe can rebuild it: git and gh record *that* a review happened, not
     how many times the engine looped. So a run whose manifest was **reconstructed** (`manifest.md`
     §reconstruction) carries an **unknown** cycle count, and unknown permits **no** loop-back — the
-    next one halts immediately. Without this, a manifest lost mid-loop silently grants two fresh
-    cycles, and one lost repeatedly grants them forever: the bound would stop bounding at exactly
+    next one halts immediately (in `autoflow`, `launch` gives such a gate the bound). Without this, a
+    manifest lost mid-loop silently grants two fresh cycles, and one lost repeatedly grants them
+    forever: the bound would stop bounding at exactly
     the moment it is load-bearing. A fresh run writes its own manifest at kickoff and is never
     reconstructed, so it is unaffected.
 - **Mechanical-check exhaustion** (§Mechanical checks) — a check failure that survives its 2 fix
@@ -773,6 +904,11 @@ Under `auto` these are the only stops. **No finding stops a run.**
 - **A return the dispatcher cannot account for** — a moved cursor, a key only the dispatcher writes,
   a rewritten ledger entry, a status the ledger does not support (`manifest.md` §What a leg writes) →
   **halt**, with `returned`'s reason.
+- **An `autoflow` step the run cannot accept** — a status the step may not return fails the step's
+  schema, and `brief` halts a step the ledger does not support (`resolve` with no open review,
+  `review` with one already open) → **halt**.
+- **A stopped `autoflow` workflow** — `TaskStop`, a dead session, a workflow error: `finish` with
+  `{"action":"halt","reason":…}` records it; the cursor names the step that was running.
 - **Playwright genuinely unavailable** → **halt.** No visual claim without proof.
 
 In `interactive` mode every gate stops anyway, so the human sees the review and none of the `auto`
