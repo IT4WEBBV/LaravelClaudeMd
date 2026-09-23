@@ -43,8 +43,9 @@
 # on it (see worktree_holding, which is the whole reason that function exists).
 #
 # The config repos get one more: a skill that has no symlink in ~/.claude/skills
-# yet is linked, so a new skill reaches every machine with its next session
-# instead of waiting for a manual relink. An existing entry is never replaced.
+# yet is linked, and so is a skill's workflow script (skills/<skill>/workflow/*.js)
+# that has none in ~/.claude/workflows, so both reach every machine with its next
+# session instead of waiting for a manual relink. An existing entry is never replaced.
 #
 # Beyond that it touches nothing: your branch, your index and your working tree
 # are left alone, merges are predicted in a throwaway index, and deciding whether
@@ -69,6 +70,7 @@ vault_toplevel=$(cd "${VAULT_DIR:-$HOME/GitProjects/SecondBrain/SecondBrain}" 2>
 # Both are overridable, and set to empty, by the tests.
 config_repos="${GIT_FRESHNESS_CONFIG_REPOS-$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd:$HOME/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config}"
 skills_dir="${GIT_FRESHNESS_SKILLS_DIR-$HOME/.claude/skills}"
+workflows_dir="${GIT_FRESHNESS_WORKFLOWS_DIR-$HOME/.claude/workflows}"
 config_fetch_seconds=5  # tighter than max_fetch_seconds: the session repo still has to fit in the hook timeout
 
 config_notes=""
@@ -438,6 +440,24 @@ link_new_skills() {
     done
 }
 
+# Link each workflow script a skill in repo $1 ships (skills/<skill>/workflow/*.js)
+# that has no entry in the workflows dir yet, so a saved workflow loads by name in
+# every project. Same rules as skills, except that a missing dir is created: it is
+# ours alone, where the skills dir is set up by hand once per machine.
+link_new_workflows() {
+    local repo=$1 script name
+
+    [ ! -L "$workflows_dir" ] && mkdir -p "$workflows_dir" 2>/dev/null || return 0
+
+    for script in "$repo"/skills/*/workflow/*.js; do
+        [ -f "$script" ] || continue
+        name=$(basename "$script")
+        { [ -e "$workflows_dir/$name" ] || [ -L "$workflows_dir/$name" ]; } && continue
+        ln -s "$script" "$workflows_dir/$name" 2>/dev/null \
+            && config_tags="${config_tags}${config_tags:+, }linked new workflow ${name%.js}"
+    done
+}
+
 # The config repos are where a stale checkout is invisible by design: their
 # skills are symlinked into the skills dir, so a checkout left behind quietly
 # runs old skills on this machine. Fetch them in parallel, fast-forward their
@@ -477,6 +497,7 @@ sync_config_repos() {
         fi
 
         link_new_skills "$repo"
+        link_new_workflows "$repo"
     done <<< "$(config_repo_list)"
 }
 

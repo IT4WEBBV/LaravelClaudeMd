@@ -50,6 +50,7 @@ git config --global user.email test@example.com
 # and let the config cases below point them at fixtures explicitly.
 export GIT_FRESHNESS_CONFIG_REPOS=""
 export GIT_FRESHNESS_SKILLS_DIR="$root/no-skills-dir"
+export GIT_FRESHNESS_WORKFLOWS_DIR="$root/no-workflows-dir"
 
 passed=0
 failed=0
@@ -358,6 +359,35 @@ payload="{\"session_id\":\"test-config3\",\"cwd\":\"$root/config3\"}"
 out=$(printf '%s' "$payload" \
     | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config3/skills-link" bash "$hook" session 2>/dev/null)
 if [ -e "$root/config3/realskills/another" ]; then fail "nothing written through the symlink"; else ok "nothing written through the symlink"; fi
+echo
+
+echo "case 16: session start links a skill's workflow script into the workflows dir"
+cfg=$(fixture config4 1 skills/flow/SKILL.md)
+push_upstream config4 skills/flow/workflow/flow-auto.js "export const meta = {name: 'flow-auto', description: 'x'}"
+push_upstream config4 skills/flow/workflow/taken.js "taken"
+workflows="$root/config4/workflows"
+mkdir -p "$workflows" "$root/config4/elsewhere"
+ln -s "$root/config4/elsewhere/taken.js" "$workflows/taken.js"
+payload="{\"session_id\":\"test-config4\",\"cwd\":\"$root/config4\"}"
+out=$(printf '%s' "$payload" \
+    | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config4/none" GIT_FRESHNESS_WORKFLOWS_DIR="$workflows" bash "$hook" session 2>/dev/null)
+is "$(readlink "$workflows/flow-auto.js")" "$cfg/skills/flow/workflow/flow-auto.js" "the workflow script is linked under its file name"
+is "$(readlink "$workflows/taken.js")" "$root/config4/elsewhere/taken.js" "an existing entry with the same name is left alone"
+contains "$out" "linked new workflow flow-auto" "the new link is reported"
+lacks "$out" "linked new workflow taken" "the collision is not reported as linked"
+echo
+
+echo "case 17: a missing workflows dir is created; one that is a symlink gets nothing"
+cfg=$(fixture config5 1 skills/flow/workflow/flow-auto.js)
+missing="$root/config5/new/workflows"
+printf '%s' "{\"session_id\":\"test-config5a\",\"cwd\":\"$root/config5\"}" \
+    | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config5/none" GIT_FRESHNESS_WORKFLOWS_DIR="$missing" bash "$hook" session >/dev/null 2>&1
+is "$(readlink "$missing/flow-auto.js")" "$cfg/skills/flow/workflow/flow-auto.js" "the missing dir is created and the script linked"
+mkdir -p "$root/config5/realflows"
+ln -s "$root/config5/realflows" "$root/config5/flows-link"
+printf '%s' "{\"session_id\":\"test-config5b\",\"cwd\":\"$root/config5\"}" \
+    | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config5/none" GIT_FRESHNESS_WORKFLOWS_DIR="$root/config5/flows-link" bash "$hook" session >/dev/null 2>&1
+if [ -e "$root/config5/realflows/flow-auto.js" ]; then fail "nothing written through a symlinked workflows dir"; else ok "nothing written through a symlinked workflows dir"; fi
 echo
 
 echo "----------------------------------------"

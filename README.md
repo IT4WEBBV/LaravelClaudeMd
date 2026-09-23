@@ -67,7 +67,8 @@ Leave out `autoMemoryDirectory` and both `vault-sync.sh` entries until the vault
 
 `git-freshness.sh` has three modes:
 - `session` — at startup: syncs both config repos (fast-forward only, never over local work) and
-  links any skill that has no symlink yet, then checks the launch directory.
+  links any skill that has no symlink yet (and any skill's `workflow/*.js` into
+  `~/.claude/workflows/`), then checks the launch directory.
 - `edit` — the repo owning the file being written, once per repo per session.
 - `checkout` — drops cached verdicts after a branch switch.
 
