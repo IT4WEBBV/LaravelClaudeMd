@@ -86,8 +86,23 @@ reserved for extra per-project ports.
 - `-p` on a fresh slot: generate `composer.pgk.json` on the host (`generate_composer_override.php`
   through `install-packages.sh`) and delete the in-container `php artisan composer:rewrite` from
   `run.sh` (there is no `vendor/` yet, so it can't boot). Keep `rm -f composer.pgk.lock`.
-- The Vite HMR host must follow the slot: pass `WEB_VITE_VHOST` through the web service's
-  `environment:` block and read it in the vite config with a primary fallback.
+- **The test image may lack `envsubst`.** Templating `.env.example` needs `gettext-base` in
+  `build/web/ubuntu_php/test/Dockerfile`: the `debian_bookworm_apache_php_8_3` base has neither the
+  binary nor the package, and with `set -e` in test/run.sh the container dies before Apache, so CI's
+  `php artisan test` never runs. The newer `php_8_4` base ships `/usr/bin/envsubst`, which is why
+  LaravelTemplate looks like it needs nothing. Check with `docker exec <project>_web command -v envsubst`.
+- The Vite HMR host must follow the slot: read `process.env.WEB_VITE_VHOST` in the vite config
+  (`server.hmr.host`) with a primary fallback. Passing it through the web service's `environment:`
+  block too is cheap and version-robust, but on Compose ≥ 2.17 the `env_file` value already resolves
+  to the slot (verified on a BreinStraat2 slot, Compose 2.20.2), and LaravelTemplate ships without the
+  block.
+- **Put the guard and render assertions in `start.sh`, not `restart.sh`.** `start.sh` runs on its own
+  and renders nothing, so a stale `.env` bypasses a restart-only check. That matters most where the
+  app fresh-migrates on boot (Asimo's `configure:development` runs `migrate:fresh` and seeds): a slot
+  pointing at the primary's `DB_HOST` wipes it, since all stacks share the external `backend` network.
+- If services move out of `docker-compose.dev.yml` (a WordPress overlay only slot 1 loads), route the
+  compose file set through one helper used by restart's `kill`/`rm`, start's `up` and stop's `down`.
+  Wiring only `start.sh` leaves the moved services running through every restart, with orphan warnings.
 - `worktree.sh remove` needs the macOS `chmod -RN "$slot_dir"` ACL strip before `git worktree remove`
   (VirtioFS deny-delete on the `-p` packages mount).
 - FontAwesome `.npmrc`: LaravelTemplate generates one and validates `~/.secrets`. Skip it when the
