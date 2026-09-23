@@ -22,8 +22,8 @@ the halts are JavaScript; agents exist only inside steps. Interactive mode is un
 
 ## Verified before writing (experiments, 2026-09-23)
 
-- Workflow agents **inherit the launching session's working directory**: launching from the run's
-  worktree is enough.
+- Workflow agents **inherit the launching session's working directory**. A single run could rely on
+  that; `/orchestrate`'s parallel runs cannot, so the design does not (§Where a step works).
 - Workflow agents **cannot start agents**: no Agent tool (only `SendMessage`, `RemoteTrigger`,
   `TaskList`, `TaskUpdate`, `TaskStop` beside the normal file, Bash and Skill tools). A skill that
   dispatches a subagent inside one fails, and in the experiment the agent **reported success anyway**
@@ -44,30 +44,48 @@ the halts are JavaScript; agents exist only inside steps. Interactive mode is un
 ### Who does what in `auto`
 
 ```
-invoking session   kickoff (unchanged) → loop counts from the ledger → Workflow(pipeline-auto, args)
-                   … on return: record done or halt in the manifest, after-handoff halt duties, report
+invoking session   kickoff (unchanged) → dispatch_cli.php launch → Workflow(pipeline-auto, args)
+                   … on return: dispatch_cli.php finish, after-handoff halt duties, report
 workflow script    for each step: agent(prompt, opts) → {status, reason, ui} → next step, or return
-step agent         php dispatch_cli.php brief <manifest> <leg> <step> → do the leg → write the manifest
+step agent         dispatch_cli.php brief <manifest> <leg> <step> → do the leg → write the manifest
                    → return {status, reason, ui}
 ```
 
-The invoking session is the main session or `/orchestrate`. It is an agent, but only at the edges:
-before the script starts and after it returns. Nothing reads a step's work between the two.
+The invoking session is the main session or `/orchestrate`, and it starts the workflow itself (the
+docs: subagents never get the Workflow tool). It is an agent only at the edges, before the script
+starts and after it returns, and even there it runs one tested command at each edge. Nothing reads a
+step's work in between. A halt lands in the session that launched the run, with its reason.
+
+### Where a step works
+
+The worktree travels in the brief (*"Work only in `<worktree>`"*, `brief.php`) and in absolute paths,
+not in the launch directory. `/orchestrate` launches up to four runs from the primary checkout, and one
+session directory cannot be four worktrees. Commands that key on `getcwd()` (§Suite reuse's tree key,
+`pipeline_exclude_manifest`) are run with `-C <worktree>` or from `cd <worktree>`, as the brief says.
 
 ### The script
 
-`skills/pipeline/workflow/pipeline-auto.js`, about 60 lines:
+`skills/pipeline/workflow/pipeline-auto.js`, about 70 lines:
 
 ```js
-const LEGS = ['design', 'review-plan', 'handoff', 'implement', 'verify-ui', 'review-pr']
+const STEPS = { 'review-plan': ['review', 'resolve'], 'review-pr': ['review', 'resolve'] }
 const LOOP_TARGET = { 'review-plan': 'design', 'verify-ui': 'implement', 'review-pr': 'implement' }
+const ALLOWED = {                                  // LegStatus::allowedFor(), as schema enums
+  'design:run': ['continued', 'halted'],
+  review: ['continued', 'halted', 'plan-insufficient'],
+  resolve: ['continued', 'looped-back', 'halted'],
+  'verify-ui:run': ['continued', 'looped-back', 'halted', 'plan-insufficient'],
+  run: ['continued', 'halted', 'plan-insufficient'],
+}
 const BOUND = 2
-const loops = { 'review-plan': 0, 'verify-ui': 0, 'review-pr': 0, ...args.loops }   // from the ledger at kickoff
+const loops = { ...args.loops }                   // from the ledger, by `launch`
 let ui = args.ui
 
-let leg = args.startLeg
+let leg = args.startLeg, from = args.startStep
 while (leg) {
-  const steps = leg === 'review-plan' || leg === 'review-pr' ? ['review', 'resolve'] : ['run']
+  const all = STEPS[leg] ?? ['run']
+  const steps = from ? all.slice(all.indexOf(from)) : all
+  from = undefined
   let result
   for (const step of steps) {
     result = await runStep(leg, step)
@@ -75,66 +93,88 @@ while (leg) {
   }
   if (result.status === 'halted') return halt(leg, result.reason)
   if (result.ui !== undefined) ui = result.ui
-  if (result.status === 'looped-back' || result.status === 'plan-insufficient') {
-    const gate = result.status === 'plan-insufficient' ? 'review-plan' : leg
-    if (!result.escalated && ++loops[gate] > BOUND) return halt(leg, `${gate}: loop-back bound exhausted`)
-    leg = result.status === 'plan-insufficient' ? 'design' : LOOP_TARGET[leg]
-    continue
-  }
-  leg = nextLeg(leg, ui)                          // steps over verify-ui unless ui fired; null after review-pr
+  if (result.status === 'continued') { leg = nextLeg(leg, ui); continue }
+
+  const gap = result.status === 'plan-insufficient'
+  const target = gap ? 'design' : LOOP_TARGET[leg]
+  if (!target) return halt(leg, `no loop-back from ${leg}`)
+  const bounded = !(gap && args.size === 'Bounded')          // an escalation is not a loop-back
+  const gate = gap ? 'review-plan' : leg
+  if (bounded && ++loops[gate] > BOUND) return halt(leg, `${gate}: loop-back bound exhausted`)
+  leg = target
 }
 return { action: 'done' }
 ```
 
-- **`runStep`** builds the prompt and options: `model: 'fable'` on a review step, falling back to
-  `model: 'opus'` when `agent()` returns null (a usage limit in a background session; in an
-  interactive session the run pauses and continues by itself); `effort: 'low'` on `handoff`. A null
-  from any other step, or from the Opus retry, is a halt: *"`<leg> <step>`: the agent returned
-  nothing"*. The schema requires only `status`; `reason`, `ui` and `escalated` are optional.
-- **`loops`** start from the ledger, so a relaunched run does not get fresh cycles. The invoking
-  session counts each gate's `looped-back` entries with the existing PHP; an `unknown` cycle
-  (a reconstructed manifest) starts that gate at `BOUND`, which permits no loop-back.
+- **`runStep`** gives each step a schema whose `status` is an `enum` of what that step may return
+  (`ALLOWED`, mirroring `LegStatus::allowedFor()` after the gate-skip fix below); `reason` and `ui`
+  are optional. A review step runs with `model: 'fable'`, retried once with `model: 'opus'` when
+  `agent()` returns null (a usage limit in a background session; in an interactive session the run
+  pauses and continues by itself; also any other unrecoverable error). `handoff` runs with
+  `effort: 'low'`. `agent()` is wrapped in `try`/`catch`: a thrown error (a schema that failed five
+  times) and a null from any other step become `halt(leg, <error or "the agent returned nothing">)`.
+- **`args`** come from `launch` (below): `startLeg`, `startStep`, `loops` per gate, `ui`, `size`
+  (the spec's design size, read from its header), `manifest`, `worktree`, `noOpen`.
+- **Unknown transitions halt.** A status outside the step's enum fails the schema; a loop-back from a
+  leg with no target halts. Nothing ends the loop as `done` except `review-pr`'s resolve step
+  continuing.
+- **The Bounded exemption is decided by `args.size`**, which `launch` reads from the committed spec,
+  not by the step. On an Architectural spec every `plan-insufficient` counts toward `review-plan`'s
+  bound.
 - **The leg order and loop targets are repeated** from `pipeline.php` (`pipeline_legs()`,
-  `pipeline_next_leg()`, `pipeline_loop_target()`): about ten lines, used by interactive mode. A
-  second copy is accepted; a third would be abstracted.
+  `pipeline_next_leg()`, `pipeline_loop_target()`) and `dispatch.php` (`allowedFor`): about fifteen
+  lines, used by interactive mode. A second copy is accepted; a third would be abstracted. The smoke
+  run (step 6) is their test.
 
 ### The step prompt
 
-Four fixed lines around the step:
+Fixed lines around the step:
 
 1. Run `php ~/.claude/skills/pipeline/checks/dispatch_cli.php brief <manifest> <leg> <step>` and
-   follow the brief it prints; it is complete.
+   follow the brief it prints; it is complete. If the command prints a halt, return `halted` with its
+   reason.
 2. You cannot start agents. Where a skill or the brief would dispatch one, do that work yourself;
    where that is impossible, return `halted` with the reason.
-3. Write your results into the manifest as the brief's `## Return` says.
-4. Return `{status, reason}`; the `implement` step also returns `ui` (from `pipeline_triggers` over
-   `git diff origin/<base>...HEAD` after its last commit), and a step that escalated a Bounded design
-   returns `escalated: true`.
+3. Finish as the brief's `## Return` says.
+4. `implement` only: after the last commit, write the diff to `<manifest stem>.diff` and return as
+   `ui` the `ui` value `pipeline_triggers` prints for it, copied, not judged.
+5. The finish step only: `PIPELINE_NO_OPEN=<args.noOpen>` for the proof page's `open` (the script
+   cannot set the environment).
 
-`PIPELINE_NO_OPEN` travels in `args` into the finish step's prompt; the script cannot set the
-environment.
+### `brief` — the step's first command
+
+`dispatch_cli.php brief <manifest> <leg> <step>`:
+
+- **writes `cursor: {leg, status: pending}`**, as `next` does today, so the manifest stays a cursor
+  during an `auto` run. The leg comes from the script's prompt: the step announces the step it was
+  given, it does not choose one. Every exit that is not the script's own return (a `TaskStop`, a dead
+  session) then leaves the cursor at the step that was running;
+- **halts when the ledger does not support the step**: `resolve` with no open entry for the gate,
+  `review` with one already open. The resolve brief can then never point at the wrong review;
+- prints the brief: `pipeline_brief()` with the step as a parameter instead of derived.
 
 ### No check on what a step reports
 
-The script trusts each step's `{status}`. That is the settled choice for v1, with its cost stated:
+The script trusts each step's `status`. That is the settled choice for v1, and its cost is this:
 
-- **What cannot go wrong:** the order. No step picks the next one, so no gate can be skipped and no
-  bound exceeded; the review/resolve split cannot be walked past, because the script, not the step,
-  decides that `resolve` follows `review`.
-- **What can:** a step claiming work it did not do (the experiment's false-success pattern). The next
-  gate is the catch: `review-plan` reads the spec and plan, `review-pr` reads the code. It is caught
-  later and by judgment, not at once and mechanically.
-- **Measured:** every run's ledger is compared with what the steps claimed (the measurement below). A
-  false report in the first runs is a reason to add a check — the natural one is a separate Haiku
-  agent that only runs `returned` and passes its output on, since the agent that did the work should
-  not run its own check.
+- **Mechanical:** the review/resolve sequence, the loop targets, the bounds and the Bounded exemption.
+  No step picks the next one, a status a step may not return fails its schema, and a loop-back with
+  no target halts.
+- **Reported, not checked:**
+  - a step's `status`: a step can claim work it did not do (the experiment's false-success pattern).
+    The next gate is the catch: `review-plan` reads the spec and plan, `review-pr` reads the code;
+  - `implement`'s `ui`: a wrong `false` skips `verify-ui`, a gate `gates.md` calls mandatory. The
+    prompt asks for `pipeline_triggers`' printed value, a copy rather than a judgement, which narrows
+    but does not close this.
+- **Measured after every run** (§Measurement): `pipeline_triggers` over the final PR diff against
+  whether a `verify-ui` entry exists, and each step's reported status against the ledger it left. A
+  mismatch is the trigger for a check, the natural one a separate Haiku agent that only runs
+  `returned` and passes its output on, since the agent that did the work should not run its own check.
 
 ### What the briefs change — in `auto` only
 
-`pipeline_brief()` takes the step as a parameter instead of deriving it from the ledger (the script
-knows which step it runs), and the lines below are added only when `mode === 'auto'`. Interactive
-steps are Agent-tool subagents that can dispatch; their briefs stay as they are. `BriefTest` pins
-both modes.
+The lines below are added only when `mode === 'auto'`. Interactive steps are Agent-tool subagents that
+can dispatch; their briefs stay as they are. `BriefTest` pins both modes.
 
 - **Review steps:** *"Apply `/critique`'s `plan` (`pr`) procedure yourself — Stage 0, Stage 1 and the
   rubric in `references/rubrics.md`. You are the reviewer; do not dispatch one."* The review step is a
@@ -145,48 +185,70 @@ both modes.
 - **Every step:** *"The owner authorised this run, including pushing the branch, opening the draft PR
   and marking it ready after `review-pr`; the pipeline never merges."* For the agent's benefit; the
   classifier does not count it as the user's request.
+- **`## Return`:** write results and `cursor.status` (and `cursor.reason` when halting) into the
+  manifest as today, then return `{status, reason}` as the structured result, instead of replying with
+  one line.
 
 ### The gate-skip fix, for interactive
 
-In `auto` the bug the PR #50 reviews found cannot happen: the script knows its step and never derives
-it from the ledger. Interactive still derives it (`pipeline_step()`), so it keeps a fix: **resolve
-steps may no longer return `plan-insufficient`** (`LegStatus::allowedFor`). A resolve step that finds
-a plan gap returns `looped-back`; if `implement` then finds the plan short, it reports the gap itself,
-as it already does. The open entry is always completed, no bound is charged twice, and no new outcome
-is needed. `DispatchTest` and `ReturnedTest` follow.
+In `auto` the bug the PR #50 reviews found cannot happen: the script knows its step, and `brief` halts
+on a step the ledger does not support. Interactive still derives the step (`pipeline_step()`), so it
+gets two arms in `LegStatus::allowedFor()` and `pipeline_ledger_problem()`:
 
-### Halts, done, resume
+- **resolve steps may no longer return `plan-insufficient`.** A resolve step that finds a plan gap
+  returns `looped-back`; if `implement` then finds the plan short, it reports the gap itself, as it
+  already does. The open entry is always completed and no bound is charged twice;
+- **a review step that returns `plan-insufficient` may add no open entry** for its gate, so a Bounded
+  escalation found after the review was written cannot leave a stale review behind.
 
-- **Halt:** the script returns `{action: 'halt', leg, reason}`. The invoking session writes it to the
-  manifest cursor (`dispatch_cli.php halt <manifest> <leg> <reason>`, new) and, after `handoff`, does
-  the failure policy's duties: the reason into the PR body, the proof page opened once. The same
-  holds when the workflow itself errors (a schema failed five times): the invoking session records a
-  halt with that error.
-- **Done:** the finish step marked the PR ready; the invoking session sets `cursor.status: done`.
-- **Resume:** a halted run is resumed with `/pipeline`, as today: the manifest is the durable state.
-  In `auto`, `/pipeline` starts a new workflow from the cursor's leg, with loop counts from the
-  ledger. `resumeFromRunId` is a same-session convenience, never the mechanism.
+`DispatchTest` and `ReturnedTest` pin both; `manifest.md`'s `plan-insufficient` row and `engine.md`'s
+plan-gap section are corrected to match.
+
+### `launch` and `finish` — the two edges
+
+- **`dispatch_cli.php launch <manifest> <diff> [--from <leg>]`** prints `{startLeg, startStep, loops,
+  ui, size, …}` or `{action: 'done'}` or a halt. It does what the dispatcher did at the start of a
+  run: `manifest_validate`, the finished rules of `next`, the invariant check (`manifest.md`: the
+  recorded spec and plan exist at `last_sha`, the PR in the expected state), `startStep` from
+  `pipeline_step()`, loop counts per gate from the ledger's `looped-back` entries (an `unknown` cycle
+  gives that gate `BOUND`, which permits no loop-back), `ui` from `pipeline_triggers` over the diff,
+  `size` from the spec's header. `--from review-pr` re-arms a run whose PR needs new commits: it moves
+  the cursor there and is `/orchestrate`'s way to restart a run without editing a file. The invariant
+  check runs **once per launch**, not per leg; `manifest.md` §Invariant check says so.
+- **`dispatch_cli.php finish <manifest> <decision-json>`** records the script's return: `done` sets
+  `cursor.status: done`; a halt sets `cursor: {leg, status: halted, reason}`, with `leg` defaulting
+  to `cursor.leg` (which `brief` keeps current). When the workflow itself errored, the invoking
+  session passes `{action: 'halt', reason: <the error>}` and the cursor names the step that was
+  running. After `handoff`, the invoking session then does the failure policy's duties: the reason
+  into the PR body, the proof page opened once.
+- **Resume** is `/pipeline` as today: `launch` starts from the cursor. `resumeFromRunId` is a
+  same-session convenience, never the mechanism.
 
 ### Launch
 
-`SKILL.md`'s `auto` path: kickoff as today, then
-`Workflow({scriptPath: "$HOME/.claude/skills/pipeline/workflow/pipeline-auto.js", args})` from the
-run's worktree, with `args = {manifest, startLeg, loops, ui, noOpen}`. Starting a workflow from a
-skill is the documented opt-in. **Unverified and first in the steps:** launching by `scriptPath` from
-another repo, where the skills directory is outside the working directory; the fallback is a Read
-allow rule for `~/.claude/skills/**` or a copy in `~/.claude/workflows/`. Unattended runs need auto
-permission mode or allow rules for push, `gh` and `docker`.
+`SKILL.md`'s `auto` path: kickoff as today, `launch`, then start the workflow with its output as
+`args`. Two routes, both checked in step 1 from another repo:
+
+- **Primary: a saved workflow by name**, `~/.claude/workflows/pipeline-auto.js` as a symlink to
+  `skills/pipeline/workflow/pipeline-auto.js`, linked by `hooks/git-freshness.sh` as it links skills.
+  Permission rules can name a saved workflow (`Workflow(pipeline-auto)`), which a `claude --bg`
+  orchestrator needs. Unverified: whether a symlinked personal workflow loads.
+- **Fallback: `scriptPath`** into the skill directory, which needs a Read allow rule for
+  `~/.claude/skills/**` outside this repo and asks consent on the first launch in auto mode.
+
+Starting a workflow from a skill is the documented opt-in. Unattended runs need auto permission mode
+or allow rules for push, `gh` and `docker`.
 
 ### `/orchestrate`
 
-- Its dispatch step launches the workflow from the run's worktree instead of an engine agent.
-- **Stalls:** `/workflows` is a TUI a `claude --bg` orchestrator cannot use. A run that returns
-  nothing for 90 minutes is treated as halted: the orchestrator stops it (`TaskStop`) and asks
-  *resume* / *leave it out*, as for any halt.
-- **"Commits wanted on a ready PR"** no longer has a run to message: the answer is a new workflow
-  started at `review-pr` from the re-armed manifest. The rule "one agent per run, ever" becomes "one
-  workflow per run at a time".
-- Its step 5 drops `engine_peak_cli.php` for `run_cost_cli.php`.
+- **Dispatch:** `launch`, then the workflow, from the primary checkout; the worktree travels in the
+  brief (§Where a step works).
+- **Stalls:** the rule stays activity-based: no notice and no commit or PR change for 90 minutes. The
+  orchestrator then stops the run (`TaskStop`, step 1 checks that it stops a workflow and what its
+  running agent does), records it with `finish` as a halt, and asks *resume* / *leave it out*.
+- **Commits wanted on a ready PR:** there is no run to message any more; `launch --from review-pr`
+  and a new workflow. "One agent per run, ever" becomes "one workflow per run at a time".
+- **Step 5** drops `engine_peak_cli.php` for `run_cost_cli.php`.
 
 ### What goes, what stays
 
@@ -195,38 +257,40 @@ permission mode or allow rules for push, `gh` and `docker`.
 | The LLM dispatcher (`engine.md` §The dispatcher), its 150k invariant, `engine_peak.php`, `engine_peak_cli.php`, `EnginePeakTest` | `dispatch.php`, `dispatch_cli.php` `next`/`returned` and `brief.php`, for interactive, which is unchanged |
 | | Kickoff, the work item, the manifest and what legs write into it, reconstruction, navigation, failure policy, the review/resolve split |
 
-New: `dispatch_cli.php brief` and `halt`, the step parameter on `pipeline_brief()`, the `auto`-only
-brief lines, `workflow/pipeline-auto.js`, `run_cost.php` + `run_cost_cli.php`.
+New: `dispatch_cli.php launch`, `brief` and `finish`; the step parameter on `pipeline_brief()`; the
+`auto`-only brief lines; the two gate-skip arms; `workflow/pipeline-auto.js`; `run_cost.php` +
+`run_cost_cli.php` and `run_audit.php` (below).
 
-### Measurement — cost per run
+### Measurement — cost per run, and the two reported inputs
 
 The old metric (engines' share of usage) would fall even if total usage rose, because the work moves
-into step agents. What answers the question is **weighted cost per run**:
+into step agents. What answers the question:
 
-- **Baseline:** old engine runs since 2026-09-14 — the engine plus every agent it dispatched — from
-  the audit's `rows.json` (weights: cache read 0.1, 5m write 1.25, 1h write 2, output 5). Median,
-  quartiles and code lines per run (`pipeline_code_lines` over the run's PR diff) go into the PR body
-  before the first new run.
-- **New runs:** `run_cost_cli.php` sums the same weights over one workflow run's agent transcripts,
-  deduplicated by `message.id`, and prints the per-step breakdown and the largest step peak. Where a
-  run's transcripts land is checked before this is written (steps 1 and 5).
-- **The comparison is indicative, not controlled:** different issues differ in size. Cost is
-  reported with code lines alongside it.
+- **Cost per run.** Baseline: old engine runs since 2026-09-14, the engine plus every agent it
+  dispatched, from the audit's `rows.json` (weights: cache read 0.1, 5m write 1.25, 1h write 2, output
+  5); median, quartiles and code lines per run (`pipeline_code_lines` over the run's PR diff) into the
+  PR body before the first new run. New runs: `run_cost_cli.php` sums the same weights over one
+  workflow run's agent transcripts, deduplicated by `message.id`, and prints the per-step breakdown
+  and the largest step peak. The comparison is indicative, not controlled: cost is reported with code
+  lines alongside.
+- **The run audit.** `run_audit.php <manifest> <diff>` prints two facts after each run:
+  `pipeline_triggers` over the final PR diff against whether the ledger has a `verify-ui` entry, and
+  whether each gate's ledger entries agree with the path the run took. Both are reported with the
+  run.
 - **Keep it** when, after 6 runs, the median cost per run is at least 30 percent below the baseline
-  median, no gate was skipped and no unattended run stalled on a permission.
-- **Revert or add a check** when any of: a step's reported status contradicted by its ledger or the
-  code (add the Haiku check first); an unattended permission stall that allow rules cannot clear;
-  `implement` peaking above 250k on a plan under 300 code lines (it can no longer delegate); median
-  cost not at least 30 percent below the baseline after 6 runs.
+  median, the run audit found nothing, and no unattended run stalled on a permission.
+- **Add the Haiku check** on the first run-audit mismatch. **Revert** on an unattended permission
+  stall that allow rules cannot clear, `implement` peaking above 250k on a plan under 300 code lines
+  (it can no longer delegate), or median cost not at least 30 percent below the baseline after 6 runs.
 
 ## Alternatives considered
 
 - **Step agents run `returned` themselves, guarded by a `begin` command** (this spec's first draft):
   hands the agent that did the work the power to move the run, which then needed per-step tokens,
   snapshot checks and mode-conditional returns to police. Rejected by the owner as the machinery
-  spiral again.
+  spiral again. `brief` writing the cursor is not that: it records the step the script chose.
 - **A separate Haiku agent per step that runs the PHP check:** a clean fail-closed check at one small
-  agent per step. Deferred until a false report is seen.
+  agent per step. Deferred until the run audit finds a mismatch.
 - **Merge PR #50 first, then this:** ships an LLM dispatcher this design deletes. Chosen against by
   the owner.
 - **Interactive as a workflow per stage** (the docs' pattern for sign-off between stages): possible
@@ -242,18 +306,30 @@ into step agents. What answers the question is **weighted cost per run**:
 
 ## Steps
 
-1. **Verify first**, from a checkout of another repo: launch a two-step stub workflow by `scriptPath`
-   into `~/.claude/skills/pipeline/workflow/`; confirm the schema return and where the run's agent
-   transcripts land. Run `gh pr ready` / `gh pr ready --undo` on a throwaway draft PR from a workflow
-   agent.
-2. `pipeline_brief()` step parameter and the `auto`-only lines, test-first (`BriefTest`, both modes).
-3. `dispatch_cli.php brief` and `halt`, test-first (`DispatchCliTest`).
-4. The gate-skip fix for interactive, test-first (`DispatchTest`, `ReturnedTest`).
-5. `run_cost.php` + `run_cost_cli.php` from `engine_peak.php`, test-first; delete `engine_peak*`.
+1. **Verify first**, from a checkout of another repo, with throwaway workflows:
+   - `docker exec` and `restart.sh` from a workflow agent in a Laravel project, unattended. A stall
+     here kills the design; nothing below starts before it passes;
+   - `gh pr ready` / `gh pr ready --undo` on a throwaway draft PR;
+   - a saved workflow symlinked into `~/.claude/workflows/`, started by name; and `scriptPath` into
+     the skill directory;
+   - `TaskStop` on a running workflow, and what its running agent does after;
+   - whether `agent()` throws on a schema that fails five times;
+   - where a workflow run's agent transcripts land.
+2. `pipeline_brief()` step parameter and the `auto`-only lines and `## Return`, test-first
+   (`BriefTest`, both modes).
+3. The two gate-skip arms, test-first (`DispatchTest`, `ReturnedTest`).
+4. `dispatch_cli.php launch`, `brief` and `finish`, test-first (`DispatchCliTest`).
+5. `run_cost.php` + `run_cost_cli.php` from `engine_peak.php`, and `run_audit.php`, test-first; delete
+   `engine_peak*`.
 6. `workflow/pipeline-auto.js`; a smoke run on a throwaway manifest whose steps only write their
-   status, covering a loop-back, the bound, a halt and done.
-7. Docs: `engine.md` §The loop, §The dispatcher, §Failure policy; `SKILL.md`'s `auto` path;
-   `orchestrate/SKILL.md` and `references/commands.md`; `LockStepTest` stays green.
-8. Baseline cost per old run from `rows.json` into the PR body, with the keep and revert criteria.
-9. Both suites green; `/critique pr`; one real `/pipeline auto` run in a Laravel project, measured
-   with `run_cost_cli.php`.
+   status, one stub per `(leg, status)` pair, covering every loop-back, the bound, the Bounded
+   exemption, a halt, a thrown schema error and done. It is the script's `ReturnedTest`.
+7. The symlink in `hooks/git-freshness.sh` (or the fallback), with its hook test.
+8. Docs: `engine.md` §The loop, §The dispatcher, §Failure policy, §Design size's plan gap;
+   `manifest.md` §What a leg writes, §Invariant check, the `plan-insufficient` row; `gates.md` §How the
+   dispatcher calls Phase A; `SKILL.md`'s `auto` path; `orchestrate/SKILL.md` and
+   `references/commands.md`. `LockStepTest` stays green.
+9. Baseline cost per old run from `rows.json` into the PR body, with the keep, add-a-check and revert
+   criteria.
+10. Both suites green; `/critique pr`; one real `/pipeline auto` run in a Laravel project, measured
+    with `run_cost_cli.php` and `run_audit.php`.
