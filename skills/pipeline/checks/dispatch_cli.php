@@ -33,7 +33,7 @@ function dispatch_cli_emit(string $manifestPath, array $manifest, string $action
 
     manifest_write($manifestPath, $manifest);
     manifest_write($files['before'], $manifest);
-    file_put_contents($files['brief'], pipeline_brief($manifest, $leg, $manifestPath));
+    file_put_contents($files['brief'], pipeline_brief($manifest, $leg, $manifestPath, $step));
 
     return [
         'action' => $action,

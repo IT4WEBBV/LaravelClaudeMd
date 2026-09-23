@@ -35,7 +35,7 @@ function dispatch_leg_writes(string $path, callable $change): void
 }
 
 it('writes the brief and the snapshot and prints one dispatch line', function () {
-    $fixture = dispatch_fixture();
+    $fixture = dispatch_fixture(['mode' => 'interactive']);
     $result = dispatch_cli(['next', $fixture['manifest']]);
 
     expect($result['code'])->toBe(0);
