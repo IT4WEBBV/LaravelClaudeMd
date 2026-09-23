@@ -37,7 +37,8 @@ The PR is found by prefix: `closingIssuesReferences` stays empty until the run's
 
 ## Owner of in-flight work
 
-- **A run this session dispatched:** the dispatch record (agent id → issue) is the owner. Search nothing.
+- **A run this session dispatched:** the dispatch record (agent id for `auto`, workflow run id for
+  `autoflow` → issue) is the owner. Search nothing.
 - **Anything else:**
   ```bash
   claude agents --json --all | python3 ~/.claude/skills/orchestrate/owners.py <worktree>
@@ -67,6 +68,8 @@ gh pr view M -R <repo> --json state --jq .state
 
 ## Brief
 
+The `auto` dispatch, one background agent per issue:
+
 ```
 Run /pipeline auto <N> in <owner/repo>. This session sits in the primary checkout <path>.
 
@@ -80,6 +83,51 @@ Pointers: issue #<N>; depends on <#M (PR #P, merged) | none>.
 Return: the PR number, draft or ready, the halt reason if it halted, and its open questions verbatim.
 ```
 Add nothing else (`pipeline` `references/engine.md` §What a leg brief consists of).
+
+## Launch
+
+`autoflow`, per issue N, from the primary checkout: pipeline `SKILL.md` §`autoflow` — how a run starts
+and ends, steps 1–3.
+
+- Kickoff creates the worktree with the declared `worktree.create`; never switch branches in the
+  primary checkout, other runs share it.
+- The owner's settled decisions for N go into the manifest's `decisions`, verbatim; `artifacts.issue`
+  is N; `mode` is `autoflow`.
+- `launch` runs with `PIPELINE_NO_OPEN=1`: the run is unattended. `done` or a halt: report it and
+  start no workflow.
+- Start the workflow `pipeline-autoflow` with `launch`'s JSON as `args`, in the background, and add
+  its run id → N to the dispatch record. Do not wait on it; its completion notice arrives.
+
+Commits wanted on a ready PR, after `gh pr ready --undo <P>`:
+
+```bash
+php -r '$m = json_decode(file_get_contents($argv[1]), true); $m["decisions"][] = $argv[2]; file_put_contents($argv[1], json_encode($m, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");' <manifest> "<the owner's request, verbatim>"
+git -C <worktree> diff origin/<base>...HEAD > <manifest stem>.diff
+PIPELINE_NO_OPEN=1 php ~/.claude/skills/pipeline/checks/dispatch_cli.php launch <manifest> <manifest stem>.diff --from review-pr
+```
+
+then a new `pipeline-autoflow` workflow with that JSON.
+
+## Finish
+
+`autoflow`, on a run's completion notice (pipeline `engine.md` §`autoflow` — a program that calls
+agents):
+
+```bash
+php ~/.claude/skills/pipeline/checks/dispatch_cli.php finish <manifest> '<the workflow return, as JSON>'
+gh pr ready <P> -R <repo>                                                      # only on done
+php ~/.claude/skills/pipeline/checks/run_cost_cli.php <the run's transcript dir>
+git -C <worktree> diff origin/<base>...HEAD > <manifest stem>.diff
+php ~/.claude/skills/pipeline/checks/run_audit.php <manifest> <manifest stem>.diff <the run's transcript dir>
+```
+
+The transcript dir is the `wf_<id>` directory the workflow result names. A workflow that errored:
+`finish <manifest> '{"action":"halt","reason":"<the error>"}'`. A halt after `handoff`: the reason
+into the PR body, as pipeline `engine.md` §Failure policy — what still stops (*Bound exhaustion*)
+says; the proof page opens only as §Proof page says.
+
+A stalled run: `TaskStop` its workflow first, then
+`finish <manifest> '{"action":"halt","reason":"stalled: no notice, commit or PR change for 90 minutes"}'`.
 
 ## Watch
 
