@@ -123,14 +123,16 @@ agents):
 
 ```bash
 php ~/.claude/skills/pipeline/checks/dispatch_cli.php finish <manifest> '<the workflow return, as JSON>'
-gh pr ready <P> -R <repo>                                                      # only on done
+gh pr ready <P> -R <repo>                                                      # only when finish printed done
 php ~/.claude/skills/pipeline/checks/run_cost_cli.php <the run's transcript dir>
 git -C <worktree> diff origin/<base>...HEAD > <manifest stem>.diff
 php ~/.claude/skills/pipeline/checks/run_audit.php <manifest> <manifest stem>.diff <the run's transcript dir>
 ```
 
-The transcript dir is the `wf_<id>` directory the workflow result names, not the task id. A workflow
-that errored: `finish <manifest> '{"action":"halt","reason":"<the error>"}'`. A halt after `handoff`: the reason
+The transcript dir is the `wf_<id>` directory the workflow result names, not the task id. `finish`
+refuses a `done` whose cursor is not on `review-pr`: it records and prints a halt instead. A denied
+`gh pr ready` writes no halt: the manifest already says done and the PR stays draft, so the denial goes
+in the report and the owner runs `gh pr ready` by hand. A workflow that errored: `finish <manifest> '{"action":"halt","reason":"<the error>"}'`. A halt after `handoff`: the reason
 into the PR body, as pipeline `engine.md` §Failure policy — what still stops (*Bound exhaustion*)
 says. No proof page opens on a halt in an unattended batch, unlike pipeline `SKILL.md`'s attended
 "opened once": it opens only on a ready PR (§Proof page).

@@ -46,7 +46,7 @@ step runs.
 
 **Control rule — the whole model, and it fails closed:**
 
-- **Every step is a fresh agent** briefed by `pipeline_brief($manifest, $leg)`
+- **Every step is a fresh agent** briefed by `pipeline_brief($manifest, $leg, $manifestPath, $step)`
   (`../checks/brief.php`). It writes its results and a status into the manifest (`manifest.md`
   §What a leg writes) and replies with one line. The dispatcher never reads that reply for content:
   `returned` compares the manifest with the snapshot taken at dispatch and **halts** on anything it
@@ -95,7 +95,7 @@ steps, the loop-backs, their bounds and the halts are JavaScript, and agents exi
 ```
 invoking session   kickoff → dispatch_cli.php launch → Workflow pipeline-autoflow (args: launch's JSON)
                    … on its return: dispatch_cli.php finish → gh pr ready | halt duties → report
-workflow script    per step: agent(prompt, {schema}) → {status, reason, ui} → next step, loop-back or return
+workflow script    per step: agent(prompt, {schema}) → {status, reason, ui, size} → next step, loop-back or return
 step agent         dispatch_cli.php brief <manifest> <leg> <step> → the leg's work → the manifest → {status, reason}
 ```
 
@@ -125,21 +125,26 @@ launched the run, with its reason.
   (`LegStatus::allowedFor()`), continues, loops back or returns on that status, counts each loop-back
   against the bound of 2 per gate (`gates.md` §Loop-backs), and returns `{action: done}` or
   `{action: halt, leg, reason}`. Nothing ends a run as `done` except `review-pr`'s resolve step
-  continuing. A Bounded escalation is not a loop-back; on an Architectural spec every
-  `plan-insufficient` counts toward `review-plan`'s bound. A review step runs on Fable, and once more on
-  Opus when it returns nothing; `handoff` runs at low effort; a step that throws or returns nothing
-  halts the run.
+  continuing. The design size it goes by is the one `launch` read, then the one each `design` step
+  copied from its spec. A Bounded escalation is not a loop-back, and escalation is one-way (§Design
+  size), so the script exempts one per run; every other `plan-insufficient` counts toward
+  `review-plan`'s bound. A status it cannot route halts, and so do `args` that are not a `launch`
+  `start` answer. A review step runs on Fable, and once more on Opus when it returns nothing;
+  `handoff` runs at low effort; a step that throws or returns nothing halts the run.
 - **A step** first runs `dispatch_cli.php brief <manifest> <leg> <step>`. It writes
   `cursor: {leg, status: pending}` — so after a `TaskStop` or a dead session the cursor still names the
   step that was running — and prints the brief, or prints a halt when the ledger does not support the
   step (`resolve` with no open review, `review` with one already open). The step writes its results
   into the manifest (`manifest.md` §What a leg writes) and returns `{status, reason}`; `implement`
-  also returns `ui`, copied from `pipeline_triggers()` over its diff.
-- **`finish`** records the return: `done` sets `cursor.status: done`; a halt sets
-  `cursor: {leg, status: halted, reason}`. When the workflow itself errored, pass
-  `{"action":"halt","reason":"<the error>"}`: the cursor keeps the step that was running. On `done` the
-  invoking session then runs **`gh pr ready <pr>`** (§Who takes the PR out of draft); on a halt after
-  `handoff`, §Failure policy's duties.
+  also returns `ui`, copied from `pipeline_triggers()` over its diff, and `design` returns `size`,
+  copied from `DesignSize::fromSpec()` over the spec it committed.
+- **`finish`** records the return: `done` sets `cursor.status: done`, but only with the cursor on
+  `review-pr` — anywhere else it records the halt "the workflow returned done at <leg>"; a halt sets
+  `cursor: {leg, status: halted, reason}`, keeping the cursor's leg when the return names none of the
+  pipeline's. When the workflow itself errored, pass `{"action":"halt","reason":"<the error>"}`: the
+  cursor keeps the step that was running. When `finish` prints `done` the invoking session then runs
+  **`gh pr ready <pr>`** (§Who takes the PR out of draft); on a halt after `handoff`, §Failure
+  policy's duties.
 - **Resume** is `/pipeline` as always: `launch` starts from the cursor, and the step it names runs
   again.
 

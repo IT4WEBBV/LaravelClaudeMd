@@ -225,24 +225,32 @@ function dispatch_cli_brief(string $manifestPath, string $leg, string $step): ar
     return pipeline_brief($manifest, $leg, $manifestPath, $step);
 }
 
-/** Records the workflow's return; anything that is not `done` is a halt, and a halt with no reason says so. */
+/**
+ * Records the workflow's return; anything that is not `done` is a halt, and a halt with no reason says
+ * so. `done` counts only on `review-pr`: nothing else may lead to `gh pr ready`. A halt that names no
+ * leg of the pipeline keeps the cursor's, so a later `launch` can still read the run.
+ */
 function dispatch_cli_finish(string $manifestPath, string $decisionJson): array
 {
     $manifest = manifest_read($manifestPath);
     if ($manifest === null) {
         return pipeline_halt("no readable manifest at {$manifestPath}");
     }
+    $leg = (string) ($manifest['cursor']['leg'] ?? '');
     $decision = json_decode($decisionJson, true);
     $decision = is_array($decision) ? $decision : [];
     if (($decision['action'] ?? null) === 'done') {
-        return dispatch_cli_done($manifestPath, $manifest);
+        return $leg === 'review-pr'
+            ? dispatch_cli_done($manifestPath, $manifest)
+            : dispatch_cli_halt($manifestPath, $manifest, $leg, "the workflow returned done at {$leg}");
     }
     $reason = trim((string) ($decision['reason'] ?? ''));
+    $named = $decision['leg'] ?? null;
 
     return dispatch_cli_halt(
         $manifestPath,
         $manifest,
-        (string) ($decision['leg'] ?? $manifest['cursor']['leg']),
+        in_array($named, pipeline_legs(), true) ? $named : $leg,
         $reason === '' ? "the workflow returned no decision: {$decisionJson}" : $reason,
     );
 }

@@ -26,10 +26,13 @@ const ALLOWED = {
   run: ['continued', 'halted', 'plan-insufficient'],
 }
 const BOUND = 2
+const COPIED = { design: { size: { type: 'string', enum: ['Bounded', 'Architectural'] } }, implement: { ui: { type: 'boolean' } } }
 const UNSATISFIABLE = { type: 'object', properties: { status: { type: 'string', enum: [] } }, required: ['status'] } // invalid: agent() throws before starting an agent — the smoke run's thrown error
 
 const loops = { 'review-plan': 0, 'verify-ui': 0, 'review-pr': 0, ...args.loops }
 let ui = args.ui
+let size = args.size
+let exempted = false
 
 function nextLeg(leg) {
   return LEGS.slice(LEGS.indexOf(leg) + 1).find(next => next !== 'verify-ui' || ui)
@@ -44,12 +47,13 @@ function briefCommand(leg, step) {
 }
 
 function schemaFor(leg, step) {
+  const copied = COPIED[leg] ?? {}
   const properties = {
     status: { type: 'string', enum: ALLOWED[`${leg}:${step}`] ?? ALLOWED[step] },
     reason: { type: 'string' },
+    ...copied,
   }
-  if (leg === 'implement') properties.ui = { type: 'boolean' }
-  return { type: 'object', properties, required: leg === 'implement' ? ['status', 'ui'] : ['status'] }
+  return { type: 'object', properties, required: ['status', ...Object.keys(copied)] }
 }
 
 function stepPrompt(leg, step) {
@@ -60,8 +64,11 @@ function stepPrompt(leg, step) {
     '2. You cannot start agents. Where a skill or the brief would dispatch one, do that work yourself; where that is impossible, return `halted` with the reason.',
     "3. Finish as the brief's `## Return` says.",
   ]
+  if (leg === 'design') {
+    lines.push(`4. After the last commit, run \`php -r '$m = json_decode(file_get_contents($argv[2]), true); $s = (string) ($m["artifacts"]["spec"] ?? ""); $p = $s === "" || $s[0] === "/" ? $s : rtrim($m["worktree"], "/") . "/" . $s; require $argv[1]; echo DesignSize::fromSpec($p !== "" && is_file($p) ? file_get_contents($p) : "")->value;' ${args.checks}/design_size.php ${args.manifest}\`, and return what it prints as \`size\`: copy it, do not judge it.`)
+  }
   if (leg === 'implement') {
-    lines.push(`4. After the last commit, run \`git -C ${args.worktree} diff origin/<base>...HEAD > ${diff}\` (<base>: the PR's base branch), then \`php -r 'require $argv[1]; echo json_encode(pipeline_triggers(file_get_contents($argv[2]))["ui"]);' ${args.checks}/triggers.php ${diff}\`, and return what it prints as \`ui\`: copy it, do not judge it.`)
+    lines.push(`4. After the last commit, run \`git -C ${args.worktree} diff origin/<base>...HEAD > ${diff}\` with <base> the PR's base branch (\`gh pr view <pr> --json baseRefName --jq .baseRefName\`, <pr> being \`artifacts.pr\` in ${args.manifest}), then \`php -r 'require $argv[1]; echo json_encode(pipeline_triggers(file_get_contents($argv[2]))["ui"]);' ${args.checks}/triggers.php ${diff}\`, and return what it prints as \`ui\`: copy it, do not judge it.`)
   }
   if (leg === 'review-pr' && step === 'resolve') {
     lines.push(`4. Run the proof page's \`open\` as \`PIPELINE_NO_OPEN=${args.noOpen ? 1 : 0} php ${args.checks}/proof_cli.php open …\`.`)
@@ -100,6 +107,9 @@ async function runStep(leg, step) {
   }
 }
 
+if (args.action !== 'start' || !LEGS.includes(args.startLeg)) return halt(args.startLeg ?? 'launch', 'args are not a launch start answer')
+if (args.startStep && !(STEPS[args.startLeg] ?? ['run']).includes(args.startStep)) return halt(args.startLeg, `${args.startLeg} has no ${args.startStep} step`)
+
 let leg = args.startLeg
 let from = args.startStep
 while (leg) {
@@ -114,15 +124,18 @@ while (leg) {
   }
   if (result.status === 'halted') return halt(leg, result.reason)
   if (result.ui !== undefined) ui = result.ui
+  if (result.size) size = result.size
   if (result.status === 'continued') {
     leg = nextLeg(leg)
     continue
   }
 
   const gap = result.status === 'plan-insufficient'
+  if (!gap && result.status !== 'looped-back') return halt(leg, `unknown status ${result.status}`)
   const target = gap ? 'design' : LOOP_TARGET[leg]
   if (!target) return halt(leg, `no loop-back from ${leg}`)
-  const counted = !(gap && args.size === 'Bounded') // a Bounded escalation is not a loop-back
+  const counted = !(gap && size === 'Bounded' && !exempted) // a Bounded escalation is not a loop-back; escalation is one-way, so once per run
+  if (!counted) exempted = true
   const gate = gap ? 'review-plan' : leg
   if (counted && ++loops[gate] > BOUND) return halt(leg, `${gate}: loop-back bound exhausted`)
   leg = target

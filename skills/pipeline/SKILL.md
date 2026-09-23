@@ -95,9 +95,12 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    for its completion notice. Starting it from this skill is the owner's opt-in; unattended runs need
    auto permission mode or allow rules for `git push`, `gh` and `docker`.
 4. **Finish.** `php "$CHECKS/dispatch_cli.php" finish <manifest> '<its return as JSON>'`, or
-   `'{"action":"halt","reason":"<the error>"}'` when the workflow errored.
-5. **`done`:** `gh pr ready <pr>`. **A halt after `handoff`:** the reason into the PR body and the
-   proof page opened once (`references/engine.md` §Failure policy).
+   `'{"action":"halt","reason":"<the error>"}'` when the workflow errored. `finish` refuses a `done`
+   whose cursor is not on `review-pr`: it records a halt and prints it instead.
+5. **`finish` printed `done`:** `gh pr ready <pr>`. The manifest already says done; when
+   `gh pr ready` is denied the PR stays draft and no halt is written: put the denial in the report,
+   and the owner runs `gh pr ready` by hand. **A halt after `handoff`:** the reason into the PR body
+   and the proof page opened once (`references/engine.md` §Failure policy).
 6. **Report** the result with the two cost-per-run outputs above.
 
 `~/.claude/workflows/pipeline-autoflow.js` is a symlink to `workflow/pipeline-autoflow.js`, linked by

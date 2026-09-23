@@ -273,14 +273,16 @@ it('halts a step the ledger does not support, and leaves the manifest alone', fu
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-plan', 'status' => 'continued']);
 });
 
-it('records the workflow\'s return with finish', function (string $decision, array $cursor) {
-    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'implement', 'status' => 'pending']]);
+it('records the workflow\'s return with finish', function (string $leg, string $decision, array $cursor) {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => $leg, 'status' => 'pending']]);
 
     expect(dispatch_cli(['finish', $fixture['manifest'], $decision])['code'])->toBe(0);
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe($cursor);
 })->with([
-    'done' => ['{"action":"done"}', ['leg' => 'implement', 'status' => 'done']],
-    'a halt naming its leg' => ['{"action":"halt","leg":"verify-ui","reason":"stub halt"}', ['leg' => 'verify-ui', 'status' => 'halted', 'reason' => 'stub halt']],
-    'a halt from the invoking session' => ['{"action":"halt","reason":"the workflow errored"}', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'the workflow errored']],
-    'no decision' => ['not json', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'the workflow returned no decision: not json']],
+    'done' => ['review-pr', '{"action":"done"}', ['leg' => 'review-pr', 'status' => 'done']],
+    'done before review-pr' => ['implement', '{"action":"done"}', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'the workflow returned done at implement']],
+    'a halt naming its leg' => ['implement', '{"action":"halt","leg":"verify-ui","reason":"stub halt"}', ['leg' => 'verify-ui', 'status' => 'halted', 'reason' => 'stub halt']],
+    'a halt naming no leg of the pipeline' => ['implement', '{"action":"halt","leg":"launch","reason":"args are not a launch start answer"}', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'args are not a launch start answer']],
+    'a halt from the invoking session' => ['implement', '{"action":"halt","reason":"the workflow errored"}', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'the workflow errored']],
+    'no decision' => ['implement', 'not json', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'the workflow returned no decision: not json']],
 ]);
