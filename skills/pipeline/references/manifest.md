@@ -96,6 +96,11 @@ returned, or the judgement in a sentence) and `outcome: escalated`. It is not a 
 counts toward a gate's cycle bound. It resets which gates count as run: `pipeline_done_legs()`
 ignores every gate pass older than it.
 
+**A plan gap** is a `plan-approval` entry written by a leg after `review-plan` on an Architectural
+design (`engine.md` §Design size): `gate`, `leg` (the leg that found the gap), `cycle`, `at`, `reason`
+and `outcome: looped-back`, and no `review`. Unlike an escalation it **is** a loop-back and counts
+toward `review-plan`'s bound; like one, it resets `pipeline_done_legs()`.
+
 **The loop bound is read from here, never from memory.** A review may drive a loop-back twice
 before the third must halt (`engine.md` §failure policy). Count **this gate's entries whose
 `outcome` is `looped-back`** — not its entries in total: a gate's history also holds halts and
@@ -122,7 +127,7 @@ status does not agree with the ledger.
 | `continued` | the step did its work; a review step has appended one open entry |
 | `looped-back` | a resolve step or `verify-ui` sends the work back (`gates.md` §Loop-backs); its entry says so |
 | `halted` | a hard failure; `cursor.reason` says what |
-| `plan-insufficient` | the plan does not cover what the change needs. Bounded: a `design-size` entry with `outcome: escalated` is appended and the design grows. Architectural: the run halts |
+| `plan-insufficient` | the plan does not cover what the change needs. Bounded: a `design-size` entry with `outcome: escalated` is appended and the design grows. Architectural: a `plan-approval` entry with `outcome: looped-back` is appended and the run loops back to `design` within `review-plan`'s bound (`engine.md` §Design size) |
 
 Keep this section in lock-step with `LegStatus` and `pipeline_leg_writable_keys()`; `LockStepTest`
 fails when they drift.
@@ -146,7 +151,7 @@ Rebuild the cursor by probing **durable state**, then feed the probes to
 |---|---|
 | `spec` | spec file present on the branch (`docs/superpowers/specs/…`) |
 | `plan` | plan file present on the branch (`docs/superpowers/plans/…`) |
-| `planApproved` | the `gate_ledger` holds a `plan-approval` entry with `outcome: continued` newer than the latest `design-size` escalation — a human approval, or the resolve step's own continue under `auto` — else re-run `review-plan` (a re-review is cheap and stateless) |
+| `planApproved` | the `gate_ledger` holds a `plan-approval` entry with `outcome: continued` newer than the latest `design-size` escalation or plan gap — a human approval, or the resolve step's own continue under `auto` — else re-run `review-plan` (a re-review is cheap and stateless) |
 | `pr` | `gh pr list --head <branch>` → PR number, else null |
 | `implemented` | PR marked ready / implementation commits present |
 | `uiNeeded` | `pipeline_triggers(<diff>)['ui']` over `git diff origin/<base>...HEAD` |

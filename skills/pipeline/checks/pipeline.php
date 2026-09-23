@@ -59,19 +59,20 @@ function pipeline_can_navigate(string $from, string $to, array $doneLegs, array 
 
 /**
  * The gate legs that have run, as `pipeline_can_navigate`'s `$doneLegs`. A gate counts once it has
- * a `continued` entry — but only one newer than the latest `design-size` escalation: a Bounded
- * design that grew is a different plan, and the pass over the small one must not let navigation
- * skip the re-review (`../references/engine.md` §Design size).
+ * a `continued` entry — but only one newer than the latest `design-size` escalation or plan gap (a
+ * `plan-approval` loop-back written by a leg after `review-plan`): a plan that grew is a different
+ * plan, and the pass over the old one must not let navigation skip the re-review
+ * (`../references/engine.md` §Design size).
  */
 function pipeline_done_legs(array $ledger): array
 {
     $legOf = ['plan-approval' => 'review-plan', 'pr-review' => 'review-pr', 'verify-ui' => 'verify-ui'];
 
-    $escalatedAt = array_column(
-        array_filter($ledger, fn (array $entry) => ($entry['outcome'] ?? null) === 'escalated'),
+    $resetAt = array_column(
+        array_filter($ledger, fn (array $entry) => ($entry['outcome'] ?? null) === 'escalated' || pipeline_is_plan_gap($entry)),
         'at',
     );
-    $since = $escalatedAt === [] ? '' : max($escalatedAt);
+    $since = $resetAt === [] ? '' : max($resetAt);
 
     $done = [];
     foreach ($ledger as $entry) {
@@ -82,4 +83,12 @@ function pipeline_done_legs(array $ledger): array
     }
 
     return array_values(array_unique($done));
+}
+
+/** A `plan-approval` loop-back written by a leg after `review-plan`: the approved plan fell short (`../references/engine.md` §Design size). */
+function pipeline_is_plan_gap(array $entry): bool
+{
+    return ($entry['gate'] ?? null) === 'plan-approval'
+        && ($entry['outcome'] ?? null) === 'looped-back'
+        && ($entry['leg'] ?? 'review-plan') !== 'review-plan';
 }

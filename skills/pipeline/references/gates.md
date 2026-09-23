@@ -137,7 +137,8 @@ php -r 'require "skills/pipeline/checks/triggers.php";
 Navigation is pure functions — call `pipeline_can_navigate` / `pipeline_next_leg` /
 `pipeline_gate_legs` directly (they take no I/O). The manifest's `gate_ledger` records which gates
 have run; `pipeline_can_navigate`'s `$doneLegs` is `pipeline_done_legs()` over it, which drops gate
-passes older than the latest `design-size` escalation and never counts an open entry.
+passes older than the latest `design-size` escalation or plan gap (`engine.md` §Design size) and
+never counts an open entry.
 
 ## Path anchoring — the app root is not always the repo root
 

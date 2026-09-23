@@ -43,7 +43,8 @@ step runs.
 - **Legs never pick the next leg and never write a brief.** `pipeline_returned()`
   (`../checks/dispatch.php`) routes: `continued` → the next step or leg (`pipeline_next_leg`),
   `looped-back` → `gates.md` §Loop-backs within the bound, `halted` → stop, `plan-insufficient` →
-  grow a Bounded design or halt an Architectural one.
+  grow a Bounded design, or loop an Architectural one back to `design` within `review-plan`'s bound
+  (§Design size, *A plan gap on an Architectural design*).
 - **Auto-continuation spans only dispatched steps.** The loop never tries to "become a skill inline
   and then regain control": a skill that tail-calls its successor (as `brainstorming` invokes
   `writing-plans`) would never return, so an inline auto-continuation would silently walk past the
@@ -377,6 +378,24 @@ past the re-review.
 **Once, and one way.** An Architectural spec never shrinks, and an escalation is not a loop-back:
 - it does not count toward `review-plan`'s cycle bound;
 - once the PR exists, bound exhaustion follows the after-`handoff` rule (§Failure policy).
+
+### A plan gap on an Architectural design — a loop-back, not a halt
+
+A step on an Architectural spec that needs files or behaviour the plan does not name returns
+`plan-insufficient` too, and does not improvise. There is no size to grow, so this is a **loop-back
+of the plan approval**: the plan passed `review-plan` and turned out not to cover the change.
+
+1. The step appends `{gate: 'plan-approval', leg: <its leg>, cycle, at, reason, outcome: 'looped-back'}`
+   and returns `plan-insufficient`. A return without that entry halts.
+2. The dispatcher sends the cursor to `design` through the same bound as a `review-plan` loop-back
+   (`pipeline_loop_back()`): the entry counts toward the 2 cycles, and the third halts — before
+   `handoff` with no push, after it with the PR left draft (§Failure policy).
+3. `design` extends the plan, and the spec where it must say more, to cover the entry's `reason`;
+   what is already built is described as state, not re-designed. Then `review-plan`, `handoff pr`
+   (updating the existing PR) and `implement` run again, as after an escalation.
+
+The entry resets `pipeline_done_legs()` like an escalation does, so the earlier plan approval cannot
+carry navigation past the re-review.
 
 ## The proof store — where the visual record actually lives
 
@@ -766,4 +785,4 @@ A slash command is only a cold-session trigger; there is no separate `/next`. Ev
 through `pipeline_can_navigate(from, to, doneLegs, triggers)`: **backward is free; forward past a
 gate leg that has not run is refused** (`gates.md`). That refusal is the un-skippable-review
 promise made mechanical. `doneLegs` is always `pipeline_done_legs(gate_ledger)`, so a gate passed
-before the latest `design-size` escalation no longer counts (§Design size).
+before the latest `design-size` escalation or plan gap no longer counts (§Design size).

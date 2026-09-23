@@ -185,7 +185,7 @@ unchanged manifest halts at once.
 | `continued` otherwise | `pipeline_next_leg($leg, $triggers)`; `null` → `done`, which the CLI writes as `cursor.status: done` so a later `next` answers `done` instead of re-dispatching `review-pr` |
 | `looped-back` | `pipeline_loop_target($leg)`: `review-plan` → `design`, `verify-ui` → `implement`, `review-pr` → `implement`. **Halt** when the gate now has more than 2 `looped-back` entries (bound exhausted), or any of its entries has `cycle: "unknown"` (reconstructed run) |
 | `halted` | halt, with `cursor.reason` |
-| `plan-insufficient` | Bounded spec → `design` (grow form, `engine.md` §Design size). Architectural spec → halt: *"plan insufficient: <reason>"* |
+| `plan-insufficient` | Bounded spec → `design` (grow form, `engine.md` §Design size). Architectural spec → a loop-back to `design` within `review-plan`'s bound; the step appends a `plan-approval` entry with `outcome: looped-back` and its `reason` (decided by the owner, assumption 5) |
 
 The bound, the loop targets and the unknown-cycle rule are today's rules; only where they are
 evaluated moves, from the engine's memory of the prose into tested code.
@@ -405,8 +405,10 @@ Questions the brainstorm would have asked the owner, and the answer this design 
    exists to prevent, and a human should decide whether to re-design. This is the only `auto` stop that
    is neither machinery failure nor bound exhaustion, on a trigger implementers hit often. The
    unattended alternative is the Bounded route (grow the design, re-review, continue), which would
-   need its own cap because an escalation is not a loop-back (engine.md §Escalation). Halting is
-   the fail-closed choice; left as an open question for the owner.
+   need its own cap because an escalation is not a loop-back (engine.md §Escalation).
+   **Decided by the owner after review:** a loop-back to `design`, counted against `review-plan`'s
+   2-cycle bound, so it needs no cap of its own. The step appends a `plan-approval` entry with
+   `outcome: looped-back` and its `reason`; that entry also resets `pipeline_done_legs()`.
 6. **Who runs the Bounded escalation check at the start of each later leg?** — The leg, first thing, per
    its brief; it returns `plan-insufficient` with a `design-size` entry. The dispatcher never computes
    code lines from a diff.
@@ -417,7 +419,8 @@ Questions the brainstorm would have asked the owner, and the answer this design 
    in interactive mode the review-step agent buys no context isolation (the session shows the human
    the review anyway) and costs one agent startup (~37k context) per review; uniformity with `auto`
    is the only argument for it. Making `pipeline_runs_inline` return true for review steps outside
-   `auto` is a one-clause change. Left as an open question for the owner.
+   `auto` is a one-clause change. **Decided by the owner after review:** dispatched in both modes, as
+   built; uniformity is worth the ~37k per review.
 9. **Who runs the 150k measurement, and how does it find the transcript?** — The session that dispatched
    the dispatcher, after its completion notice, by agent id. No heuristic over worktree paths, which
    slot recycling would defeat.

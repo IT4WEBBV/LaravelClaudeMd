@@ -110,7 +110,7 @@ it('reads the design size from the spec to route plan-insufficient', function (s
     expect(dispatch_cli(['returned', $fixture['manifest'], $fixture['diff']])['json']['action'])->toBe($action);
 })->with([
     'Bounded grows' => ['**Design size:** Bounded', 'dispatch'],
-    'Architectural halts' => ['**Design size:** Architectural', 'halt'],
+    'Architectural needs a plan-approval loop-back, not a design-size entry' => ['**Design size:** Architectural', 'halt'],
 ]);
 
 it('records a finished run as done and does not re-dispatch it', function () {

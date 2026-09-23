@@ -25,3 +25,15 @@ it('stops counting gates that passed before a design escalation', function () us
     expect(pipeline_done_legs($reReviewed))->toBe(['review-plan']);
     expect(pipeline_can_navigate('review-plan', 'implement', pipeline_done_legs($reReviewed), $uiOff))->toBeTrue();
 });
+
+it('stops counting a plan approval once a later leg found the plan insufficient', function () use ($uiOff) {
+    $ledger = [
+        ['gate' => 'plan-approval', 'leg' => 'review-plan', 'at' => '2026-09-14T10:00:00Z', 'outcome' => 'continued'],
+        ['gate' => 'plan-approval', 'leg' => 'implement', 'at' => '2026-09-14T10:40:00Z', 'reason' => 'needs a queue', 'outcome' => 'looped-back'],
+    ];
+    expect(pipeline_done_legs($ledger))->toBe([]);
+    expect(pipeline_can_navigate('design', 'implement', pipeline_done_legs($ledger), $uiOff))->toBeFalse();
+
+    $reReviewed = [...$ledger, ['gate' => 'plan-approval', 'leg' => 'review-plan', 'at' => '2026-09-14T11:00:00Z', 'outcome' => 'continued']];
+    expect(pipeline_done_legs($reReviewed))->toBe(['review-plan']);
+});

@@ -83,16 +83,34 @@ it('loops verify-ui back to implement on its own thin entry', function () use ($
     expect(pipeline_returned($before, returned_after($before, 'continued'), $ui, DesignSize::Architectural)['action'])->toBe('halt');
 });
 
-it('grows a Bounded design and halts an Architectural one on plan-insufficient', function () use ($noUi) {
+it('grows a Bounded design on plan-insufficient', function () use ($noUi) {
     $before = returned_before('implement');
     $escalated = ['gate' => 'design-size', 'leg' => 'implement', 'at' => '2026-09-22T12:00:00Z', 'reason' => 'migration', 'outcome' => 'escalated'];
-    $after = returned_after($before, 'plan-insufficient', [$escalated], [], 'migration');
 
-    expect(pipeline_returned($before, $after, $noUi, DesignSize::Bounded))->toBe(['action' => 'dispatch', 'leg' => 'design']);
-    expect(pipeline_returned($before, $after, $noUi, DesignSize::Architectural))->toBe(['action' => 'halt', 'reason' => 'plan insufficient: migration']);
+    expect(pipeline_returned($before, returned_after($before, 'plan-insufficient', [$escalated], [], 'migration'), $noUi, DesignSize::Bounded))
+        ->toBe(['action' => 'dispatch', 'leg' => 'design']);
 
     $withoutEntry = returned_after($before, 'plan-insufficient', null, [], 'migration');
     expect(pipeline_returned($before, $withoutEntry, $noUi, DesignSize::Bounded)['reason'])->toContain('design-size');
+});
+
+it('loops an Architectural plan-insufficient back to design within the plan-approval bound', function () use ($noUi, $open) {
+    $gap = ['gate' => 'plan-approval', 'leg' => 'implement', 'cycle' => 2, 'at' => '2026-09-22T12:00:00Z', 'reason' => 'needs a queue', 'outcome' => 'looped-back'];
+    $passed = [...$open, 'outcome' => 'continued'];
+
+    $before = returned_before('implement', [$passed]);
+    expect(pipeline_returned($before, returned_after($before, 'plan-insufficient', [$passed, $gap], [], 'needs a queue'), $noUi, DesignSize::Architectural))
+        ->toBe(['action' => 'dispatch', 'leg' => 'design']);
+
+    $withoutEntry = pipeline_returned($before, returned_after($before, 'plan-insufficient', null, [], 'needs a queue'), $noUi, DesignSize::Architectural);
+    expect($withoutEntry['action'])->toBe('halt');
+    expect($withoutEntry['reason'])->toContain('plan-approval entry with outcome looped-back');
+
+    $looped = [...$open, 'outcome' => 'looped-back'];
+    $before = returned_before('implement', [$looped, $looped, $passed]);
+    $exhausted = pipeline_returned($before, returned_after($before, 'plan-insufficient', [$looped, $looped, $passed, $gap], [], 'needs a queue'), $noUi, DesignSize::Architectural);
+    expect($exhausted['action'])->toBe('halt');
+    expect($exhausted['reason'])->toContain('bound exhausted');
 });
 
 it('halts with the leg\'s own reason, and refuses a halt without one', function () use ($noUi) {

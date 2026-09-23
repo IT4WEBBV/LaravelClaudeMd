@@ -195,9 +195,8 @@ function pipeline_ledger_problem(array $old, array $new, LegStatus $status, stri
     return match (true) {
         $status === LegStatus::Halted => null,
         $status === LegStatus::PlanInsufficient => $size === DesignSize::Bounded
-            && array_filter($addedTo('design-size'), fn ($entry) => ($entry['outcome'] ?? null) === 'escalated') === []
-                ? 'plan-insufficient on a Bounded design needs a new design-size entry with outcome escalated'
-                : null,
+            ? pipeline_added_with($addedTo('design-size'), 'escalated', 'plan-insufficient on a Bounded design needs a new design-size entry with outcome escalated')
+            : pipeline_added_with($addedTo('plan-approval'), 'looped-back', 'plan-insufficient on an Architectural design needs a new plan-approval entry with outcome looped-back'),
         $step === 'review' => count($addedTo($gate)) === 1 && pipeline_is_open($addedTo($gate)[0])
             ? null
             : "the review step must add exactly one open {$gate} entry",
@@ -211,6 +210,11 @@ function pipeline_ledger_problem(array $old, array $new, LegStatus $status, stri
     };
 }
 
+function pipeline_added_with(array $added, string $outcome, string $problem): ?string
+{
+    return array_filter($added, fn ($entry) => ($entry['outcome'] ?? null) === $outcome) === [] ? $problem : null;
+}
+
 function pipeline_pick(array $entry, array $keys): array
 {
     return array_map(fn (string $key) => $entry[$key] ?? null, $keys);
@@ -218,13 +222,11 @@ function pipeline_pick(array $entry, array $keys): array
 
 function pipeline_route(array $after, string $leg, string $step, array $triggers, DesignSize $size): array
 {
-    $reason = (string) ($after['cursor']['reason'] ?? '');
-
     return match (LegStatus::from($after['cursor']['status'])) {
-        LegStatus::Halted => pipeline_halt($reason),
+        LegStatus::Halted => pipeline_halt((string) $after['cursor']['reason']),
         LegStatus::PlanInsufficient => $size === DesignSize::Bounded
             ? pipeline_dispatch('design')
-            : pipeline_halt('plan insufficient: ' . ($reason === '' ? 'no reason given' : $reason)),
+            : pipeline_loop_back($after['gate_ledger'] ?? [], 'review-plan'),
         LegStatus::LoopedBack => pipeline_loop_back($after['gate_ledger'] ?? [], $leg),
         LegStatus::Continued => pipeline_continue($leg, $step, $triggers),
     };

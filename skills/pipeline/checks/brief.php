@@ -154,12 +154,17 @@ function pipeline_brief_state(array $manifest, string $leg): string
 function pipeline_brief_overrides(array $manifest, string $leg, string $step): string
 {
     $lines = pipeline_leg_overrides()["{$leg}:{$step}"];
+    $ledger = $manifest['gate_ledger'] ?? [];
 
-    if ($leg === 'design' && pipeline_design_grows($manifest['gate_ledger'] ?? [])) {
+    if ($leg === 'design' && pipeline_design_grows($ledger)) {
         $lines[] = 'Grow form: the design escalated from Bounded (engine.md §Design size). Grow the spec and the plan; do not re-design them.';
+    }
+    if ($leg === 'design' && pipeline_is_plan_gap(end($ledger) ?: [])) {
+        $lines[] = 'Plan gap: extend the plan (and the spec where it must say more) to cover the entry\'s `reason`; describe what is already built as state, do not re-design it (engine.md §Design size).';
     }
     if ($leg !== 'design') {
         $lines[] = 'While the spec\'s header says `**Design size:** Bounded`, run the escalation check first (engine.md §Design size); on escalation append the `design-size` entry and return `plan-insufficient`.';
+        $lines[] = 'On an Architectural spec, append a `plan-approval` entry with `leg`, `cycle`, `at`, `reason` and outcome `looped-back` before returning `plan-insufficient`.';
     }
 
     return "## Overrides\n\n" . implode("\n", array_map(fn (string $line) => "- {$line}", $lines));

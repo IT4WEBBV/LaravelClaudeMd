@@ -66,6 +66,20 @@ it('asks for grow form only after an escalation no plan approval has answered', 
     expect(pipeline_brief(brief_manifest('design', ['gate_ledger' => [$escalated, $approved]]), 'design', '/tmp/wt/.claude/pipeline/feature-x.json'))->not->toContain('Grow form');
 });
 
+it('tells a later leg how to report a plan gap, and design to extend the plan for it', function () {
+    expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))
+        ->toContain('On an Architectural spec, append a `plan-approval` entry with `leg`, `cycle`, `at`, `reason` and outcome `looped-back`');
+
+    $gap = ['gate' => 'plan-approval', 'leg' => 'implement', 'cycle' => 2, 'at' => '2026-09-22T12:00:00Z', 'reason' => 'needs a queue', 'outcome' => 'looped-back'];
+    expect(pipeline_brief(brief_manifest('design', ['gate_ledger' => [$gap]]), 'design', '/tmp/m.json'))
+        ->toContain('- redo what `gate_ledger[0]` looped back for')
+        ->toContain('Plan gap: extend the plan');
+
+    $reviewLoop = [...$gap, 'leg' => 'review-plan'];
+    expect(pipeline_brief(brief_manifest('design', ['gate_ledger' => [$reviewLoop]]), 'design', '/tmp/m.json'))
+        ->not->toContain('Plan gap');
+});
+
 it('gives the reviewer crafted context: no earlier review, no earlier actions', function () {
     $earlier = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'OLD REVIEW TEXT', 'actions' => [['claim' => 'x', 'disposition' => 'integrated', 'note' => 'OLD ACTION']], 'outcome' => 'looped-back'];
     $brief = pipeline_brief(brief_manifest('review-plan', ['gate_ledger' => [$earlier]]), 'review-plan', '/tmp/wt/.claude/pipeline/feature-x.json');
