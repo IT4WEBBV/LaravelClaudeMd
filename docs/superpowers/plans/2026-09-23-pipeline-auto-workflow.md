@@ -25,6 +25,43 @@
 - Nothing is pushed before Task 11.
 - `main` moved after this plan was written: PRs #54 and #57 add a `ci`-label paragraph to `engine.md` (after §Who takes the PR out of draft's cold-resume paragraph) whose last sentence asks the `implement` brief to say **"add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch."** Catching the branch up conflicts in `engine.md` and is the owner's call: raise it before Task 1, and do not pull, rebase or merge on your own initiative. If the owner has `main` merged first, Task 1 also adds that quoted sentence to `pipeline_leg_overrides()`' `implement:run` list (`brief.php` exists only on this branch), and Task 8's `engine.md` edits apply around main's paragraph.
 
+## Amendment A — `autoflow` beside `auto` (owner decision, 2026-09-23, after Task 5)
+
+The new engine does not replace the old one yet. Until the keep / revert decision after 6 runs, both
+run side by side as modes of the one `/pipeline` skill, recorded in the manifest's `mode` at kickoff
+(so a resumed run stays on the engine it started with):
+
+- **`auto`** — the LLM dispatcher, exactly as on `main`: `next` / `returned`, the 150k invariant and
+  `engine_peak*`, its briefs as before Task 1 (identical override lines to `interactive`, one-line reply).
+- **`autoflow`** — this plan's engine: `launch` → the saved workflow **`pipeline-autoflow`**
+  (`skills/pipeline/workflow/pipeline-autoflow.js`) → `finish`. Every "`auto`-only" brief line of Tasks 1–2
+  is an `autoflow`-only line.
+- **`interactive`** — unchanged.
+- **`/orchestrate [auto|autoflow] <issues>`** — the engine per batch; without the argument, `auto`.
+- After the decision, the losing mode is deleted: keep → `auto` and the dispatcher go and `autoflow`
+  may be renamed `auto`; revert → `autoflow`, the workflow, `launch` / `brief` / `finish`, `run_cost*`
+  and `run_audit` go.
+
+What this changes in the tasks (the spec is not modified; this amendment is the record):
+
+- **Task 5A (new, below)**: the mode split in code.
+- **Task 6**: the file is `skills/pipeline/workflow/pipeline-autoflow.js`, `meta.name` is
+  `pipeline-autoflow`; the smoke manifests carry `"mode":"autoflow"`.
+- **Task 7**: unchanged (the hook links whatever `skills/*/workflow/*.js` exists).
+- **Task 8**: `engine.md` keeps main's §The loop and §The dispatcher for `auto` and gains
+  `### autoflow — a program that calls agents` beside it; wherever Task 8's text replaces dispatcher
+  wording with the workflow's, it applies to `autoflow` only and the `auto` wording stays. Step 8's grep
+  becomes: no text describing `autoflow` mentions the dispatcher, `engine_peak` or 150k; the `auto` text
+  keeps them. `SKILL.md`: the mode list is `[interactive|auto|autoflow]`, the 150k invariant bullet stays
+  for `auto`, the new section is `## autoflow — how a run starts and ends`, the cost-per-run bullet is
+  for `autoflow`. `gates.md` §Modes names three modes.
+- **Task 9**: `orchestrate` takes `[auto|autoflow]`, default `auto`; its current dispatch path stays for
+  `auto` and Task 9's workflow path is added for `autoflow` (with "one workflow per run at a time"
+  beside "one agent per run, ever").
+- **Task 10**: the criteria read "keep `autoflow` (and delete `auto`)" / "revert: delete `autoflow`".
+- **Task 11**: the real run is `/pipeline autoflow`; the temporary link is
+  `~/.claude/workflows/pipeline-autoflow.js`.
+
 ---
 
 ## File Structure
@@ -1430,6 +1467,63 @@ Expected: PASS.
 ```bash
 git add skills/pipeline/checks/run_audit.php skills/pipeline/checks/tests/RunAuditTest.php
 git commit -m "pipeline: run_audit reports what an auto run's steps said against the ledger they left"
+```
+
+---
+
+### Task 5A: `autoflow` beside `auto` in code (Amendment A)
+
+**Files:**
+- Modify: `skills/pipeline/checks/brief.php` (the three `=== 'auto'` checks become `=== 'autoflow'`; docblocks say `autoflow`)
+- Modify: `skills/pipeline/checks/dispatch_cli.php` (`launch` halts unless the manifest's mode is `autoflow`; `next` halts on an `autoflow` manifest)
+- Restore from `2524cf5`: `skills/pipeline/checks/engine_peak.php`, `engine_peak_cli.php`, `tests/EnginePeakTest.php`; `tests/Pest.php` loads `engine_peak.php` again beside `run_cost.php`
+- Test: `BriefTest.php`, `DispatchCliTest.php`, `RunAuditTest.php` (fixture mode only)
+
+**Interfaces:**
+- Produces: `pipeline_leg_overrides('autoflow')` carries the lines Task 1 gave `'auto'`; `pipeline_leg_overrides('auto') === pipeline_leg_overrides('interactive')`. `pipeline_brief_return(…, 'autoflow')` asks for the structured result; `'auto'` and `'interactive'` ask for one line. `launch` on a non-`autoflow` manifest → `{"action":"halt","reason":"launch starts autoflow runs; this run's mode is <mode> (resume it with /pipeline, which uses next)"}`, manifest untouched. `next` on an `autoflow` manifest → `{"action":"halt","reason":"an autoflow run resumes with launch, not next"}`, manifest untouched. `brief` and `finish` accept any mode (the script and the invoking session call them only for `autoflow`).
+
+- [ ] **Step 1: Tests first.** In `BriefTest.php`, every test that expects the lines Task 1 added for `auto` (`has an auto reviewer apply /critique itself…`, `drops the independent read and the subagents in auto`, `leaves the PR draft at the auto finish step…`, `tells every auto step where to work…`, `tells a resolve step to loop back…` where it asserts an auto-only line, `has overrides for every leg and step`) builds its fixture with `'mode' => 'autoflow'` instead of relying on `brief_manifest()`'s default, and says `autoflow` in its name. Add:
+
+```php
+it('briefs an auto run exactly as an interactive one: the dispatcher's steps can dispatch', function () {
+    expect(pipeline_leg_overrides('auto'))->toBe(pipeline_leg_overrides('interactive'));
+    expect(pipeline_brief_return('implement', 'run', 'auto'))->toBe(pipeline_brief_return('implement', 'run', 'interactive'));
+    expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))
+        ->not->toContain('The owner authorised this run')
+        ->not->toContain('`cd /tmp/wt`')
+        ->toContain('and reply with one line naming it');
+});
+```
+
+In `DispatchCliTest.php`, the `launch` / `brief` / `finish` tests build fixtures with `'mode' => 'autoflow'` (the `brief` test asserts `as your structured result`, which only `autoflow` prints), and add:
+
+```php
+it('launches only autoflow runs, and next refuses one', function () {
+    $auto = dispatch_fixture();
+    expect(dispatch_cli(['launch', $auto['manifest'], $auto['diff']])['json'])
+        ->toBe(['action' => 'halt', 'reason' => "launch starts autoflow runs; this run's mode is auto (resume it with /pipeline, which uses next)"]);
+    expect(manifest_read($auto['manifest'])['cursor'])->toBe(['leg' => 'review-plan', 'status' => 'pending']);
+
+    $flow = dispatch_fixture(['mode' => 'autoflow']);
+    expect(dispatch_cli(['next', $flow['manifest']])['json'])
+        ->toBe(['action' => 'halt', 'reason' => 'an autoflow run resumes with launch, not next']);
+    expect(is_file($flow['brief']))->toBeFalse();
+});
+```
+
+In `RunAuditTest.php`, `audit_run()` writes `'mode' => 'autoflow'`.
+
+Restore `EnginePeakTest.php` from `2524cf5` (`git checkout 2524cf5 -- skills/pipeline/checks/tests/EnginePeakTest.php`). Run the pipeline suite: expect the new and renamed tests red (and EnginePeakTest erroring on the missing functions).
+
+- [ ] **Step 2: Implement.** `git checkout 2524cf5 -- skills/pipeline/checks/engine_peak.php skills/pipeline/checks/engine_peak_cli.php`; add `'engine_peak.php'` back to `tests/Pest.php`'s list (keep `'run_cost.php'`). In `brief.php` replace the three `'auto'` comparisons with `'autoflow'` and the docblock's "An `auto` step" with "An `autoflow` step". In `dispatch_cli.php`: in `dispatch_cli_launch()`, directly after the manifest/diff readability check and before `--from`, return `pipeline_halt("launch starts autoflow runs; this run's mode is {$manifest['mode']} (resume it with /pipeline, which uses next)")` when `($manifest['mode'] ?? null) !== 'autoflow'`; in `dispatch_cli_next()`, after the readability check, return `pipeline_halt('an autoflow run resumes with launch, not next')` for an `autoflow` manifest. Update the file docblock's `auto:` label to `autoflow:`.
+
+- [ ] **Step 3: Run the pipeline suite.** All green, EnginePeakTest included.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add skills/pipeline/checks/brief.php skills/pipeline/checks/dispatch_cli.php skills/pipeline/checks/engine_peak.php skills/pipeline/checks/engine_peak_cli.php skills/pipeline/checks/tests/EnginePeakTest.php skills/pipeline/checks/tests/Pest.php skills/pipeline/checks/tests/BriefTest.php skills/pipeline/checks/tests/DispatchCliTest.php skills/pipeline/checks/tests/RunAuditTest.php
+git commit -m "pipeline: autoflow runs beside auto; the dispatcher and its invariant stay for auto"
 ```
 
 ---
