@@ -185,3 +185,16 @@ it('tells every auto step where to work, that the run is authorised, and to retu
         }
     }
 });
+
+it('tells a resolve step to loop back on a plan gap, and a review step to leave no review behind', function () {
+    $open = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
+
+    expect(pipeline_brief(brief_manifest('review-plan', ['gate_ledger' => [$open]]), 'review-plan', '/tmp/m.json'))
+        ->toContain('A plan gap or a Bounded escalation found while resolving is a loop-back: return `looped-back`')
+        ->not->toContain('`plan-insufficient`');
+    expect(pipeline_brief(brief_manifest('review-plan'), 'review-plan', '/tmp/m.json'))
+        ->toContain('When you return `plan-insufficient`, append no review entry.');
+    expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))
+        ->toContain('run the escalation check first')
+        ->not->toContain('append no review entry');
+});

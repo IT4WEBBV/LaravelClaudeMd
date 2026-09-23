@@ -46,7 +46,8 @@ it('allows each step only the statuses it can honestly return', function () {
 
     expect($values('design', 'run'))->toBe(['continued', 'halted']);
     expect($values('review-plan', 'review'))->toBe(['continued', 'halted', 'plan-insufficient']);
-    expect($values('review-pr', 'resolve'))->toBe(['continued', 'looped-back', 'halted', 'plan-insufficient']);
+    expect($values('review-pr', 'resolve'))->toBe(['continued', 'looped-back', 'halted']);
+    expect($values('review-plan', 'resolve'))->toBe(['continued', 'looped-back', 'halted']);
     expect($values('verify-ui', 'run'))->toBe(['continued', 'looped-back', 'halted', 'plan-insufficient']);
     expect($values('implement', 'run'))->toBe(['continued', 'halted', 'plan-insufficient']);
 });

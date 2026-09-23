@@ -179,3 +179,24 @@ it('halts when a resolve step sets an outcome other than its status', function (
 
     expect($decision['reason'])->toContain('outcome to continued');
 });
+
+it('refuses plan-insufficient from a resolve step: a plan gap found there is a loop-back', function () use ($noUi, $open) {
+    $before = returned_before('review-plan', [$open]);
+    $gap = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 2, 'at' => '2026-09-22T12:00:00Z', 'reason' => 'needs a queue', 'outcome' => 'looped-back'];
+    $decision = pipeline_returned($before, returned_after($before, 'plan-insufficient', [[...$open, 'outcome' => 'looped-back'], $gap], [], 'needs a queue'), $noUi, DesignSize::Architectural);
+
+    expect($decision['action'])->toBe('halt');
+    expect($decision['reason'])->toContain('cannot return plan-insufficient');
+});
+
+it('refuses a review step that returns plan-insufficient and leaves an open review behind', function () use ($noUi, $open) {
+    $before = returned_before('review-plan');
+    $escalated = ['gate' => 'design-size', 'leg' => 'review-plan', 'at' => '2026-09-22T12:00:00Z', 'reason' => 'migration', 'outcome' => 'escalated'];
+
+    $decision = pipeline_returned($before, returned_after($before, 'plan-insufficient', [$open, $escalated], [], 'migration'), $noUi, DesignSize::Bounded);
+    expect($decision['action'])->toBe('halt');
+    expect($decision['reason'])->toContain('may add no open plan-approval entry');
+
+    expect(pipeline_returned($before, returned_after($before, 'plan-insufficient', [$escalated], [], 'migration'), $noUi, DesignSize::Bounded))
+        ->toBe(['action' => 'dispatch', 'leg' => 'design']);
+});

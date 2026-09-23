@@ -17,7 +17,8 @@ enum LegStatus: string
     {
         return match (true) {
             $leg === 'design' => [self::Continued, self::Halted],
-            $step === 'resolve', $leg === 'verify-ui' => [self::Continued, self::LoopedBack, self::Halted, self::PlanInsufficient],
+            $step === 'resolve' => [self::Continued, self::LoopedBack, self::Halted],
+            $leg === 'verify-ui' => [self::Continued, self::LoopedBack, self::Halted, self::PlanInsufficient],
             default => [self::Continued, self::Halted, self::PlanInsufficient],
         };
     }
@@ -194,6 +195,8 @@ function pipeline_ledger_problem(array $old, array $new, LegStatus $status, stri
 
     return match (true) {
         $status === LegStatus::Halted => null,
+        $status === LegStatus::PlanInsufficient && $step === 'review' && array_filter($addedTo($gate), 'pipeline_is_open') !== []
+            => "a review step that returns plan-insufficient may add no open {$gate} entry",
         $status === LegStatus::PlanInsufficient => $size === DesignSize::Bounded
             ? pipeline_added_with($addedTo('design-size'), 'escalated', 'plan-insufficient on a Bounded design needs a new design-size entry with outcome escalated')
             : pipeline_added_with($addedTo('plan-approval'), 'looped-back', 'plan-insufficient on an Architectural design needs a new plan-approval entry with outcome looped-back'),

@@ -172,8 +172,7 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step): s
         $lines[] = 'Plan gap: extend the plan (and the spec where it must say more) to cover the entry\'s `reason`; describe what is already built as state, do not re-design it (engine.md §Design size).';
     }
     if ($leg !== 'design') {
-        $lines[] = 'While the spec\'s header says `**Design size:** Bounded`, run the escalation check first (engine.md §Design size); on escalation append the `design-size` entry and return `plan-insufficient`.';
-        $lines[] = 'On an Architectural spec, append a `plan-approval` entry with `leg`, `cycle`, `at`, `reason` and outcome `looped-back` before returning `plan-insufficient`.';
+        $lines = [...$lines, ...pipeline_plan_gap_lines($step)];
     }
     if ($manifest['mode'] === 'auto') {
         $lines[] = "Run every command from `cd {$manifest['worktree']}` or with `git -C {$manifest['worktree']}`: the session that started this run may sit in another checkout.";
@@ -181,6 +180,20 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step): s
     }
 
     return "## Overrides\n\n" . implode("\n", array_map(fn (string $line) => "- {$line}", $lines));
+}
+
+/** How a step after `design` reports a plan that falls short (engine.md §Design size). A resolve step completes its open entry, so it loops back instead. */
+function pipeline_plan_gap_lines(string $step): array
+{
+    if ($step === 'resolve') {
+        return ['A plan gap or a Bounded escalation found while resolving is a loop-back: return `looped-back` and name it in the entry\'s `actions`; the leg the run goes back to handles it.'];
+    }
+
+    return [
+        'While the spec\'s header says `**Design size:** Bounded`, run the escalation check first (engine.md §Design size); on escalation append the `design-size` entry and return `plan-insufficient`.',
+        'On an Architectural spec, append a `plan-approval` entry with `leg`, `cycle`, `at`, `reason` and outcome `looped-back` before returning `plan-insufficient`.',
+        ...($step === 'review' ? ['When you return `plan-insufficient`, append no review entry.'] : []),
+    ];
 }
 
 /** A design-size escalation that no plan approval has answered yet. */
