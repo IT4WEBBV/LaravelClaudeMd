@@ -30,9 +30,27 @@ the halts are JavaScript; agents exist only inside steps. Interactive mode is un
   (`/critique` asked the main session to dispatch its reviewer and claimed the reviewer had started).
 - A workflow agent briefed like a leg, in a background job in auto permission mode, ran `git push`,
   `gh pr create --draft`, `gh pr comment` and `gh pr close --delete-branch` with **no permission
-  prompt or denial** (throwaway PR #55). Not tested: `gh pr ready`, `docker exec`, `restart.sh`.
-  The brief said the owner authorised the run; the docs say the prompt a script passes does not count
-  as the user's request to the classifier, so the line's effect on the classifier is unknown.
+  prompt or denial** (throwaway PR #55). The brief said the owner authorised the run; the docs say
+  the prompt a script passes does not count as the user's request to the classifier.
+
+Step 1, run 2026-09-23 before any code, each result checked outside the agent's own report:
+
+- **`docker exec` and `restart.sh` pass.** A workflow agent created slot 2 of LaravelTemplate with
+  `worktree.sh create`, started its stack with `restart.sh` and ran `docker exec
+  laraveltemplate-2_web php artisan --version` (`Laravel Framework 13.22.0`), unattended.
+- **`gh pr ready` is denied** in a workflow agent: *"Permission for this action was denied by the
+  Claude Code auto mode classifier. Reason: [External System Writes]."* (throwaway PR #56). It is the
+  one outward write that failed; it moves to the invoking session (§`launch` and `finish`).
+- **A saved workflow symlinked into `~/.claude/workflows/` loads by name** and appears as a slash
+  command; it is picked up mid-session shortly after the file lands. A fresh `claude --bg` session
+  in another repo, in auto mode, started it without a prompt: the `/orchestrate` case.
+- **`scriptPath` outside the working directory is refused** without `/add-dir` or a Read allow rule.
+- **`TaskStop` stops a workflow cleanly**: the running agent's command is killed and the next
+  `agent()` never starts.
+- **Schema enforcement is strong**: an agent told to return an invalid value returned a valid one, so
+  a five-times schema failure could not be provoked. `runStep` keeps its `try`/`catch` anyway.
+- **A run's agent transcripts land in their own directory**,
+  `~/.claude/projects/<project>/<session>/subagents/workflows/wf_<id>/`, with a `journal.jsonl`.
 - Documented (workflows docs, workflow-authoring reference): per-call `model`, `effort` and `schema`;
   `agent()` returns null on an unrecoverable error; a schema that fails five times errors the run;
   `~/.claude/workflows/` is available in every project; a skill whose instructions start a workflow
@@ -182,9 +200,12 @@ can dispatch; their briefs stay as they are. `BriefTest` pins both modes.
   never session history) holds. `--verify` and `alternatives` are not available: both dispatch.
 - **`review-plan:resolve`:** the independent read (a dispatched agent) is dropped.
 - **`implement`:** *"Execute the plan inline, task by task; no subagents."*
-- **Every step:** *"The owner authorised this run, including pushing the branch, opening the draft PR
-  and marking it ready after `review-pr`; the pipeline never merges."* For the agent's benefit; the
-  classifier does not count it as the user's request.
+- **Every step:** *"The owner authorised this run, including pushing the branch and opening the draft
+  PR; the pipeline never merges."* For the agent's benefit; the classifier does not count it as the
+  user's request.
+- **`review-pr:resolve` (the finish step):** everything it does today except `gh pr ready`: *"Leave
+  the PR draft; the session that launched the run marks it ready."* Its last action, opening the
+  proof page, stays.
 - **`## Return`:** write results and `cursor.status` (and `cursor.reason` when halting) into the
   manifest as today, then return `{status, reason}` as the structured result, instead of replying with
   one line.
@@ -216,7 +237,9 @@ plan-gap section are corrected to match.
   the cursor there and is `/orchestrate`'s way to restart a run without editing a file. The invariant
   check runs **once per launch**, not per leg; `manifest.md` §Invariant check says so.
 - **`dispatch_cli.php finish <manifest> <decision-json>`** records the script's return: `done` sets
-  `cursor.status: done`; a halt sets `cursor: {leg, status: halted, reason}`, with `leg` defaulting
+  `cursor.status: done`, after which the invoking session runs **`gh pr ready`** — the one outward
+  write a workflow agent is denied (step 1), and the most consequential one, so it stays with the
+  session that answers to the owner; a halt sets `cursor: {leg, status: halted, reason}`, with `leg` defaulting
   to `cursor.leg` (which `brief` keeps current). When the workflow itself errored, the invoking
   session passes `{action: 'halt', reason: <the error>}` and the cursor names the step that was
   running. After `handoff`, the invoking session then does the failure policy's duties: the reason
@@ -226,15 +249,12 @@ plan-gap section are corrected to match.
 
 ### Launch
 
-`SKILL.md`'s `auto` path: kickoff as today, `launch`, then start the workflow with its output as
-`args`. Two routes, both checked in step 1 from another repo:
-
-- **Primary: a saved workflow by name**, `~/.claude/workflows/pipeline-auto.js` as a symlink to
-  `skills/pipeline/workflow/pipeline-auto.js`, linked by `hooks/git-freshness.sh` as it links skills.
-  Permission rules can name a saved workflow (`Workflow(pipeline-auto)`), which a `claude --bg`
-  orchestrator needs. Unverified: whether a symlinked personal workflow loads.
-- **Fallback: `scriptPath`** into the skill directory, which needs a Read allow rule for
-  `~/.claude/skills/**` outside this repo and asks consent on the first launch in auto mode.
+`SKILL.md`'s `auto` path: kickoff as today, `launch`, then start the saved workflow
+**`pipeline-auto`** by name with `launch`'s output as `args`. `~/.claude/workflows/pipeline-auto.js`
+is a symlink to `skills/pipeline/workflow/pipeline-auto.js`, linked by `hooks/git-freshness.sh` as it
+links skills, so both machines get it from the repo. Step 1 verified the symlink loads by name, from
+another repo and from a fresh `claude --bg` session. `scriptPath` is not used: outside the working
+directory it needs a Read allow rule.
 
 Starting a workflow from a skill is the documented opt-in. Unattended runs need auto permission mode
 or allow rules for push, `gh` and `docker`.
@@ -244,8 +264,10 @@ or allow rules for push, `gh` and `docker`.
 - **Dispatch:** `launch`, then the workflow, from the primary checkout; the worktree travels in the
   brief (§Where a step works).
 - **Stalls:** the rule stays activity-based: no notice and no commit or PR change for 90 minutes. The
-  orchestrator then stops the run (`TaskStop`, step 1 checks that it stops a workflow and what its
-  running agent does), records it with `finish` as a halt, and asks *resume* / *leave it out*.
+  orchestrator then stops the run (`TaskStop`, which step 1 showed stops the workflow and its running
+  agent's command), records it with `finish` as a halt, and asks *resume* / *leave it out*.
+- **`gh pr ready`** after `finish` runs in the orchestrator's own `claude --bg` session. Step 1 did
+  not cover it there; the first orchestrated run shows it, and a denial is a halt the owner sees.
 - **Commits wanted on a ready PR:** there is no run to message any more; `launch --from review-pr`
   and a new workflow. "One agent per run, ever" becomes "one workflow per run at a time".
 - **Step 5** drops `engine_peak_cli.php` for `run_cost_cli.php`.
@@ -306,15 +328,8 @@ into step agents. What answers the question:
 
 ## Steps
 
-1. **Verify first**, from a checkout of another repo, with throwaway workflows:
-   - `docker exec` and `restart.sh` from a workflow agent in a Laravel project, unattended. A stall
-     here kills the design; nothing below starts before it passes;
-   - `gh pr ready` / `gh pr ready --undo` on a throwaway draft PR;
-   - a saved workflow symlinked into `~/.claude/workflows/`, started by name; and `scriptPath` into
-     the skill directory;
-   - `TaskStop` on a running workflow, and what its running agent does after;
-   - whether `agent()` throws on a schema that fails five times;
-   - where a workflow run's agent transcripts land.
+1. ~~Verify first~~ — done 2026-09-23 (§Verified before writing). Left open: `gh pr ready` from a
+   `claude --bg` orchestrator's own session.
 2. `pipeline_brief()` step parameter and the `auto`-only lines and `## Return`, test-first
    (`BriefTest`, both modes).
 3. The two gate-skip arms, test-first (`DispatchTest`, `ReturnedTest`).
@@ -324,7 +339,7 @@ into step agents. What answers the question:
 6. `workflow/pipeline-auto.js`; a smoke run on a throwaway manifest whose steps only write their
    status, one stub per `(leg, status)` pair, covering every loop-back, the bound, the Bounded
    exemption, a halt, a thrown schema error and done. It is the script's `ReturnedTest`.
-7. The symlink in `hooks/git-freshness.sh` (or the fallback), with its hook test.
+7. The `~/.claude/workflows/pipeline-auto.js` symlink in `hooks/git-freshness.sh`, with its hook test.
 8. Docs: `engine.md` §The loop, §The dispatcher, §Failure policy, §Design size's plan gap;
    `manifest.md` §What a leg writes, §Invariant check, the `plan-insufficient` row; `gates.md` §How the
    dispatcher calls Phase A; `SKILL.md`'s `auto` path; `orchestrate/SKILL.md` and
