@@ -26,6 +26,14 @@ enum LegStatus: string
 
 const PIPELINE_GATE_OF = ['review-plan' => 'plan-approval', 'review-pr' => 'pr-review', 'verify-ui' => 'verify-ui'];
 
+const PIPELINE_LOOP_BOUND = 2;
+
+/** @return list<string> */
+function pipeline_steps(string $leg): array
+{
+    return in_array($leg, ['review-plan', 'review-pr'], true) ? ['review', 'resolve'] : ['run'];
+}
+
 function pipeline_gate_of(string $leg): ?string
 {
     return PIPELINE_GATE_OF[$leg] ?? null;
@@ -63,7 +71,7 @@ function pipeline_open_entry(array $ledger, ?string $gate): ?int
 /** `review` or `resolve` on the two review legs, derived from the ledger; `run` everywhere else. */
 function pipeline_step(array $manifest, string $leg): string
 {
-    if (! in_array($leg, ['review-plan', 'review-pr'], true)) {
+    if (pipeline_steps($leg) === ['run']) {
         return 'run';
     }
 
@@ -255,8 +263,8 @@ function pipeline_loop_back(array $ledger, string $leg): array
         return pipeline_halt("{$gate}: the loop-back count is unknown after a reconstruction, so no loop-back is allowed");
     }
     $loops = count(array_filter($entries, fn ($entry) => ($entry['outcome'] ?? null) === 'looped-back'));
-    if ($loops > 2) {
-        return pipeline_halt("{$gate}: loop-back bound exhausted, {$loops} loop-backs where 2 are allowed");
+    if ($loops > PIPELINE_LOOP_BOUND) {
+        return pipeline_halt("{$gate}: loop-back bound exhausted, {$loops} loop-backs where " . PIPELINE_LOOP_BOUND . ' are allowed');
     }
 
     return pipeline_dispatch(pipeline_loop_target($leg));
@@ -270,4 +278,50 @@ function pipeline_dispatch(string $leg): array
 function pipeline_halt(string $reason): array
 {
     return ['action' => 'halt', 'reason' => $reason];
+}
+
+/**
+ * Loop-backs so far per looping leg, which the workflow script counts on from (`launch`). An
+ * `unknown` cycle gives that leg the bound: after a reconstruction no loop-back is allowed.
+ *
+ * @return array<string, int>
+ */
+function pipeline_loop_counts(array $ledger): array
+{
+    $counts = [];
+    foreach (PIPELINE_GATE_OF as $leg => $gate) {
+        $entries = array_filter($ledger, fn ($entry) => ($entry['gate'] ?? null) === $gate);
+        $counts[$leg] = in_array('unknown', array_column($entries, 'cycle'), true)
+            ? PIPELINE_LOOP_BOUND
+            : count(array_filter($entries, fn ($entry) => ($entry['outcome'] ?? null) === 'looped-back'));
+    }
+
+    return $counts;
+}
+
+/** Why the ledger does not support running this step now (`brief`'s check), or null. */
+function pipeline_step_problem(array $manifest, string $leg, string $step): ?string
+{
+    if (! in_array($leg, pipeline_legs(), true) || ! in_array($step, pipeline_steps($leg), true)) {
+        return "{$leg} has no {$step} step";
+    }
+    $gate = pipeline_gate_of($leg);
+    $open = pipeline_open_entry($manifest['gate_ledger'] ?? [], $gate);
+
+    return match (true) {
+        $step === 'resolve' && $open === null => "no open {$gate} review to resolve",
+        $step === 'review' && $open !== null => "gate_ledger[{$open}] is an open {$gate} review; resolve it first",
+        default => null,
+    };
+}
+
+/** `manifest.md` §Invariant check: once a run has a PR, it is an open draft. `$view` is `gh pr view --json state,isDraft`. */
+function pipeline_pr_problem(int|string $pr, ?array $view): ?string
+{
+    return match (true) {
+        $view === null => "PR #{$pr} cannot be read",
+        ($view['state'] ?? null) !== 'OPEN' => "PR #{$pr} is " . strtolower((string) ($view['state'] ?? 'unknown')),
+        empty($view['isDraft']) => "PR #{$pr} is not a draft; a run only works on a draft PR (`gh pr ready --undo {$pr}` first)",
+        default => null,
+    };
 }
