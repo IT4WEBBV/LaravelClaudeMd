@@ -67,7 +67,7 @@ Three distinct failures sit behind one complaint, and only one of them is about 
    person who most needs the visual — someone who did not see the run happen — is the one
    guaranteed not to get it.
 
-**Why it is worth building.** The vault's fleet-scale note already describes the target loop as
+**Why it is worth building.** The fleet-scale proposal (2026-07-23) already describes the target loop as
 *"Gate 2: PR review — two or three PRs that already survived machine review, with screenshot proof
 and green tests attached"*, and names its dominant risk as **review-gate collapse**: plausible,
 green, proofed PRs arriving faster than one person can genuinely judge them, across twenty client
