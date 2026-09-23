@@ -26,7 +26,7 @@ const ALLOWED = {
   run: ['continued', 'halted', 'plan-insufficient'],
 }
 const BOUND = 2
-const UNSATISFIABLE = { type: 'object', properties: {}, required: ['status'] } // the smoke run's thrown error
+const UNSATISFIABLE = { type: 'object', properties: { status: { type: 'string', enum: [] } }, required: ['status'] } // invalid: agent() throws before starting an agent — the smoke run's thrown error
 
 const loops = { 'review-plan': 0, 'verify-ui': 0, 'review-pr': 0, ...args.loops }
 let ui = args.ui
@@ -72,6 +72,7 @@ function stepPrompt(leg, step) {
 function stubPrompt(leg, step, returns) {
   return [
     `SMOKE TEST: you stand in for the \`${leg}\` leg, \`${step}\` step, of a /pipeline autoflow run. Do no real work.`,
+    `Your status is \`${returns.status}\`${returns.reason ? ` with reason "${returns.reason}"` : ''}; your structured result is exactly ${JSON.stringify(returns)}.`,
     `1. Run \`${briefCommand(leg, step)}\`. If it prints {"action":"halt",…}, return {"status":"halted","reason":<its reason>} and stop.`,
     args.stub.prompt,
     JSON.stringify(returns),
@@ -81,7 +82,7 @@ function stubPrompt(leg, step, returns) {
 async function runStep(leg, step) {
   const returns = args.stub?.steps[`${leg}:${step}`]?.shift()
   if (args.stub && !returns) return { status: 'halted', reason: `the smoke run has no stub for ${leg}:${step}` }
-  const model = returns ? 'haiku' : step === 'review' ? 'fable' : undefined
+  const model = returns ? 'sonnet' : step === 'review' ? 'fable' : undefined
   const opts = {
     label: `${leg}:${step}`,
     phase: leg,
