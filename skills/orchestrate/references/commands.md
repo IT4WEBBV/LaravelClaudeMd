@@ -37,8 +37,8 @@ The PR is found by prefix: `closingIssuesReferences` stays empty until the run's
 
 ## Owner of in-flight work
 
-- **A run this session dispatched:** the dispatch record (agent id for `auto`, workflow run id for
-  `autoflow` → issue) is the owner. Search nothing.
+- **A run this session dispatched:** the dispatch record (agent id for `auto`, the workflow's task
+  id for `autoflow` → issue) is the owner. Search nothing.
 - **Anything else:**
   ```bash
   claude agents --json --all | python3 ~/.claude/skills/orchestrate/owners.py <worktree>
@@ -48,6 +48,9 @@ The PR is found by prefix: `closingIssuesReferences` stays empty until the run's
   transcript, so treat the worktree as owned and ask the owner, quoting the error.
   Only a `working` or `blocked` session owns a worktree; `done`, `failed` and `stopped` rows never do.
   An open PR with no worktree has no owner to find: treat it as orphaned.
+  A worktree whose manifest has `mode: autoflow` and a `pending` cursor may be another live session's
+  workflow, which `owners.py` cannot see yet: ask *adopt* / *leave it out*, never *resume* on "no
+  owner" alone.
 
 ## Dependencies
 
@@ -96,7 +99,12 @@ and ends, steps 1–3.
 - `launch` runs with `PIPELINE_NO_OPEN=1`: the run is unattended. `done` or a halt: report it and
   start no workflow.
 - Start the workflow `pipeline-autoflow` with `launch`'s JSON as `args`, in the background, and add
-  its run id → N to the dispatch record. Do not wait on it; its completion notice arrives.
+  its task id → N to the dispatch record (the id `TaskStop` takes and the completion notice carries;
+  the `wf_…` run id names the transcript dir). Do not wait on it; its completion notice arrives.
+
+The engine follows the manifest's `mode`, not the batch's argument: `launch` refuses a manifest that is
+not `autoflow`, `next` one that is. A dead session's `autoflow` run: `finish` it with a halt, then a new
+`launch` and workflow.
 
 Commits wanted on a ready PR, after `gh pr ready --undo <P>`:
 
@@ -121,13 +129,16 @@ git -C <worktree> diff origin/<base>...HEAD > <manifest stem>.diff
 php ~/.claude/skills/pipeline/checks/run_audit.php <manifest> <manifest stem>.diff <the run's transcript dir>
 ```
 
-The transcript dir is the `wf_<id>` directory the workflow result names. A workflow that errored:
-`finish <manifest> '{"action":"halt","reason":"<the error>"}'`. A halt after `handoff`: the reason
+The transcript dir is the `wf_<id>` directory the workflow result names, not the task id. A workflow
+that errored: `finish <manifest> '{"action":"halt","reason":"<the error>"}'`. A halt after `handoff`: the reason
 into the PR body, as pipeline `engine.md` §Failure policy — what still stops (*Bound exhaustion*)
-says; the proof page opens only as §Proof page says.
+says. No proof page opens on a halt in an unattended batch, unlike pipeline `SKILL.md`'s attended
+"opened once": it opens only on a ready PR (§Proof page).
 
-A stalled run: `TaskStop` its workflow first, then
+A stalled run: `TaskStop` its task id first. Only once it reports the task stopped,
 `finish <manifest> '{"action":"halt","reason":"stalled: no notice, commit or PR change for 90 minutes"}'`.
+TaskStop finds nothing: the workflow completed just before, so `finish` its real return instead. A
+notice that arrives after a stall's `finish` is not finished again.
 
 ## Watch
 
