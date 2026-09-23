@@ -6,7 +6,8 @@ are `gates.md`. This file is the operational procedure.
 
 ## The loop
 
-All three modes walk the same legs with the same briefs. They differ in who holds the loop:
+All three modes walk the same legs with the same briefs, which `autoflow` extends (§What a leg brief
+consists of). They differ in who holds the loop:
 
 | Mode | Who holds the loop | Commands |
 |---|---|---|
@@ -209,7 +210,7 @@ gh api /repos/<repo>/issues/<number>/dependencies/blocked_by \
   | jq -r '.[] | select(.state == "open") | "#\(.number) \(.title)"'
 ```
 
-Any open blocker → **halt at kickoff**, in both modes, naming the blockers. This is deliberately
+Any open blocker → **halt at kickoff**, in every mode, naming the blockers. This is deliberately
 *not* the treatment the content triggers get (`gates.md`): those are facts about a diff, answered
 with an annotation, and the governing principle there is that the pipeline never merges so a bad
 PR is trashable. A blocker is a different claim — that this work may not *start* — and the three
@@ -448,7 +449,7 @@ php -r 'require $argv[1] . "/triggers.php"; require $argv[1] . "/design_size.php
   the package's own PR; it keeps its annotation.
 - **Judgement also escalates:**
   - brainstorming's ratchet upgrades the path;
-  - an `auto` assumption turns out to change what gets built;
+  - an `auto` or `autoflow` assumption turns out to change what gets built;
   - `implement` needs files or behaviour the plan did not name. The implement subagent returns
     **"plan insufficient"** instead of improvising.
 
@@ -831,14 +832,14 @@ engine because a fresh agent must first re-read what the engine held (spec 2026-
 2026-09-22 audit measured the other side: in-engine review-fix phases cost a median 0.92M weighted
 tokens at 250k+ context, against about 0.4–0.5M for a fresh agent doing the same work.
 
-**In `auto` an independent read is available, and is not a routing rule.** At `review-plan` the
+**Outside `autoflow` an independent read is available, and is not a routing rule.** At `review-plan` the
 resolve step is judging a critique of a plan another agent wrote, with the author's framing in the
 spec. So where
 acting on a point is expensive and the resolve step doubts it, it dispatches a **fresh agent that never
 saw the design leg**, gives it the point plus the code, and asks it to refute the claim citing
 `file:line`. That is judgment exercised where it pays, not a mandatory step with an outcome enum — and
 it cannot stop the run; it only informs what the resolve step does next. In `autoflow` there is none:
-a workflow agent cannot start one, and its brief says so.
+a workflow agent cannot start one, and its step prompt says so.
 
 ## Failure policy — what still stops
 
@@ -852,9 +853,9 @@ Under `auto` and `autoflow` these are the only stops. **No finding stops a run.*
   - **A halted manifest is the one the check rejected.** When the reason names a key the leg was not
     allowed to change, repair it from `<manifest stem>.before.json`, the snapshot taken at dispatch,
     before the next `next`; otherwise the run resumes with the leg's change in place.
-  - **In `autoflow`** a review step that returns nothing runs once more, on Opus; any other step that
-    returns nothing or throws, or a station that would need an agent the step cannot start, halts at
-    once. The halt reaches the invoking session as the workflow's return, and `finish` writes it to
+  - **In `autoflow`** a review step that returns nothing runs once more, on Opus; a step that throws,
+    any other step that returns nothing, or a station that would need an agent the step cannot start,
+    halts at once. The halt reaches the invoking session as the workflow's return, and `finish` writes it to
     the manifest.
 - **A Fable usage limit is not a hard failure.** `/critique` moves the reviewer to Opus itself
   (`../../critique/SKILL.md` §Stage 2). That switch is not the single retry above: a reviewer that
@@ -867,7 +868,7 @@ Under `auto` and `autoflow` these are the only stops. **No finding stops a run.*
   continues by itself), and a usage limit on that run too is the same hard failure.
 - **Kickoff halts** (§The work item) — these fire *before* the worktree exists, so they leave
   nothing behind and there is no manifest yet to write to; report and stop.
-  - **An open blocker** on the run's issue → halt in both modes. Which of wait / work around /
+  - **An open blocker** on the run's issue → halt in every mode. Which of wait / work around /
     pick the blocker up first applies is the human's call, not a finding to resolve.
   - **`pipeline_repo_board()` returns `invalid`** → machinery failure, same treatment as an
     `invalid` `## Checks` block. A board-less repo returns `absent` and is unaffected.

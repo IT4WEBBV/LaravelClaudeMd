@@ -1,7 +1,7 @@
 <?php
 
 /**
- * After a `/pipeline auto` run: the two things the workflow takes on report (spec 2026-09-23 §No check
+ * After a `/pipeline autoflow` run: the two things the workflow takes on report (spec 2026-09-23 §No check
  * on what a step reports), as facts. A MISMATCH is the trigger for adding a check, never a halt.
  *
  *   php run_audit.php <manifest> <final PR diff> <run transcript dir>

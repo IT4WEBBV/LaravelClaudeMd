@@ -1,7 +1,7 @@
 <?php
 
 /**
- * After a `/pipeline auto` run: its weighted cost per step and the largest step peak.
+ * After a `/pipeline autoflow` run: its weighted cost per step and the largest step peak.
  *
  *   php run_cost_cli.php <run transcript dir>
  *

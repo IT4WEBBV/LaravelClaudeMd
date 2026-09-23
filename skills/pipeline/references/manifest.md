@@ -16,7 +16,7 @@ Read/written by the Phase A helpers in `../checks/manifest.php`:
 | `branch` | **required** | run identity (also the manifest filename) |
 | `worktree` | **required** | absolute path of the run's worktree — where every leg operates |
 | `mode` | **required** | `interactive`, `auto` or `autoflow` |
-| `cursor` | **required** | `{leg, status, reason?, retried?}` — the current leg; `status` is `pending` (written by `next`, or by `brief` as an `autoflow` step starts), the status the leg returned, `halted` (with `reason`), or `done` (written by `returned` or `finish` on a finished run; `next` and `launch` then answer `done` and dispatch nothing); `reason` only with `halted`; `retried` only after a review step's single retry in `auto` or `interactive` |
+| `cursor` | **required** | `{leg, status, reason?, retried?}` — the current leg; `status` is `pending` (written by `next`, by `launch --from`, or by `brief` as an `autoflow` step starts), the status the leg returned, `halted` (with `reason`), or `done` (written by `returned` or `finish` on a finished run; `next` and `launch` then answer `done` and dispatch nothing); `reason` only with `halted`; `retried` only after a review step's single retry in `auto` or `interactive` |
 | `pipeline_id` | optional | stable id alongside `branch` |
 | `artifacts` | optional | pointers: idea, spec path, plan path, PR number, issue number (`engine.md` §The work item), `proof` — the proof page `verify-ui` wrote |
 | `last_sha` | optional | HEAD at the last completed leg |

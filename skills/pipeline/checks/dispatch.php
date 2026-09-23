@@ -78,7 +78,7 @@ function pipeline_step(array $manifest, string $leg): string
     return pipeline_open_entry($manifest['gate_ledger'] ?? [], pipeline_gate_of($leg)) === null ? 'review' : 'resolve';
 }
 
-/** Anything that is not `auto` behaves as interactive (`gates.md` §Modes): the human designs and resolves. */
+/** Anything that is neither `auto` nor `autoflow` behaves as interactive (`gates.md` §Modes): the human designs and resolves. */
 function pipeline_runs_inline(string $mode, string $leg, string $step): bool
 {
     return $mode !== 'auto' && ($leg === 'design' || $step === 'resolve');

@@ -81,7 +81,7 @@ skipped entirely (`pipeline_next_leg` steps over it). See `engine.md` for the le
 
 **The `ui` trigger is untouched by the annotation change above.** The other three decide whether a
 *human is asked*, and are now answered with an annotation. This one decides whether a *leg runs* —
-a different question, with a different answer: mandatory, in both modes, unchanged.
+a different question, with a different answer: mandatory, in every mode, unchanged.
 
 ## Navigation guardrail — forward past an un-run gate is refused
 

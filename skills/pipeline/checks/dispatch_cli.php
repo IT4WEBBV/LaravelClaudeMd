@@ -127,7 +127,7 @@ function dispatch_cli_design_size(array $manifest): DesignSize
     return DesignSize::fromSpec($path !== '' && is_file($path) ? (string) file_get_contents($path) : '');
 }
 
-/** What the run needs once, at its start (`../references/engine.md` §The loop): the workflow script's `args`. */
+/** What the run needs once, at its start (`../references/engine.md` §`autoflow` — a program that calls agents): the workflow script's `args`. */
 function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $from): array
 {
     $manifest = manifest_read($manifestPath);

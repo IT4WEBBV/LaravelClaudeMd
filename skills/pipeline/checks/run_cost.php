@@ -1,7 +1,7 @@
 <?php
 
 /**
- * What one `/pipeline auto` run cost (spec 2026-09-23 §Measurement), weighted as the 2026-09-22 token
+ * What one `/pipeline autoflow` run cost (spec 2026-09-23 §Measurement), weighted as the 2026-09-22 token
  * audit weighs usage (`usage.py`). Assistant messages are deduplicated by `message.id`, the last
  * occurrence winning; context per call = input + cache writes + cache reads.
  */

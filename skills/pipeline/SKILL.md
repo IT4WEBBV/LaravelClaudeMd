@@ -17,9 +17,9 @@ dispatcher agent that asks `dispatch_cli.php` for the next step, dispatches it w
 `pipeline_brief()` generated and lets the same command validate what came back, never reading
 artifacts, reviews, diffs or test output itself. In `autoflow` the loop is a program, the saved
 workflow `pipeline-autoflow` (`workflow/pipeline-autoflow.js`), whose steps each run
-`dispatch_cli.php brief`, do their leg, write the manifest and return a status. `interactive` walks
-the same legs through `next` / `returned`, with the human resolving each review; review fixes and
-finishing the PR belong to fresh resolve agents. No long-lived brain; a lost run reconstructs from
+`dispatch_cli.php brief`, do their leg, write the manifest and return a status. In both, review fixes
+and finishing the PR belong to fresh resolve agents. `interactive` walks the same legs through
+`next` / `returned`, with the human resolving each review. No long-lived brain; a lost run reconstructs from
 git + gh. See the references before driving a run — the enforcement lives there, not in this summary:
 
 - **`references/engine.md`** — the loop, the work item, kickoff/worktree, dev-stack readiness, the
