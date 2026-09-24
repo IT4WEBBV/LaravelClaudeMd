@@ -60,11 +60,6 @@ max_fetch_seconds=10    # hard cap on the network call
 fetch_ttl_seconds=900   # skip the network entirely if we fetched within 15 min
 max_listed_files=6      # the conflict list is a prompt, not an inventory
 
-# The SecondBrain vault is synced by vault-sync.sh and never checked here.
-# Resolved with pwd -P so it compares equal to git's --show-toplevel; empty
-# when the vault is not cloned.
-vault_toplevel=$(cd "${VAULT_DIR:-$HOME/GitProjects/SecondBrain/SecondBrain}" 2>/dev/null && pwd -P)
-
 # The repos whose skills are symlinked into the skills dir, colon-separated.
 # Both are overridable, and set to empty, by the tests.
 config_repos="${GIT_FRESHNESS_CONFIG_REPOS-$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd:$HOME/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config}"
@@ -488,13 +483,6 @@ check_repo() {
     cd "$target" 2>/dev/null || return 0
     git rev-parse --git-dir >/dev/null 2>&1 || return 0
     git remote get-url origin >/dev/null 2>&1 || return 0
-
-    # vault-sync.sh pulls and pushes the vault itself. Checking it here would
-    # fetch it concurrently and tell Claude "Do NOT pull" about the one repo
-    # that is meant to be pulled automatically.
-    if [ -n "$vault_toplevel" ] && [ "$(git rev-parse --show-toplevel 2>/dev/null)" = "$vault_toplevel" ]; then
-        return 0
-    fi
 
     fetch_if_stale "$max_fetch_seconds"
 
