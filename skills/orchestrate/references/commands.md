@@ -44,8 +44,9 @@ The PR is found by prefix: `closingIssuesReferences` stays empty until the run's
   claude agents --json --all | python3 ~/.claude/skills/orchestrate/owners.py <worktree>
   ```
   One line: in flight, owned by that session. Several lines: ask which one. No output and exit 0:
-  orphaned. **A non-zero exit is never orphaned**: the lookup could not read a live session's
-  transcript, so treat the worktree as owned and ask the owner, quoting the error.
+  orphaned. **A non-zero exit is never orphaned**: the lookup could not read the transcript of a live
+  session rooted in, above, or in the same repository as the worktree, so treat the worktree as owned
+  and ask the owner, quoting the error. An unreadable session rooted anywhere else is skipped.
   Only a `working` or `blocked` session owns a worktree; `done`, `failed` and `stopped` rows never do.
   An open PR with no worktree has no owner to find: treat it as orphaned.
   A worktree whose manifest has `mode: autoflow` and a `pending` cursor may be another live session's
