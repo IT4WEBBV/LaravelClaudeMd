@@ -42,11 +42,11 @@ def above(cwd, worktree):
 @functools.lru_cache(maxsize=None)
 def repository(path):
     result = subprocess.run(
-        ["git", "-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        ["git", "-C", path, "rev-parse", "--git-common-dir"],
         capture_output=True,
         text=True,
     )
-    return result.stdout.strip() if result.returncode == 0 else None
+    return os.path.realpath(os.path.join(path, result.stdout.strip())) if result.returncode == 0 else None
 
 
 def related(cwd, worktree):

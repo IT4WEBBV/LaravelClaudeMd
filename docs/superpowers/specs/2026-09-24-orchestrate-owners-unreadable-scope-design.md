@@ -43,7 +43,7 @@ worktree. It is related when any of these holds:
    `.claude/worktrees/<branch>` worktree, `~`, or `/`. A launcher or orchestrator rooted in `~` still
    blocks when its transcript is missing, as the issue intends.
 3. **Same repository:** the `cwd` lies in a checkout of the same git repository as the worktree, that is
-   `git rev-parse --path-format=absolute --git-common-dir` gives the same directory for both. This
+   `git rev-parse --git-common-dir`, resolved against the path, gives the same directory for both. This
    covers slot layouts, where the primary checkout `Shop/Shop` is a sibling of the slot `Shop/Shop-4`,
    not a parent, and still is where `orchestrate` launches the slot's runs from.
 4. **Unknown:** the row has no `cwd`. Without it nothing can be ruled out, so the session blocks.
@@ -76,8 +76,11 @@ module docstring's *Fails closed* paragraph is rewritten to say which unreadable
 Both sides are normalised with `os.path.abspath(...).rstrip("/")`, as the worktree already is, except
 that `/` stays `/`. The *Above* test is `worktree.startswith(cwd + "/")` with `cwd` stripped of its
 trailing slash, so `/` (stripped to the empty string) contains everything, and `Shop/Shop-4` does not
-contain `Shop/Shop-40`. The *Same repository* test compares `git`'s own output for both paths, which
-`git` resolves identically (macOS `/var` → `/private/var` on both sides), so no `realpath` is needed.
+contain `Shop/Shop-40`. The *Same repository* test resolves `git rev-parse --git-common-dir` for each
+path: `os.path.join(path, answer)` keeps an absolute answer (a linked worktree) and roots a relative
+one (`.git` in a primary checkout) at the path, and `os.path.realpath` normalises both sides alike
+(macOS `/var` → `/private/var`). That needs no `--path-format=absolute`, which git before 2.31 echoes
+instead of rejecting, so the comparison would silently never match there.
 
 ### Docs
 
