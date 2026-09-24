@@ -14,12 +14,18 @@ No output and exit 0 means no live session owns it: the work is orphaned.
 
 Fails closed: when a live session has no transcript, or its transcripts hold no cwd entries at all,
 the lookup cannot tell whether that session owns the worktree (the transcript layout or format has
-changed). It then prints nothing, names the sessions on stderr and exits 2. That is never "orphaned".
+changed, or the session has not written its first entry yet). When that session's own cwd, from its
+`claude agents` row, is inside the worktree, contains it (the primary checkout, ~), lies in the same
+git repository (a slot's primary checkout), or is missing, it prints nothing, names the sessions on
+stderr and exits 2. That is never "orphaned". An unreadable session rooted anywhere else has no path
+to the worktree and is skipped.
 """
 import argparse
+import functools
 import glob
 import json
 import os
+import subprocess
 import sys
 
 LIVE_STATES = {"working", "blocked"}
@@ -27,6 +33,31 @@ LIVE_STATES = {"working", "blocked"}
 
 def inside(cwd, worktree):
     return cwd == worktree or cwd.startswith(worktree + "/")
+
+
+def above(cwd, worktree):
+    return worktree.startswith(cwd.rstrip("/") + "/")
+
+
+@functools.lru_cache(maxsize=None)
+def repository(path):
+    result = subprocess.run(
+        ["git", "-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def related(cwd, worktree):
+    if not cwd:
+        return True  # no cwd in the row: nothing rules the session out
+    cwd = os.path.abspath(cwd)
+    return inside(cwd, worktree) or above(cwd, worktree) or same_repository(cwd, worktree)
+
+
+def same_repository(cwd, worktree):
+    return repository(worktree) is not None and repository(cwd) == repository(worktree)
 
 
 def transcripts(projects_dir, session_id):
@@ -63,7 +94,8 @@ def main():
         label = f"{session.get('name', '')} ({session.get('id', '')}, {session.get('state', '')})"
         cwds = list(cwd_entries(transcripts(args.projects_dir, session_id))) if session_id else []
         if not cwds:
-            unreadable.append(label)
+            if related(session.get("cwd"), worktree):
+                unreadable.append(label)
             continue
         count = sum(1 for cwd in cwds if inside(cwd, worktree))
         if count:
