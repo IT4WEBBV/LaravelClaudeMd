@@ -61,19 +61,30 @@ Every step up to the create runs before anything exists, so a halt there leaves 
    after that halts naming the key (`- issue:` under `## Branch convention`). A branch outside
    `[A-Za-z0-9._/-]` halts.
 4. **Already started?** A local branch of that name, or a worktree on it, halts: *"branch <b>
-   already exists: a run or session has it; resume it with launch"*. This is also the double-run
-   guard for two sessions kicking off one issue.
+   already exists: a run or session has it; resume it with launch"*. For an issue the same halt
+   covers any local branch under `branch.issue` cut at `<slug>` with `<number>` filled in
+   (`feature/issue-69-`), naming the branch it found: a hand-made or `work-on` branch for the issue
+   slugs its title by hand and need not match `pipeline_slug()`, and a second branch for one issue
+   is what engine.md §Kickoff exists to avoid. A pattern with no `<slug>`, or none with `<number>`
+   before it, checks the exact name only. This is the double-run guard for two kickoffs, and for a
+   kickoff against a branch another session made on this machine; orchestrate's map covers the
+   rest.
 5. **The declared create, as declared.** `<branch>` is substituted and nothing else. A command that
    still holds a `<placeholder>` (`<next-free-N>`) halts naming the config line: *"the declared
    worktree.create needs <next-free-N>, which kickoff does not compute: `- create: …`"*. Slot
    choice belongs to the repo's script (`worktree.sh create` picks the free slot). The command runs
    through `sh -c` from `<repo-root>`, stdout and stderr captured together.
-6. **A failed create halts with its output.** Non-zero exit (a classifier denial arrives as one):
-   the reason is the command, its exit code and its output. Nothing is retried in another form.
-   An exit 0 after which no worktree carries the branch (`git worktree list --porcelain`) halts
-   too, with the output.
-7. **After the create.** A failure from here on halts saying the worktree exists, so the owner
-   knows there is something to look at.
+6. **A failed create halts with its output.** Non-zero exit (a sandbox refusal, a script that asks
+   a question, a stale path): the reason is the command, its exit code and its output. Nothing is
+   retried in another form. A classifier never sees the create: it judges only the Bash call the
+   session makes, `php dispatch_cli.php kickoff <root> <item>`, and a denial of that call reaches
+   the session as a denied tool call before any PHP runs, not as JSON. The session reports it like
+   a halt and retries nothing in another form. An exit 0 after which no worktree carries the
+   branch (`git worktree list --porcelain`) halts too, with the output, and ends with *"check git
+   worktree list"*: the script may have made something under another name.
+7. **After the create.** A failure from here on halts saying the worktree exists and no manifest
+   was written, so the owner removes the worktree and its branch by hand before kicking off again
+   (the next kickoff would otherwise halt on step 4 with advice it cannot follow).
    The worktree path comes from `git worktree list --porcelain`, the entry
    whose `branch` is `refs/heads/<branch>`, never from parsing the command or its output, so
    `git worktree add` and `worktree.sh create` are read the same way. Then:
@@ -96,7 +107,8 @@ to compute is a halt.
 ## Where it lives
 
 - `skills/pipeline/checks/kickoff.php` — the pure parts (`pipeline_repo_config_value()`,
-  `pipeline_slug()`, `pipeline_kickoff_branch()`, `pipeline_placeholder()`) and the probes that
+  `pipeline_slug()`, `pipeline_branch_prefix()`, `pipeline_kickoff_branch()`,
+  `pipeline_placeholder()`) and the probes that
   shell out (`pipeline_kickoff_gh()`, `pipeline_kickoff_create()`, `pipeline_worktree_of()`), plus
   `pipeline_kickoff()` that walks the steps above. `board.php` and `suite.php` are reused as they
   are; `pipeline_git_run()` runs every git command.
@@ -125,6 +137,7 @@ The cases, from the issue's *Done when* and the steps above:
 | `--light`, `--decision` twice | `light: true`, `decisions` verbatim in order |
 | a number that is a PR | halt; no worktree |
 | the branch already exists | halt; the create never ran |
+| another branch for the issue (`feature/issue-69-hand-made`) | halt naming it; the create never ran; `feature/issue-690-…` does not count |
 | an invalid `## Board` | halt before the create |
 | a valid `## Board` | `item-add` and `item-edit` called, the move in `notes` |
 | a valid `## Board` that will not answer | `ready`, the failure in `notes` |
@@ -136,12 +149,14 @@ The cases, from the issue's *Done when* and the steps above:
 
 - `skills/pipeline/SKILL.md` §`autoflow` — how a run starts and ends: step 1 becomes the `kickoff`
   command (its `ready` names the manifest; a halt is reported and nothing starts); step 2 `launch`
-  takes that manifest.
+  takes that manifest. A denied kickoff call is reported like a halt: nothing is retried in another
+  form.
 - `references/engine.md`: the §`autoflow` diagram's first line names `dispatch_cli.php kickoff`;
   §The dispatcher's "It keeps: kickoff" runs it with `--mode auto`; §Kickoff gets one paragraph
   saying the unattended modes do §The work item and this section through `kickoff`, with its rules
-  (only `<branch>` substituted, a placeholder or failed create halts, no retry, no upstream).
-  `interactive` keeps the prose.
+  (only `<branch>` substituted, a placeholder or failed create halts, no retry, no upstream), that
+  a classifier sees only the kickoff call itself, and that an allow rule for `dispatch_cli.php
+  kickoff` is an allow rule for whatever `worktree.create` declares. `interactive` keeps the prose.
 - `skills/orchestrate/references/commands.md` §Launch: kickoff is the command, the owner's decisions
   go in as `--decision` flags, and the manifest comes from `ready`. §Brief's `auto` worktree line
   names `kickoff --mode auto`.

@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-24-pipeline-kickoff-design.md`
 
-**Verified before writing (2026-09-24):** the code in Tasks 1–3, assembled into a scratch copy of this branch, passes the whole pipeline suite (244 tests, the 44 new ones included), and the upstream expectation fails when the `--unset-upstream` line is removed. `git worktree add -b <b> origin/main` sets `origin/main` as upstream, and `git worktree list --porcelain` prints resolved paths (`/private/var/…` on macOS).
+**Verified before writing (2026-09-24):** the code in Tasks 1–3, assembled into a scratch copy of this branch, passes the whole pipeline suite (244 tests: 211 on main and the 33 new ones), and the upstream expectation fails when the `--unset-upstream` line is removed. `git worktree add -b <b> origin/main` sets `origin/main` as upstream, and `git worktree list --porcelain` prints resolved paths (`/private/var/…` on macOS). Added at review-plan and not in that scratch run: `pipeline_branch_prefix()` with its dataset (Task 1) and the prefix guard in `pipeline_kickoff_unclaimed()` with its case (Task 2); the helper and `git for-each-ref --format=%(refname:lstrip=2) refs/heads/` were tried on a scratch repo (git 2.33), and their own tests verify them at implement.
 
 ## Global Constraints
 
@@ -20,6 +20,7 @@
 - The worktree path comes from `git worktree list --porcelain` (the entry with `branch refs/heads/<branch>`), never from the command or its output.
 - After the create: unset the new branch's upstream when it has one, `pipeline_exclude_manifest()`, then the first `manifest_write` at `<worktree>/.claude/pipeline/<branch, / → ->.json` with exactly `branch`, `worktree`, `mode`, `cursor: {leg: design, status: pending}`, `artifacts.issue` or `artifacts.idea`, plus `light: true` and `decisions` only when given.
 - The board claim runs last and only after a successful create; its failure is a note, never a halt. An `invalid` `## Board` halts before anything is created. `absent` says nothing.
+- Already started: a local branch of that name halts; for an issue so does any local branch starting with `branch.issue` cut at `<slug>` with `<number>` filled in (`feature/issue-69-`), named in the halt. A pattern with no `<slug>`, or no `<number>` before it, checks the exact name only.
 - Slug: lowercase, `[^a-z0-9]+` → `-`, trim `-`, over 50 characters cut at the last `-` within the first 51 (hard cut at 50 when there is none).
 - Suites (from the worktree root, on the host): `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`, `./vendor/bin/pest -c skills/critique/checks/phpunit.xml --test-directory=skills/critique/checks/tests`, `bash skills/orchestrate/tests/owners_test.sh`.
 - This repo has no `.changelog/` and no `CHANGELOG.md`: no changelog entry.
@@ -37,7 +38,7 @@
 ## File Structure
 
 - Create `skills/pipeline/checks/kickoff.php` — `PipelineKickoffHalt`, the pure helpers, the probes, `pipeline_kickoff()`.
-- Modify `skills/pipeline/checks/dispatch_cli.php` — require `board.php` and `kickoff.php`, `dispatch_cli_kickoff_args()`, `dispatch_cli_kickoff()`, the match arm, the docblock and the usage line.
+- Modify `skills/pipeline/checks/dispatch_cli.php` — require `kickoff.php`, `dispatch_cli_kickoff_args()`, `dispatch_cli_kickoff()`, the match arm, the docblock and the usage line.
 - Modify `skills/pipeline/checks/tests/Pest.php` — load `kickoff.php`.
 - Create `skills/pipeline/checks/tests/KickoffTest.php` — the pure helpers.
 - Modify `skills/pipeline/checks/tests/DispatchCliTest.php` — the fixture, the fake `gh`, the command cases.
@@ -53,7 +54,7 @@
 - Test: `skills/pipeline/checks/tests/KickoffTest.php`
 
 **Interfaces:**
-- Produces: `pipeline_repo_config_value(string $configMarkdown, string $section, string $key): ?string`, `pipeline_slug(string $text): string`, `pipeline_placeholder(string $text): ?string` (the first `<name>` token, or null).
+- Produces: `pipeline_repo_config_value(string $configMarkdown, string $section, string $key): ?string`, `pipeline_slug(string $text): string`, `pipeline_placeholder(string $text): ?string` (the first `<name>` token, or null), `pipeline_branch_prefix(string $pattern, int $number): ?string` (every branch for the issue starts with it, or null).
 
 - [ ] **Step 1: Install the dev dependencies in the worktree** (the worktree has no `vendor/`; it is gitignored)
 
@@ -108,6 +109,15 @@ it('finds a placeholder, and does not mistake a shell redirection for one', func
     'redirections' => ['make create 2>&1 < input.txt', null],
     'nothing left' => ['git worktree add .claude/worktrees/feature/x -b feature/x origin/main', null],
 ]);
+
+it('cuts a branch pattern at the slug, so every branch for the issue shares the prefix', function (string $pattern, ?string $prefix) {
+    expect(pipeline_branch_prefix($pattern, 69))->toBe($prefix);
+})->with([
+    'feature branches' => ['feature/issue-<number>-<slug>', 'feature/issue-69-'],
+    'worktree branches' => ['worktree-issue-<number>-<slug>', 'worktree-issue-69-'],
+    'no slug' => ['feature/issue-<number>', null],
+    'the number after the slug' => ['<slug>-<number>', null],
+]);
 ```
 
 Add `'kickoff.php'` to the end of the file list in `skills/pipeline/checks/tests/Pest.php`:
@@ -118,8 +128,8 @@ foreach (['triggers.php', 'pipeline.php', 'manifest.php', 'checks.php', 'board.p
 
 - [ ] **Step 3: Run it to see it fail**
 
-Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='own section only|branch-safe name|shell redirection'`
-Expected: FAIL, `Call to undefined function pipeline_repo_config_value()` (and the slug and placeholder functions).
+Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='own section only|branch-safe name|shell redirection|cuts a branch pattern'`
+Expected: FAIL, `Call to undefined function pipeline_repo_config_value()` (and the slug, placeholder and prefix functions).
 
 - [ ] **Step 4: Write the implementation** — `skills/pipeline/checks/kickoff.php`
 
@@ -133,6 +143,7 @@ Expected: FAIL, `Call to undefined function pipeline_repo_config_value()` (and t
  */
 
 require_once __DIR__ . '/board.php';
+require_once __DIR__ . '/dispatch.php';
 require_once __DIR__ . '/manifest.php';
 require_once __DIR__ . '/suite.php';
 
@@ -173,6 +184,14 @@ function pipeline_placeholder(string $text): ?string
 {
     return preg_match('/<[A-Za-z][A-Za-z0-9_-]*>/', $text, $match) ? $match[0] : null;
 }
+
+/** `branch.issue` up to `<slug>`, the number filled in: every branch for the issue starts with it, whoever slugged the title. Null without a `<slug>`, or without a `<number>` before it. */
+function pipeline_branch_prefix(string $pattern, int $number): ?string
+{
+    $head = strstr($pattern, '<slug>', true);
+
+    return $head === false || ! str_contains($head, '<number>') ? null : str_replace('<number>', (string) $number, $head);
+}
 ```
 
 - [ ] **Step 5: Run it to see it pass, then the whole suite**
@@ -197,7 +216,7 @@ git commit -m "pipeline: kickoff's config lookup, slug and placeholder rule (#69
 - Test: `skills/pipeline/checks/tests/DispatchCliTest.php` (append)
 
 **Interfaces:**
-- Consumes: Task 1's three functions; `pipeline_repo_board()` (`board.php`); `pipeline_git_run()`, `pipeline_git()`, `pipeline_exclude_manifest()` (`suite.php`); `manifest_write()` (`manifest.php`); `pipeline_halt()` (`dispatch.php`, loaded by `dispatch_cli.php`); `suite_repo()` (`tests/SuiteTest.php`, already used by `DispatchCliTest.php`); `dispatch_cli(array $arguments, array $env = [])` (the test's own helper).
+- Consumes: Task 1's three functions; `pipeline_repo_board()` (`board.php`); `pipeline_git_run()`, `pipeline_git()`, `pipeline_exclude_manifest()` (`suite.php`); `manifest_write()` (`manifest.php`); `pipeline_halt()` (`dispatch.php`, required by `kickoff.php`); `suite_repo()` (`tests/SuiteTest.php`, already used by `DispatchCliTest.php`); `dispatch_cli(array $arguments, array $env = [])` (the test's own helper).
 - Produces: `pipeline_kickoff(string $repoRoot, string $item, array $options): array` with `$options = ['mode' => string, 'light' => bool, 'decisions' => list<string>]`; `pipeline_worktree_of(string $repoRoot, string $branch): ?string`; `pipeline_kickoff_gh(string $cwd, array $args): array{0: int, 1: string, 2: string}`; `dispatch_cli_kickoff_args(array $arguments): ?array`. Task 3 adds the board claim into `pipeline_kickoff()`.
 
 - [ ] **Step 1: Write the failing tests** — append to `skills/pipeline/checks/tests/DispatchCliTest.php`
@@ -384,6 +403,21 @@ it('halts when the branch already exists, before the create runs', function () {
     expect(is_file($fixture['primary'] . '/created'))->toBeFalse();
 });
 
+it('halts on another branch for the issue, whoever named it, and on no other issue\'s', function () {
+    $fixture = kickoff_fixture("touch created; git worktree add .claude/worktrees/<branch> -b <branch> origin/main");
+    pipeline_git($fixture['primary'], ['branch', 'feature/issue-690-another-issue', 'origin/main']);
+    pipeline_git($fixture['primary'], ['branch', 'feature/issue-69-hand-made', 'origin/main']);
+
+    expect(kickoff($fixture, ['69'])['json'])->toBe([
+        'action' => 'halt',
+        'reason' => 'branch feature/issue-69-hand-made already exists: a run or session has it; resume it with launch',
+    ]);
+    expect(is_file($fixture['primary'] . '/created'))->toBeFalse();
+
+    pipeline_git($fixture['primary'], ['branch', '-D', 'feature/issue-69-hand-made']);
+    expect(kickoff($fixture, ['69'])['json']['action'])->toBe('ready');
+});
+
 it('refuses a kickoff it cannot parse', function (array $arguments) {
     $fixture = kickoff_fixture();
 
@@ -400,7 +434,7 @@ it('refuses a kickoff it cannot parse', function (array $arguments) {
 
 - [ ] **Step 2: Run them to see them fail**
 
-Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='kicks off|first manifest|open blocker|work item cannot|value kickoff|create that fails|exits 0 without|already exists|cannot parse'`
+Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='kicks off|first manifest|open blocker|work item cannot|value kickoff|create that fails|exits 0 without|already exists|another branch for the issue|cannot parse'`
 Expected: FAIL. `dispatch_cli.php` answers `kickoff` with its usage line and exit 1, so `json` is null (the parse case passes by accident; that is fine, it pins the refusal).
 
 - [ ] **Step 3: Write the implementation** — append to `skills/pipeline/checks/kickoff.php`
@@ -424,7 +458,7 @@ function pipeline_kickoff(string $repoRoot, string $item, array $options): array
         $issue = pipeline_kickoff_issue($repoRoot, $config, $item);
         $branch = pipeline_kickoff_branch($config, $item, $issue);
         $command = pipeline_kickoff_create_command($config, $branch);
-        pipeline_kickoff_unclaimed($repoRoot, $branch);
+        pipeline_kickoff_unclaimed($repoRoot, $config, $branch, $issue);
         $worktree = pipeline_kickoff_create($repoRoot, $command, $branch);
     } catch (PipelineKickoffHalt $halt) {
         return pipeline_halt($halt->getMessage());
@@ -433,7 +467,7 @@ function pipeline_kickoff(string $repoRoot, string $item, array $options): array
     try {
         $manifest = pipeline_kickoff_prepare($worktree, $branch, pipeline_kickoff_manifest($branch, $worktree, $item, $issue, $options));
     } catch (RuntimeException $failure) {
-        return pipeline_halt("kickoff created {$worktree} but could not finish it: {$failure->getMessage()}");
+        return pipeline_halt("kickoff created {$worktree} but could not finish it, and wrote no manifest: {$failure->getMessage()}; remove the worktree and its branch before kicking off again");
     }
 
     return ['action' => 'ready', 'manifest' => $manifest, 'worktree' => $worktree, 'branch' => $branch, 'notes' => []];
@@ -551,11 +585,18 @@ function pipeline_kickoff_create_command(string $config, string $branch): string
     return $command;
 }
 
-/** An existing branch belongs to a run or session kickoff cannot see: never reuse it. */
-function pipeline_kickoff_unclaimed(string $repoRoot, string $branch): void
+/**
+ * An existing branch for the item belongs to a run or session kickoff cannot see: never reuse it. For an
+ * issue that is any branch under `pipeline_branch_prefix()`, so a hand-made or work-on branch counts.
+ */
+function pipeline_kickoff_unclaimed(string $repoRoot, string $config, string $branch, ?array $issue): void
 {
-    if (pipeline_git_run($repoRoot, ['rev-parse', '--verify', '--quiet', "refs/heads/{$branch}"])[0] === 0) {
-        throw new PipelineKickoffHalt("branch {$branch} already exists: a run or session has it; resume it with launch");
+    $prefix = $issue === null ? null : pipeline_branch_prefix(pipeline_kickoff_required($config, 'Branch convention', 'issue'), $issue['number']);
+    $refs = preg_split('/\R/', pipeline_git($repoRoot, ['for-each-ref', '--format=%(refname:lstrip=2)', 'refs/heads/']), -1, PREG_SPLIT_NO_EMPTY);
+    foreach ($refs as $ref) {
+        if ($ref === $branch || ($prefix !== null && str_starts_with($ref, $prefix))) {
+            throw new PipelineKickoffHalt("branch {$ref} already exists: a run or session has it; resume it with launch");
+        }
     }
 }
 
@@ -573,7 +614,7 @@ function pipeline_kickoff_create(string $repoRoot, string $command, string $bran
     }
 
     return pipeline_worktree_of($repoRoot, $branch)
-        ?? throw new PipelineKickoffHalt("the declared worktree.create exited 0 but no worktree has {$branch}: `{$command}`\n{$tail}");
+        ?? throw new PipelineKickoffHalt("the declared worktree.create exited 0 but no worktree has {$branch}: `{$command}`\n{$tail}\ncheck git worktree list");
 }
 
 /** The worktree git lists for the branch, whichever command made it. */
@@ -618,10 +659,9 @@ function pipeline_kickoff_manifest(string $branch, string $worktree, string $ite
 
 In `skills/pipeline/checks/dispatch_cli.php`:
 
-1. Add to the requires, after `require_once __DIR__ . '/suite.php';`:
+1. Add to the requires, after `require_once __DIR__ . '/suite.php';` (`kickoff.php` requires `board.php` itself):
 
 ```php
-require_once __DIR__ . '/board.php';
 require_once __DIR__ . '/kickoff.php';
 ```
 
@@ -704,7 +744,7 @@ function dispatch_cli_kickoff(array $arguments): ?array
 
 - [ ] **Step 4: Run them to see them pass**
 
-Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='kicks off|first manifest|open blocker|work item cannot|value kickoff|create that fails|exits 0 without|already exists|cannot parse'`
+Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='kicks off|first manifest|open blocker|work item cannot|value kickoff|create that fails|exits 0 without|already exists|another branch for the issue|cannot parse'`
 Expected: PASS.
 
 - [ ] **Step 5: Check the upstream test can fail**
@@ -868,7 +908,8 @@ git commit -m "pipeline: kickoff halts on an invalid board and claims a valid on
    `php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | idea> [--light] [--decision "<verbatim>"]…`
    does §The work item and §Kickoff in one call (`references/engine.md` §Kickoff). `ready`: its
    `manifest` is the run's, and its `notes` go into the report. A halt: report it and stop; never
-   create the worktree another way. A resume skips this step.
+   create the worktree another way. A denied kickoff call is reported like a halt: nothing is
+   retried in another form. A resume skips this step.
 2. **Launch.** `git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"`, then
    `PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff"`.
    `done` or a halt: report it and stop. A resume starts here: `launch` starts from the cursor.
@@ -906,11 +947,15 @@ php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | idea> [--lig
 
 It runs the declared `worktree.create` as declared, from the primary checkout, with only `<branch>`
 substituted: slot choice belongs to the repo's script, and a declared command that still needs a
-value computed (`<next-free-N>`) is a halt naming the config line. A create that fails — a
-classifier denial arrives as a non-zero exit — halts with the command's output, and nothing is
-retried in another form. An existing branch halts too: resume that run with `launch`. After the
-create it unsets the new branch's upstream, keeps the manifest out of git, writes the first manifest
-(below) and claims the board last. `interactive` follows the rest of this section by hand.
+value computed (`<next-free-N>`) is a halt naming the config line. A create that fails — a sandbox
+refusal, a script that asks a question, a stale path — halts with the command's output, and nothing
+is retried in another form. A classifier only ever sees the kickoff call itself: a denial of it
+reaches the session before any PHP runs, and is reported like a halt. An existing branch for the
+item halts too (for an issue, any branch under `branch.issue` cut at `<slug>`): resume that run with
+`launch`. After the create it unsets the new branch's upstream, keeps the manifest out of git, writes
+the first manifest (below) and claims the board last. The create runs through `sh -c` behind the one
+kickoff call, so an allow rule for `dispatch_cli.php kickoff` is an allow rule for whatever
+`worktree.create` declares. `interactive` follows the rest of this section by hand.
 ~~~
 
 - [ ] **Step 5: `skills/orchestrate/references/commands.md`, §Launch** — replace the two bullets
