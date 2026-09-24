@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Fixture test for owners.py: only working or blocked sessions other than the caller, whose
-# transcript (main or subagents/) has cwd entries inside the worktree, own it. A live session whose
-# transcript cannot be read fails closed (exit 2, never "no owner") when its own cwd is inside the
-# worktree, contains it, lies in the same git repository, or is missing; rooted anywhere else it is
-# skipped.
+# Fixture test for owners.py: only working or blocked sessions other than the caller own a worktree,
+# when one of their transcripts (main, subagents/ or subagents/workflows/wf_*/) has an entry whose cwd
+# lies inside it, or that names it through the pipeline: a dispatch_cli.php call on the run's
+# manifest, a kickoff or launch answer, or the Workflow call. A live session with a transcript that
+# cannot be read fails closed (exit 2, never "no owner") when its own cwd is inside the worktree,
+# contains it, lies in the same git repository, or is missing; rooted anywhere else it is skipped.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TMP="$(mktemp -d)"
@@ -28,6 +29,30 @@ entry "$WT"                > "$P/a/ggg.jsonl"                 # done, works in t
 entry "$WT"                > "$P/a/hhh.jsonl"                 # failed, works in the worktree -> skipped
 entry "$WT"                > "$P/a/iii.jsonl"                 # stopped, works in the worktree -> skipped
 
+# autoflow: every entry carries the launch directory (the primary checkout) as cwd.
+PRIMARY="$TMP/Shop/Shop"
+START='{"action":"start","startLeg":"design","manifest":"'"$WT"'/.claude/pipeline/b.json","worktree":"'"$WT"'"}'
+prompt() { printf '{"type":"user","cwd":"%s","message":{"role":"user","content":"%s"}}\n' "$PRIMARY" "$1"; }
+bash_call() { printf '{"type":"assistant","cwd":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"%s"}}]}}\n' "$PRIMARY" "$1"; }
+result() { printf '{"type":"user","cwd":"%s","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":%s}]}}\n' "$PRIMARY" "$1"; }
+json() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
+BRIEF="php /x/checks/dispatch_cli.php brief $WT/.claude/pipeline/feature/issue-4-x.json design run"
+workflow() { mkdir -p "$P/c/$1/subagents/workflows/$2"; printf '%s/subagents/workflows/%s/%s' "$P/c/$1" "$2" "$3"; }
+{ prompt "Run $BRIEF"; bash_call "$BRIEF"; } > "$(workflow wf-step wf_1-abc agent-s1.jsonl)"   # a step's brief call -> owner
+printf '{"type":"launched"}\n' > "$P/c/wf-step/subagents/workflows/wf_1-abc/journal.jsonl"          # the workflow's journal: no cwd, not a transcript
+bash_call "cd $PRIMARY; php /x/checks/dispatch_cli.php launch \\\"$WT/.claude/pipeline/b.json\\\" \\\"$WT/.claude/pipeline/b.diff\\\"" \
+  > "$(workflow wf-quoted wf_6-abc agent-s7.jsonl)"                                              # a quoted manifest, after a cd -> owner
+bash_call "php /x/checks/dispatch_cli.php brief $TMP/Shop/Shop-40/.claude/pipeline/b.json design run" \
+  > "$(workflow wf-prefix wf_2-abc agent-s2.jsonl)"                                              # prefix trap -> not an owner
+{ entry "$PRIMARY"; result "[{\"type\":\"text\",\"text\":$(json '{"action":"ready","manifest":"'"$WT"'/.claude/pipeline/b.json","worktree":"'"$WT"'","branch":"b","notes":[]}')}]"; } \
+  > "$P/c/kick.jsonl"                                                                             # kickoff's answer -> owner
+{ entry "$PRIMARY"; result "$(json "--- b
+$START")"; } > "$P/c/launch.jsonl"                                                               # launch's answer -> owner
+{ entry "$PRIMARY"; printf '{"type":"assistant","cwd":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"t2","name":"Workflow","input":{"name":"pipeline-autoflow","args":%s}}]}}\n' "$PRIMARY" "$START"; } \
+  > "$P/c/wfcall.jsonl"                                                                           # the Workflow call -> owner
+{ prompt "Run $BRIEF"; result "$(json '{"worktree":"'"$WT"'","mode":"autoflow"}')"; } > "$P/c/mention.jsonl"   # mentions only -> not an owner
+bash_call "grep -c 'dispatch_cli.php brief $WT/.claude/pipeline/b.json' $P/c/wfcall.jsonl" > "$P/c/grep.jsonl"   # a command quoting the call -> owner (accepted: the safe side)
+
 AGENTS='[
  {"id":"aaa","name":"run a","state":"working","sessionId":"aaa"},
  {"id":"bbb","name":"old run","state":"done","sessionId":"bbb"},
@@ -38,13 +63,21 @@ AGENTS='[
  {"id":"ggg","name":"finished run","state":"done","sessionId":"ggg"},
  {"id":"hhh","name":"crashed run","state":"failed","sessionId":"hhh"},
  {"id":"iii","name":"stopped run","state":"stopped","sessionId":"iii"},
- {"id":"kkk","name":"old run, transcript gone","state":"done","sessionId":"kkk"}
+ {"id":"kkk","name":"old run, transcript gone","state":"done","sessionId":"kkk"},
+ {"id":"wf-step","name":"workflow step","state":"working","sessionId":"wf-step"},
+ {"id":"wf-quoted","name":"quoted launch","state":"working","sessionId":"wf-quoted"},
+ {"id":"wf-prefix","name":"workflow on Shop-40","state":"working","sessionId":"wf-prefix"},
+ {"id":"kick","name":"kicked off","state":"working","sessionId":"kick"},
+ {"id":"launch","name":"launched","state":"blocked","sessionId":"launch"},
+ {"id":"wfcall","name":"started the workflow","state":"working","sessionId":"wfcall"},
+ {"id":"mention","name":"mentions the brief","state":"working","sessionId":"mention"},
+ {"id":"grep","name":"greps for the brief","state":"working","sessionId":"grep"}
 ]'
 
 fail() { printf 'FAIL owners.py: %s\n' "$1"; exit 1; }
 
 actual="$(printf '%s' "$AGENTS" | python3 "$HERE/../owners.py" "$WT" --projects-dir "$P" --session-id ccc | sort)"
-expected="$(printf 'run a\taaa\tworking\t1\nrun e\teee\tblocked\t1\n' | sort)"
+expected="$(printf 'run a\taaa\tworking\t1\nrun e\teee\tblocked\t1\nworkflow step\twf-step\tworking\t1\nkicked off\tkick\tworking\t1\nlaunched\tlaunch\tblocked\t1\nstarted the workflow\twfcall\tworking\t1\nquoted launch\twf-quoted\tworking\t1\ngreps for the brief\tgrep\tworking\t1\n' | sort)"
 [ "$actual" = "$expected" ] || fail "$(printf 'owners\n--- expected\n%s\n--- actual\n%s' "$expected" "$actual")"
 
 # A live session with no transcript at all (the layout moved), rooted inside the worktree: fail closed.
@@ -97,5 +130,20 @@ skipped u-plain   "$TMP/Plain" "$TMP/NoRepo"   # a worktree outside any reposito
 actual="$(printf '[{"id":"aaa","name":"run a","state":"working","sessionId":"aaa"},{"id":"u-other","name":"unreadable","state":"working","sessionId":"u-other","cwd":"%s"}]' "$TMP/Other/Other" \
   | python3 "$HERE/../owners.py" "$WT" --projects-dir "$P" --session-id ccc)" || fail "an owner plus an unrelated unreadable session did not exit 0"
 [ "$actual" = "$(printf 'run a\taaa\tworking\t1')" ] || fail "an unrelated unreadable session hid the owner: $actual"
+
+# Fail closed per transcript: a readable main transcript does not hide an unreadable workflow step.
+printf '{"type":"assistant","message":"no cwd here"}\n' > "$(workflow half wf_3-abc agent-s3.jsonl)"
+entry "$PRIMARY" > "$P/c/half.jsonl"
+blocks half ",\"cwd\":\"$PRIMARY\""
+printf '{"type":"assistant","message":"no cwd here"}\n' > "$(workflow half-far wf_5-abc agent-s5.jsonl)"
+entry "$PRIMARY" > "$P/c/half-far.jsonl"
+skipped half-far "$TMP/Other/Other"
+
+# An owner stays an owner when another of its transcripts cannot be read.
+bash_call "$BRIEF" > "$(workflow half-owner wf_4-abc agent-s4.jsonl)"
+printf '{"type":"assistant","message":"no cwd here"}\n' > "$P/c/half-owner/subagents/workflows/wf_4-abc/agent-s6.jsonl"
+actual="$(printf '[{"id":"half-owner","name":"owner","state":"working","sessionId":"half-owner","cwd":"%s"}]' "$PRIMARY" \
+  | python3 "$HERE/../owners.py" "$WT" --projects-dir "$P" --session-id ccc)" || fail "an owner with an unreadable step transcript did not exit 0"
+[ "$actual" = "$(printf 'owner\thalf-owner\tworking\t1')" ] || fail "an owner with an unreadable step transcript: $actual"
 
 echo "PASS owners.py"
