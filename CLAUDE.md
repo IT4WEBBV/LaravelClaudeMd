@@ -90,6 +90,12 @@ human-readable name and a static `getOptions()` returning `[['id' => $case->valu
 - Thin controllers: Livewire components preferred for interactive UI, validation in Form Requests or
   inline, business logic in Actions and Services.
 
+#### Flare signals
+A handled situation worth watching (a slide skipped because its media file is missing) is
+`report(new SomeDedicatedException($context))`, not `Log::warning()`: Flare groups it and counts the
+occurrences. Give the exception a `context(): array` with the relevant ids, and report it from one
+place so all occurrences land in one Flare error. `Log::` is for low-value debug output.
+
 ### Frontend Stack
 
 #### Livewire and the it4web packages
@@ -258,7 +264,8 @@ in `~/.claude/skills/`. At session start `hooks/git-freshness.sh` fast-forwards 
 any new skill, on each machine. Skill names must be unique across the two repos.
 `DevOps-Claude-Config` is a colleague's personal config: link only its `skills/`, never its
 `settings.json` or `CLAUDE.md`. After changing a hook, run its tests in `hooks/tests/`. Machine
-setup and hook wiring: `README.md`.
+setup and hook wiring: `README.md`. Playbooks for porting a LaravelTemplate feature into a project
+(slots, changelog automation, base image upgrade, Pest migration): `docs/playbooks/`.
 
 ---
 
