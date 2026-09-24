@@ -26,7 +26,7 @@
 ## Review Focus
 
 1. **A `cwd` with a trailing slash** (`/Users/x/`): must still count as *above* its worktree. `above()` strips the trailing slash before appending `/`; `u-root` (`/`) pins the extreme case of the same code path.
-2. **A worktree that is not a git repository** (a deleted or never-created directory): `repository(worktree)` is `None`, so `same_repository()` must be `False` rather than `None == None` → `True`. The `u-gone` and `u-plain` skip cases run against a real worktree; the `None` guard is pinned by the Task 1 Step 6 probe.
+2. **A worktree that is not a git repository** (a deleted or never-created directory): `repository(worktree)` is `None`, so `same_repository()` must be `False` rather than `None == None` → `True`. The `u-gone` and `u-plain` skip cases run against a real worktree; the `None` guard is pinned by the `u-plain` case run against `$TMP/NoRepo`, a worktree path that was never `git init`ed.
 3. **Prefix trap for *above***: `Shop/Shop-4` must not be counted as above `Shop/Shop-40/...`, nor `Shop/Shop-40` as related to `Shop/Shop-4`. `u-prefix` pins it.
 4. **A readable session that also lies outside the worktree** must not start blocking because of the new code: the existing `fff` (neighbour) row stays a non-owner in the first assertion, and the mixed case pins that an unrelated unreadable row neither hides an owner nor fails the run.
 5. **macOS `/var` vs `/private/var`**: the same-repository rule compares `git`'s own output for both sides, which resolves symlinks identically. `u-primary` runs under `mktemp -d` (a `/var/folders/...` path) and pins it.
@@ -67,7 +67,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 WT="$TMP/Shop/Shop-4"
 P="$TMP/projects"
-mkdir -p "$P/a" "$P/b/eee/subagents" "$TMP/Shop" "$TMP/Other" "$TMP/Plain" "$TMP/Shop/Shop-40"
+mkdir -p "$P/a" "$P/b/eee/subagents" "$TMP/Shop" "$TMP/Other" "$TMP/Plain" "$TMP/NoRepo" "$TMP/Shop/Shop-40"
 git init -q "$TMP/Shop/Shop"
 git -C "$TMP/Shop/Shop" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
 git -C "$TMP/Shop/Shop" worktree add -q "$WT" -b slot-4
@@ -136,10 +136,10 @@ blocks u-primary  ",\"cwd\":\"$TMP/Shop/Shop\""      # the slot's primary checko
 blocks u-no-cwd   ""                                  # no cwd in the row: cannot rule it out
 
 # An unreadable live session rooted anywhere else is skipped: no owner, exit 0, silent.
-skipped() { # <session id> <cwd>
+skipped() { # <session id> <cwd> [worktree, default $WT]
   local status=0 out
   out="$(printf '[{"id":"%s","name":"unreadable","state":"working","sessionId":"%s","cwd":"%s"}]' "$1" "$1" "$2" \
-    | python3 "$HERE/../owners.py" "$WT" --projects-dir "$P" --session-id ccc 2>"$TMP/err")" || status=$?
+    | python3 "$HERE/../owners.py" "${3:-$WT}" --projects-dir "$P" --session-id ccc 2>"$TMP/err")" || status=$?
   [ "$status" -eq 0 ] || fail "unreadable session $1 in $2 exited $status, expected 0: $(cat "$TMP/err")"
   [ -z "$out" ] || fail "unreadable session $1 in $2 printed: $out"
   [ ! -s "$TMP/err" ] || fail "unreadable session $1 in $2 wrote to stderr: $(cat "$TMP/err")"
@@ -148,6 +148,7 @@ skipped u-other   "$TMP/Other/Other"      # another git repository
 skipped u-plain   "$TMP/Plain"            # a directory outside any repository
 skipped u-prefix  "$TMP/Shop/Shop-40"     # prefix trap: Shop-40 is not Shop-4
 skipped u-gone    "$TMP/Gone/Gone"        # a directory that no longer exists
+skipped u-plain   "$TMP/Plain" "$TMP/NoRepo"   # a worktree outside any repository: no None == None match
 
 # A skipped unreadable session does not hide a real owner.
 actual="$(printf '[{"id":"aaa","name":"run a","state":"working","sessionId":"aaa"},{"id":"u-other","name":"unreadable","state":"working","sessionId":"u-other","cwd":"%s"}]' "$TMP/Other/Other" \
@@ -246,16 +247,9 @@ bash skills/orchestrate/tests/owners_test.sh
 ```
 Expected: `PASS owners.py`.
 
-- [ ] **Step 6: Pin Review Focus 2 and probe the live machine**
+- [ ] **Step 6: Probe the live machine**
 
-A worktree path that is not a repository must never match through `None == None`:
-
-```bash
-printf '[{"id":"u","name":"x","state":"working","sessionId":"u","cwd":"/tmp/not-a-repo-65"}]' | python3 skills/orchestrate/owners.py /tmp/no-such-worktree-65 --projects-dir /tmp/no-such-projects-65; echo "exit $?"
-```
-Expected: no output, `exit 0`.
-
-The real session list against this worktree:
+Review Focus 2 (a worktree outside any repository never matches through `None == None`) is pinned by the fixture's `u-plain` case against `$TMP/NoRepo`, which Step 5 already ran. The real session list against this worktree:
 
 ```bash
 claude agents --json --all | python3 skills/orchestrate/owners.py "$(pwd)"; echo "exit $?"
