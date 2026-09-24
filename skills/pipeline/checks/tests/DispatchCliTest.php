@@ -548,6 +548,17 @@ it('halts on another branch for the issue, whoever named it, and on no other iss
     expect(kickoff($fixture, ['69'])['json']['action'])->toBe('ready');
 });
 
+it('halts with git\'s message, as one JSON line, when git fails in the primary checkout', function () {
+    $fixture = kickoff_fixture();
+    exec('rm -rf ' . escapeshellarg($fixture['primary'] . '/.git'));
+
+    $answer = dispatch_cli(['kickoff', $fixture['primary'], '69'], [...$fixture['env'], 'GIT_CEILING_DIRECTORIES' => $fixture['dir']]);
+
+    expect($answer['code'])->toBe(0);
+    expect($answer['json']['action'])->toBe('halt');
+    expect($answer['json']['reason'])->toContain('not a git repository');
+});
+
 it('refuses a kickoff it cannot parse', function (array $arguments) {
     $fixture = kickoff_fixture();
 

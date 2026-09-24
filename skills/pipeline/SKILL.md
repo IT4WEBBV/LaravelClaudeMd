@@ -89,7 +89,7 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
 (`references/engine.md` §`autoflow`):
 
 1. **Kickoff.** With `CHECKS="$HOME/.claude/skills/pipeline/checks"`:
-   `php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | idea> [--light] [--decision "<verbatim>"]…`
+   `php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--decision "<verbatim>"]…`
    does §The work item and §Kickoff in one call (`references/engine.md` §Kickoff). `ready`: its
    `manifest` is the run's, and its `notes` go into the report. A halt: report it and stop; never
    create the worktree another way. A denied kickoff call is reported like a halt: nothing is

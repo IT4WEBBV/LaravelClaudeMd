@@ -101,7 +101,7 @@ step agent         dispatch_cli.php brief <manifest> <leg> <step> → the leg's 
 
 ```bash
 CHECKS="$HOME/.claude/skills/pipeline/checks"
-php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | idea> [--light] [--decision "<verbatim>"]…
+php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--decision "<verbatim>"]…
 # → {"action":"ready","manifest":…,"worktree":…,"branch":…,"notes":[…]} | {"action":"halt","reason":…}
 git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
 PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>]
@@ -277,7 +277,7 @@ latent drift bug. The issue number is a pointer, which is what the manifest is f
 section in one call and leaves the session nothing to judge:
 
 ```bash
-php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | idea> [--light] [--mode autoflow|auto] [--decision "<verbatim>"]…
+php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--mode autoflow|auto] [--decision "<verbatim>"]…
 ```
 
 It runs the declared `worktree.create` as declared, from the primary checkout, with only `<branch>`

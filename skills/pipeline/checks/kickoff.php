@@ -78,7 +78,7 @@ function pipeline_kickoff(string $repoRoot, string $item, array $options): array
         $command = pipeline_kickoff_create_command($config, $branch);
         pipeline_kickoff_unclaimed($repoRoot, $config, $branch, $issue);
         $worktree = pipeline_kickoff_create($repoRoot, $command, $branch);
-    } catch (PipelineKickoffHalt $halt) {
+    } catch (RuntimeException $halt) {
         return pipeline_halt($halt->getMessage());
     }
 
