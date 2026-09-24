@@ -475,6 +475,30 @@ sync_config_repos() {
     done <<< "$(config_repo_list)"
 }
 
+# The SecondBrain vault was retired on one machine (LaravelClaudeMd #64); this
+# reminds the other one to clean up at its next session. Read-only: the session
+# asks before touching anything. Delete this once both machines are clean.
+remind_retired_vault() {
+    local home="${GIT_FRESHNESS_VAULT_HOME-$HOME}" found="" n
+
+    [ "$(grep -c '"basic-memory"' "$home/.claude.json" 2>/dev/null)" -gt 0 ] 2>/dev/null \
+        && found="${found}, basic-memory MCP entry in ~/.claude.json"
+    [ -d "$home/.basic-memory" ] && found="${found}, ~/.basic-memory"
+    if [ -d "$home/GitProjects/SecondBrain" ]; then
+        n=$(git -C "$home/GitProjects/SecondBrain/SecondBrain" status --porcelain 2>/dev/null | grep -c .)
+        case "${n:-0}" in
+            0) found="${found}, ~/GitProjects/SecondBrain" ;;
+            1) found="${found}, ~/GitProjects/SecondBrain (1 uncommitted file)" ;;
+            *) found="${found}, ~/GitProjects/SecondBrain ($n uncommitted files)" ;;
+        esac
+    fi
+    [ -n "$found" ] || return 0
+
+    config_notes="${config_notes}
+  - SecondBrain leftovers on this machine: ${found#, }. The vault is retired (LaravelClaudeMd #64). Offer the cleanup with AskUserQuestion: \`claude mcp remove basic-memory -s user\`, \`uv tool uninstall basic-memory\`, \`rm -rf ~/.basic-memory\`, and grep ~/.claude/projects/*/memory for SecondBrain/basic-memory notes to delete. Ask separately before deleting ~/GitProjects/SecondBrain: uncommitted files there exist nowhere else (the GitHub repo is archived)."
+    config_tags="${config_tags}${config_tags:+, }SecondBrain leftovers found"
+}
+
 # Report on the repo containing $1. Prints hook JSON, or nothing when the path
 # is not a git repo with an origin.
 check_repo() {
@@ -635,6 +659,7 @@ case "$mode" in
         [ -n "$repo" ] && [ -d "$repo" ] || repo="$PWD"
 
         sync_config_repos
+        remind_retired_vault
         check_repo "$repo" SessionStart
 
         # check_repo stays silent outside a git repo; config news still gets out.

@@ -50,6 +50,8 @@ git config --global user.email test@example.com
 # and let the config cases below point them at fixtures explicitly.
 export GIT_FRESHNESS_CONFIG_REPOS=""
 export GIT_FRESHNESS_SKILLS_DIR="$root/no-skills-dir"
+# Same for the retired-vault reminder: no case may read the real home.
+export GIT_FRESHNESS_VAULT_HOME="$root/no-home"
 
 passed=0
 failed=0
@@ -348,6 +350,26 @@ payload="{\"session_id\":\"test-config3\",\"cwd\":\"$root/config3\"}"
 out=$(printf '%s' "$payload" \
     | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config3/skills-link" bash "$hook" session 2>/dev/null)
 if [ -e "$root/config3/realskills/another" ]; then fail "nothing written through the symlink"; else ok "nothing written through the symlink"; fi
+echo
+
+echo "case 15: SecondBrain leftovers get a reminder, a clean home stays silent"
+home="$root/vaulthome"
+mkdir -p "$home/.basic-memory"
+printf '{"mcpServers":{"basic-memory":{"type":"stdio"}}}' > "$home/.claude.json"
+git init -q "$home/GitProjects/SecondBrain/SecondBrain"
+printf 'only here\n' > "$home/GitProjects/SecondBrain/SecondBrain/2026-08-05.md"
+config_notes=""; config_tags=""
+GIT_FRESHNESS_VAULT_HOME="$home" remind_retired_vault
+contains "$config_notes" "basic-memory MCP entry in ~/.claude.json" "the MCP entry is named"
+contains "$config_notes" "~/.basic-memory" "the index dir is named"
+contains "$config_notes" "~/GitProjects/SecondBrain (1 uncommitted file)" "the clone and its local-only files are named"
+contains "$config_notes" "AskUserQuestion" "the session is told to ask first"
+contains "$config_tags" "SecondBrain leftovers" "the user sees a headline"
+mkdir -p "$root/cleanhome"
+printf '{"mcpServers":{"flare":{}}}' > "$root/cleanhome/.claude.json"
+config_notes=""; config_tags=""
+GIT_FRESHNESS_VAULT_HOME="$root/cleanhome" remind_retired_vault
+is "$config_notes$config_tags" "" "a clean home adds nothing"
 echo
 
 echo "----------------------------------------"
