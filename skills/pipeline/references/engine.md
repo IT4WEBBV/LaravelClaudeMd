@@ -303,8 +303,8 @@ current checkout isn't already it. Derive the starting point from the invocation
 Record the `worktree` absolute path in the manifest so every leg and every resume operates in
 the right place. A resume locates the run's worktree via `git worktree list` for the branch.
 **One worktree for the entire run** — `implement` reuses `work-on`'s logic but **not** its slot
-claim, so no *second* slot ever appears mid-chain. **Created, never torn down**: teardown is
-destructive and stays the human's call.
+claim, so no *second* slot ever appears mid-chain. **Never torn down mid-run; torn down after the
+merge** by the session that created it (§After the merge).
 
 **Keep the manifest out of git before writing it.** Many repos do not ignore `.claude/`, and a
 manifest that git can see would be committed by a stray `git add -A` and would change §Suite reuse's
@@ -327,6 +327,28 @@ an idea file or an issue, and `decisions` (verbatim) when settled decisions were
 Nothing that runs the loop, in any mode, reads an artifact to recover any of these, so a field
 kickoff leaves out is simply absent from every brief: a `light` run would get an Architectural design
 brief, and inline decisions would never reach a reviewer.
+
+## After the merge — the run removes its own slot
+
+The worktree a run created is the run's to clean up, not the owner's: a finished run that leaves its
+slot standing hands the owner a chore per PR. Only the slot **this run created** at §Kickoff; never a
+checkout the run was launched inside, never another session's slot, never before the PR is `MERGED`.
+A run started by `orchestrate` is covered by its own step 6 — this section is for a standalone
+`/pipeline`.
+
+1. **Arm the watch** as the run's report goes out (ready PR or halted-after-`handoff`): one background
+   Bash per PR, exactly `orchestrate`'s §Watch "awaiting merge" loop
+   (`../../orchestrate/references/commands.md`). It polls `gh` every 5 minutes in a shell, so it
+   costs no tokens while it waits; the session wakes once, on the change.
+2. **On `MERGED`**, run `orchestrate`'s §Teardown checks and removal as written there (clean, `HEAD`
+   equals the merged `headRefOid`, no owner, then the repo's declared `worktree.remove`). All hold:
+   **remove without asking**, ahead of `slots`' confirm step. A check fails: ask, quoting the output.
+   A session sitting inside the worktree leaves it first (`ExitWorktree` with `keep`).
+3. **Closed without merge**: never torn down. Say so in one line; the owner decides.
+
+**The watch dies with the session.** A merge the session never saw — or the owner saying "merged" —
+is handled the same way the next time `/pipeline` runs in that repo: a manifest whose PR is `MERGED`
+gets step 2 before anything else.
 
 ## Dev-stack readiness — pipeline-owned, no hesitation
 
