@@ -104,7 +104,8 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    `gh pr ready` is denied the PR stays draft and no halt is written: put the denial in the report,
    and the owner runs `gh pr ready` by hand. **A halt after `handoff`:** the reason into the PR body
    and the proof page opened once (`references/engine.md` §Failure policy).
-6. **Report** the result with the two cost-per-run outputs above.
+6. **Report** the result with the two cost-per-run outputs above, and arm the merge watch
+   (`references/engine.md` §After the merge).
 
 `~/.claude/workflows/pipeline-autoflow.js` is a symlink to `workflow/pipeline-autoflow.js`, linked by
 `hooks/git-freshness.sh` as it links the skills.
@@ -113,8 +114,8 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
 
 - **Replacing any station's judgment.** The pipeline sequences skills; it does not out-think them.
 - **New review logic** (that is `/critique`) or **new bug-hunting** (that is `/code-review`).
-- **Tearing down worktrees.** It creates one worktree for the run and **never removes it** —
-  teardown is destructive and stays the human's call.
+- **Tearing down a worktree before its PR is merged,** or one the run did not create. After the
+  merge the run removes its own slot without asking (`references/engine.md` §After the merge).
 - **Posting to GitHub beyond what `handoff`/`work-on` already do**, and nothing it writes ever
   addresses a person.
 - **A findings store, or any persistent state not reconstructable** from git + gh.

@@ -64,6 +64,11 @@ NOT run `stop.sh`.**
 3. **Never delete the local branch** unless the user explicitly asks (that is
    `--force-local-branch-removal` / `git branch -D` — it can drop unmerged work).
 
+**Exception — your own slot after its PR merged.** A slot a `/pipeline` or `orchestrate` run
+created is removed by that session once the PR is `MERGED`, with no confirm step and with its local
+branch, after the checks in `orchestrate/references/commands.md` §Teardown pass (pipeline
+`references/engine.md` §After the merge). The owner does not clean up after a run.
+
 ## Red flags — you're about to get it wrong
 
 - Reaching for `stop.sh` because the user said "stop" → WRONG. Stop = destroy.
