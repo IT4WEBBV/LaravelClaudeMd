@@ -67,10 +67,10 @@ step runs.
 session (the main session or `orchestrate`). Its steps are depth 2; `/critique`'s reviewer and the
 independent read are depth 3.
 
-**It keeps:** kickoff (§The work item, §Kickoff, the manifest exclusion, writing `decisions` and
-`light` from the invocation), the invariant check (`manifest.md`), `dispatch_cli.php` (which holds
-`manifest_validate`, `manifest_write`, `pipeline_next_leg`, the loop bound and the return checks),
-navigation through `pipeline_can_navigate`, and the halts (§Failure policy).
+**It keeps:** kickoff (`dispatch_cli.php kickoff --mode auto`, §Kickoff), the invariant check
+(`manifest.md`), `dispatch_cli.php` (which holds `manifest_validate`, `manifest_write`,
+`pipeline_next_leg`, the loop bound and the return checks), navigation through
+`pipeline_can_navigate`, and the halts (§Failure policy).
 
 **It never** reads an artifact, a review, a diff or test output; never edits; never runs the suite.
 Diffs go to a file that only `dispatch_cli.php` reads. Of this document it needs only §The loop, this
@@ -93,7 +93,7 @@ The loop is `../workflow/pipeline-autoflow.js`, the saved workflow `pipeline-aut
 steps, the loop-backs, their bounds and the halts are JavaScript, and agents exist only inside steps.
 
 ```
-invoking session   kickoff → dispatch_cli.php launch → Workflow pipeline-autoflow (args: launch's JSON)
+invoking session   dispatch_cli.php kickoff → dispatch_cli.php launch → Workflow pipeline-autoflow (args: launch's JSON)
                    … on its return: dispatch_cli.php finish → gh pr ready | halt duties → report
 workflow script    per step: agent(prompt, {schema}) → {status, reason, ui, size} → next step, loop-back or return
 step agent         dispatch_cli.php brief <manifest> <leg> <step> → the leg's work → the manifest → {status, reason}
@@ -101,6 +101,8 @@ step agent         dispatch_cli.php brief <manifest> <leg> <step> → the leg's 
 
 ```bash
 CHECKS="$HOME/.claude/skills/pipeline/checks"
+php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | idea> [--light] [--decision "<verbatim>"]…
+# → {"action":"ready","manifest":…,"worktree":…,"branch":…,"notes":[…]} | {"action":"halt","reason":…}
 git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
 PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>]
 # → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"noOpen":…,"checks":…}
@@ -270,6 +272,25 @@ recomputable from the board, and `manifest.md` is explicit that storing a recomp
 latent drift bug. The issue number is a pointer, which is what the manifest is for.
 
 ## Kickoff — resolve the worktree, then start the loop
+
+**In `auto` and `autoflow`, kickoff is one tested command** that does §The work item and this
+section in one call and leaves the session nothing to judge:
+
+```bash
+php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | idea> [--light] [--mode autoflow|auto] [--decision "<verbatim>"]…
+```
+
+It runs the declared `worktree.create` as declared, from the primary checkout, with only `<branch>`
+substituted: slot choice belongs to the repo's script, and a declared command that still needs a
+value computed (`<next-free-N>`) is a halt naming the config line. A create that fails — a sandbox
+refusal, a script that asks a question, a stale path — halts with the command's output, and nothing
+is retried in another form. A classifier only ever sees the kickoff call itself: a denial of it
+reaches the session before any PHP runs, and is reported like a halt. An existing branch for the
+item halts too (for an issue, any branch under `branch.issue` cut at `<slug>`): resume that run with
+`launch`. After the create it unsets the new branch's upstream, keeps the manifest out of git, writes
+the first manifest (below) and claims the board last. The create runs through `sh -c` behind the one
+kickoff call, so an allow rule for `dispatch_cli.php kickoff` is an allow rule for whatever
+`worktree.create` declares. `interactive` follows the rest of this section by hand.
 
 The whole run lives in **one worktree**; the pipeline ensures one exists, creating it if the
 current checkout isn't already it. Derive the starting point from the invocation:

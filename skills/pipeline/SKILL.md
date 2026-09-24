@@ -88,10 +88,13 @@ numbers.
 The invoking session (this one, or `orchestrate`) holds only the two edges of an `autoflow` run
 (`references/engine.md` §`autoflow`):
 
-1. **Kickoff** (`references/engine.md` §The work item, §Kickoff): the worktree, the manifest
-   exclusion, the first `manifest_write` with `mode: autoflow`.
-2. **Launch.** With `CHECKS="$HOME/.claude/skills/pipeline/checks"`:
-   `git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"`, then
+1. **Kickoff.** With `CHECKS="$HOME/.claude/skills/pipeline/checks"`:
+   `php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | idea> [--light] [--decision "<verbatim>"]…`
+   does §The work item and §Kickoff in one call (`references/engine.md` §Kickoff). `ready`: its
+   `manifest` is the run's, and its `notes` go into the report. A halt: report it and stop; never
+   create the worktree another way. A denied kickoff call is reported like a halt: nothing is
+   retried in another form. A resume skips this step.
+2. **Launch.** `git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"`, then
    `PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff"`.
    `done` or a halt: report it and stop. A resume starts here: `launch` starts from the cursor.
 3. **Start the saved workflow `pipeline-autoflow`** by name, with `launch`'s JSON as `args`, and wait
