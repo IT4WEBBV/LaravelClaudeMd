@@ -182,6 +182,7 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
         'worktree' => $manifest['worktree'],
         'noOpen' => ! in_array((string) getenv('PIPELINE_NO_OPEN'), ['', '0'], true),
         'checks' => __DIR__,
+        'tables' => pipeline_routing_tables(),
     ];
 }
 
