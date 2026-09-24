@@ -351,3 +351,269 @@ it('refuses size without a readable manifest and ui without a diff file', functi
     expect(dispatch_cli(['size', '/nonexistent/m.json']))->toMatchArray(['code' => 1, 'stdout' => '']);
     expect(dispatch_cli(['ui', '/nonexistent/x.diff']))->toMatchArray(['code' => 1, 'stdout' => '']);
 });
+
+function kickoff_issue(array $overrides = []): array
+{
+    return ['number' => 69, 'title' => 'Pipeline: kickoff as one command', 'html_url' => 'https://github.com/acme/app/issues/69', 'pull_request' => null, ...$overrides];
+}
+
+/** What the fake gh answers: the issue and its blockers; a null leaves the file out, so that call fails. */
+function kickoff_gh(array $fixture, ?array $issue, ?array $blockers = []): void
+{
+    foreach (['issue.json' => $issue, 'blocked_by.json' => $blockers] as $file => $answer) {
+        $path = $fixture['dir'] . '/' . $file;
+        $answer === null ? @unlink($path) : file_put_contents($path, json_encode($answer));
+    }
+}
+
+/**
+ * A bare origin with one commit on main, a clone of it as the primary checkout with a work-on config,
+ * and a fake gh first on PATH that logs each call. The default create is this repo's own: it leaves an
+ * upstream on the new branch.
+ */
+function kickoff_fixture(string $create = 'git worktree add .claude/worktrees/<branch> -b <branch> origin/main', string $extraConfig = ''): array
+{
+    $dir = sys_get_temp_dir() . '/pipeline-kickoff-' . uniqid();
+    mkdir($dir . '/bin', 0777, true);
+    $seed = suite_repo();
+    pipeline_git($seed, ['branch', '-M', 'main']);
+    pipeline_git($dir, ['clone', '-q', '--bare', $seed, $dir . '/origin.git']);
+    pipeline_git($dir, ['clone', '-q', $dir . '/origin.git', $dir . '/primary']);
+    mkdir($dir . '/primary/.claude');
+    file_put_contents($dir . '/primary/.claude/work-on.config.md', implode("\n", [
+        '# work-on — per-repo config', '',
+        '## Repo', '- repo: acme/app', '',
+        '## Worktree', "- create: {$create}", '',
+        '## Branch convention', '- issue: feature/issue-<number>-<slug>   # issue pickup', '',
+        $extraConfig,
+    ]));
+    file_put_contents($dir . '/bin/gh', <<<'SH'
+#!/bin/sh
+echo "$*" >> "$GH_FAKE/calls"
+case "$*" in
+  *dependencies/blocked_by) cat "$GH_FAKE/blocked_by.json" ;;
+  "api repos/"*) cat "$GH_FAKE/issue.json" ;;
+  "project item-add"*) [ -f "$GH_FAKE/board-fails" ] && { echo 'HTTP 401: Bad credentials' >&2; exit 1; }; echo '{"id":"ITEM_1"}' ;;
+  "project item-edit"*) ;;
+  *) echo "unexpected gh $*" >&2; exit 1 ;;
+esac
+SH);
+    chmod($dir . '/bin/gh', 0755);
+    $fixture = ['dir' => $dir, 'primary' => $dir . '/primary', 'env' => ['PATH' => $dir . '/bin:' . getenv('PATH'), 'GH_FAKE' => $dir]];
+    kickoff_gh($fixture, kickoff_issue());
+
+    return $fixture;
+}
+
+function kickoff(array $fixture, array $arguments): array
+{
+    return dispatch_cli(['kickoff', $fixture['primary'], ...$arguments], $fixture['env']);
+}
+
+/** @return list<string> the fake gh's calls, in order */
+function kickoff_calls(array $fixture): array
+{
+    return is_file($fixture['dir'] . '/calls') ? file($fixture['dir'] . '/calls', FILE_IGNORE_NEW_LINES) : [];
+}
+
+/** Nothing was created: the primary checkout is still the only worktree and the branch does not exist. */
+function kickoff_left_nothing(array $fixture, string $branch = 'feature/issue-69-pipeline-kickoff-as-one-command'): void
+{
+    expect(preg_match_all('/^worktree /m', pipeline_git($fixture['primary'], ['worktree', 'list', '--porcelain'])))->toBe(1);
+    expect(pipeline_git_run($fixture['primary'], ['rev-parse', '--verify', '--quiet', "refs/heads/{$branch}"])[0])->not->toBe(0);
+}
+
+it('kicks off an issue: the declared create, no upstream, the manifest excluded and written', function () {
+    $fixture = kickoff_fixture();
+    $branch = 'feature/issue-69-pipeline-kickoff-as-one-command';
+
+    $ready = kickoff($fixture, ['69'])['json'];
+
+    expect($ready)->toMatchArray(['action' => 'ready', 'branch' => $branch, 'notes' => []]);
+    $worktree = $ready['worktree'];
+    expect($worktree)->toBe(realpath($fixture['primary'] . '/.claude/worktrees/' . $branch));
+    expect($ready['manifest'])->toBe($worktree . '/.claude/pipeline/feature-issue-69-pipeline-kickoff-as-one-command.json');
+    expect(manifest_read($ready['manifest']))->toBe([
+        'branch' => $branch,
+        'worktree' => $worktree,
+        'mode' => 'autoflow',
+        'cursor' => ['leg' => 'design', 'status' => 'pending'],
+        'artifacts' => ['issue' => 69],
+    ]);
+    expect(pipeline_git_run($worktree, ['rev-parse', '--abbrev-ref', "{$branch}@{upstream}"])[0])->not->toBe(0);
+    expect(pipeline_git_run($worktree, ['check-ignore', '-q', '.claude/pipeline/any.json'])[0])->toBe(0);
+    expect(kickoff_calls($fixture))->toBe(['api repos/acme/app/issues/69', 'api /repos/acme/app/issues/69/dependencies/blocked_by']);
+});
+
+it('writes the mode, light and the decisions verbatim into the first manifest', function () {
+    $fixture = kickoff_fixture();
+
+    $ready = kickoff($fixture, ['#69', '--light', '--mode', 'auto', '--decision', 'Fold in #53: add pipeline_ledger()', '--decision', 'Keep the guard'])['json'];
+
+    expect(manifest_read($ready['manifest']))->toMatchArray([
+        'mode' => 'auto',
+        'light' => true,
+        'decisions' => ['Fold in #53: add pipeline_ledger()', 'Keep the guard'],
+    ]);
+});
+
+it('kicks off an idea on a feature branch without asking gh', function () {
+    $fixture = kickoff_fixture();
+
+    $ready = kickoff($fixture, ['Add a dark-mode toggle!'])['json'];
+
+    expect($ready)->toMatchArray(['action' => 'ready', 'branch' => 'feature/add-a-dark-mode-toggle']);
+    expect(manifest_read($ready['manifest'])['artifacts'])->toBe(['idea' => 'Add a dark-mode toggle!']);
+    expect(kickoff_calls($fixture))->toBe([]);
+});
+
+it('halts on an open blocker and leaves nothing behind', function () {
+    $fixture = kickoff_fixture();
+    kickoff_gh($fixture, kickoff_issue(), [
+        ['number' => 65, 'title' => 'owners.py reads the wrong column', 'state' => 'open'],
+        ['number' => 60, 'title' => 'already done', 'state' => 'closed'],
+    ]);
+
+    expect(kickoff($fixture, ['69'])['json'])->toBe(['action' => 'halt', 'reason' => '#69 is blocked by #65 owners.py reads the wrong column']);
+    kickoff_left_nothing($fixture);
+});
+
+it('halts before anything is created when the work item cannot be read or started', function (?array $issue, ?array $blockers, string $reason) {
+    $fixture = kickoff_fixture();
+    kickoff_gh($fixture, $issue, $blockers);
+
+    $halt = kickoff($fixture, ['69'])['json'];
+
+    expect($halt['action'])->toBe('halt');
+    expect($halt['reason'])->toContain($reason);
+    kickoff_left_nothing($fixture);
+})->with([
+    'gh cannot read the issue' => [null, [], '#69 does not resolve in acme/app'],
+    'gh cannot read the blockers' => [kickoff_issue(), null, 'the blockers of #69 could not be read'],
+    'a pull request' => [kickoff_issue(['pull_request' => ['url' => 'x']]), [], '#69 is a pull request'],
+]);
+
+it('halts on a declared create that needs a value kickoff does not compute', function () {
+    $fixture = kickoff_fixture('./scripts/worktree.sh create <branch> --slot <next-free-N>');
+
+    expect(kickoff($fixture, ['69'])['json'])->toBe([
+        'action' => 'halt',
+        'reason' => 'the declared worktree.create needs <next-free-N>, which kickoff does not compute: `- create: ./scripts/worktree.sh create <branch> --slot <next-free-N>`',
+    ]);
+    kickoff_left_nothing($fixture);
+});
+
+it('halts with the output of a create that fails, and retries nothing', function (string $create, string $exit, string $output) {
+    $fixture = kickoff_fixture($create);
+
+    $halt = kickoff($fixture, ['69'])['json'];
+
+    expect($halt['action'])->toBe('halt');
+    expect($halt['reason'])->toContain("the declared worktree.create failed ({$exit})")->toContain($output);
+    kickoff_left_nothing($fixture);
+})->with([
+    'denied' => ["echo 'Permission for this action was denied' >&2; exit 3", 'exit 3', 'Permission for this action was denied'],
+    'waits on stdin' => ["read answer || { echo 'no answer'; exit 4; }", 'exit 4', 'no answer'],
+]);
+
+it('halts when a create exits 0 without a worktree for the branch', function () {
+    $fixture = kickoff_fixture('true');
+
+    expect(kickoff($fixture, ['69'])['json']['reason'])->toContain('the declared worktree.create exited 0 but no worktree has feature/issue-69-pipeline-kickoff-as-one-command');
+});
+
+it('halts when the branch already exists, before the create runs', function () {
+    $fixture = kickoff_fixture("touch created; git worktree add .claude/worktrees/<branch> <branch>");
+    pipeline_git($fixture['primary'], ['branch', 'feature/issue-69-pipeline-kickoff-as-one-command', 'origin/main']);
+
+    expect(kickoff($fixture, ['69'])['json'])->toBe([
+        'action' => 'halt',
+        'reason' => 'branch feature/issue-69-pipeline-kickoff-as-one-command already exists: a run or session has it; resume it with launch',
+    ]);
+    expect(is_file($fixture['primary'] . '/created'))->toBeFalse();
+});
+
+it('halts on another branch for the issue, whoever named it, and on no other issue\'s', function () {
+    $fixture = kickoff_fixture("touch created; git worktree add .claude/worktrees/<branch> -b <branch> origin/main");
+    pipeline_git($fixture['primary'], ['branch', 'feature/issue-690-another-issue', 'origin/main']);
+    pipeline_git($fixture['primary'], ['branch', 'feature/issue-69-hand-made', 'origin/main']);
+
+    expect(kickoff($fixture, ['69'])['json'])->toBe([
+        'action' => 'halt',
+        'reason' => 'branch feature/issue-69-hand-made already exists: a run or session has it; resume it with launch',
+    ]);
+    expect(is_file($fixture['primary'] . '/created'))->toBeFalse();
+
+    pipeline_git($fixture['primary'], ['branch', '-D', 'feature/issue-69-hand-made']);
+    expect(kickoff($fixture, ['69'])['json']['action'])->toBe('ready');
+});
+
+it('halts with git\'s message, as one JSON line, when git fails in the primary checkout', function () {
+    $fixture = kickoff_fixture();
+    exec('rm -rf ' . escapeshellarg($fixture['primary'] . '/.git'));
+
+    $answer = dispatch_cli(['kickoff', $fixture['primary'], '69'], [...$fixture['env'], 'GIT_CEILING_DIRECTORIES' => $fixture['dir']]);
+
+    expect($answer['code'])->toBe(0);
+    expect($answer['json']['action'])->toBe('halt');
+    expect($answer['json']['reason'])->toContain('not a git repository');
+});
+
+it('refuses a kickoff it cannot parse', function (array $arguments) {
+    $fixture = kickoff_fixture();
+
+    expect(kickoff($fixture, $arguments)['code'])->toBe(1);
+    expect(dispatch_cli(['kickoff'])['code'])->toBe(1);
+})->with([
+    'no item' => [[]],
+    'interactive' => [['69', '--mode', 'interactive']],
+    'an unknown flag' => [['69', '--sideways']],
+    'a flag without its value' => [['69', '--decision']],
+    'two items' => [['69', '70']],
+]);
+
+function kickoff_board(): string
+{
+    return implode("\n", ['## Board', '- org: acme', '- number: 7', '- project-id: PVT_1', '- status-field-id: F_1', '- in-progress-option-id: O_1', '']);
+}
+
+it('claims the issue on a valid board after the create, and says so', function () {
+    $fixture = kickoff_fixture(extraConfig: kickoff_board());
+
+    expect(kickoff($fixture, ['69'])['json'])->toMatchArray(['action' => 'ready', 'notes' => ['#69 is In Progress on board 7']]);
+    expect(array_slice(kickoff_calls($fixture), 2))->toBe([
+        'project item-add 7 --owner acme --url https://github.com/acme/app/issues/69 --format json',
+        'project item-edit --id ITEM_1 --project-id PVT_1 --field-id F_1 --single-select-option-id O_1',
+    ]);
+});
+
+it('reports a board claim that could not be recorded, and still kicks off', function () {
+    $fixture = kickoff_fixture(extraConfig: kickoff_board());
+    touch($fixture['dir'] . '/board-fails');
+
+    $ready = kickoff($fixture, ['69'])['json'];
+
+    expect($ready['action'])->toBe('ready');
+    expect($ready['notes'])->toBe(['the board claim was not recorded: HTTP 401: Bad credentials']);
+});
+
+it('claims nothing when the create fails, and nothing for an idea', function () {
+    $failing = kickoff_fixture("echo denied >&2; exit 1", kickoff_board());
+    expect(kickoff($failing, ['69'])['json']['action'])->toBe('halt');
+    expect(array_filter(kickoff_calls($failing), fn (string $call) => str_starts_with($call, 'project')))->toBe([]);
+
+    $idea = kickoff_fixture(extraConfig: kickoff_board());
+    expect(kickoff($idea, ['Add a toggle'])['json']['notes'])->toBe([]);
+    expect(kickoff_calls($idea))->toBe([]);
+});
+
+it('halts on an invalid board before anything is created', function () {
+    $fixture = kickoff_fixture(extraConfig: "## Board\n- org: acme\n");
+
+    $halt = kickoff($fixture, ['69'])['json'];
+
+    expect($halt['action'])->toBe('halt');
+    expect($halt['reason'])->toContain('the ## Board section is invalid')->toContain('missing: number');
+    expect(kickoff_calls($fixture))->toBe([]);
+    kickoff_left_nothing($fixture);
+});

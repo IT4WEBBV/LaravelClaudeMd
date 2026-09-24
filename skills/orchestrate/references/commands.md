@@ -78,7 +78,7 @@ The `auto` dispatch, one background agent per issue:
 Run /pipeline auto <N> in <owner/repo>. This session sits in the primary checkout <path>.
 
 Unattended: do not open the proof page in a browser (PIPELINE_NO_OPEN=1, pipeline engine.md §The proof store).
-<only in a repo without scripts/worktree.sh:> Worktree: create it with the declared worktree.create (<command>). Never switch branches in <path>; other runs share it.
+Kickoff: php ~/.claude/skills/pipeline/checks/dispatch_cli.php kickoff <path> <N> --mode auto, with one --decision per settled decision below; a halt ends the run. Never switch branches in <path>; other runs share it.
 
 Settled decisions (owner, <date>): <each decision verbatim | none>
 
@@ -93,10 +93,10 @@ Add nothing else (`pipeline` `references/engine.md` §What a leg brief consists 
 `autoflow`, per issue N, from the primary checkout: pipeline `SKILL.md` §`autoflow` — how a run starts
 and ends, steps 1–3.
 
-- Kickoff creates the worktree with the declared `worktree.create`; never switch branches in the
-  primary checkout, other runs share it.
-- The owner's settled decisions for N go into the manifest's `decisions`, verbatim; `artifacts.issue`
-  is N; `mode` is `autoflow`.
+- Kickoff is `php ~/.claude/skills/pipeline/checks/dispatch_cli.php kickoff <primary checkout> N`,
+  with one `--decision "<verbatim>"` per settled decision of the owner's for N. `ready` names the
+  manifest (`mode: autoflow`, `artifacts.issue` N); a halt: report it and start nothing. Never
+  create the worktree another way or switch branches in the primary checkout; other runs share it.
 - `launch` runs with `PIPELINE_NO_OPEN=1`: the run is unattended. `done` or a halt: report it and
   start no workflow.
 - Start the workflow `pipeline-autoflow` with `launch`'s JSON as `args`, in the background, and add
