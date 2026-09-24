@@ -1208,7 +1208,7 @@ finish sooner (owner decision
 §What a leg brief consists of).
 ```
 
-This file is outside the repo and synced by the vault hook. Do not stage or commit it.
+This file is outside the repo (machine-local memory). Do not stage or commit it.
 
 - [ ] **Step 4: Verify and commit**
 

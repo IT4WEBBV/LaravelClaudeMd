@@ -51,6 +51,8 @@ git config --global user.email test@example.com
 export GIT_FRESHNESS_CONFIG_REPOS=""
 export GIT_FRESHNESS_SKILLS_DIR="$root/no-skills-dir"
 export GIT_FRESHNESS_WORKFLOWS_DIR="$root/no-workflows-dir"
+# Same for the retired-vault reminder: no case may read the real home.
+export GIT_FRESHNESS_VAULT_HOME="$root/no-home"
 
 passed=0
 failed=0
@@ -290,16 +292,6 @@ is "$(git -C "$repo" rev-list --count main..origin/main)" "0" "main synced on th
 rm -rf "${TMPDIR:-/tmp}/claude-git-freshness/test-edit"
 echo
 
-echo "case 12: the SecondBrain vault is left to vault-sync.sh"
-repo=$(fixture vaultskip 2)
-payload="{\"session_id\":\"test-vault\",\"file_path\":\"$repo/app.php\"}"
-rm -rf "${TMPDIR:-/tmp}/claude-git-freshness/test-vault"
-out=$(printf '%s' "$payload" | VAULT_DIR="$repo" bash "$hook" edit 2>/dev/null)
-is "$out" "" "no report for the vault"
-is "$(git -C "$repo" rev-list --count main..origin/main)" "2" "the vault's main was not fast-forwarded"
-rm -rf "${TMPDIR:-/tmp}/claude-git-freshness/test-vault"
-echo
-
 # Push a commit to a fixture's origin from its "other" clone, then fetch it into
 # the checkout, so the next sync has something to fast-forward.
 push_upstream() { # push_upstream <fixture name> <path> <content>
@@ -313,7 +305,7 @@ push_upstream() { # push_upstream <fixture name> <path> <content>
     git -C "$root/$1/work" fetch -q origin
 }
 
-echo "case 13: session start syncs a config repo and links its new skills"
+echo "case 12: session start syncs a config repo and links its new skills"
 cfg=$(fixture config 2 skills/newskill/SKILL.md)
 push_upstream config skills/taken/SKILL.md "taken"
 push_upstream config skills/notaskill/README.md "no SKILL.md here"
@@ -336,7 +328,7 @@ lacks "$out" "linked new skill taken" "the collision is not reported as linked"
 contains "$out" '"systemMessage"' "a new skill earns a visible line"
 echo
 
-echo "case 14: a config checkout on a feature branch is flagged"
+echo "case 13: a config checkout on a feature branch is flagged"
 cfg=$(fixture config2 2)
 git -C "$cfg" checkout -q -b feature
 sess=$(fixture sessionrepo 0)
@@ -351,7 +343,7 @@ is "$(git -C "$cfg" rev-list --count main..origin/main)" "0" "main still fast-fo
 is "$(git -C "$cfg" symbolic-ref --short HEAD)" "feature" "the checkout stays on its branch"
 echo
 
-echo "case 15: a skills dir that is itself a symlink gets nothing linked into it"
+echo "case 14: a skills dir that is itself a symlink gets nothing linked into it"
 cfg=$(fixture config3 1 skills/another/SKILL.md)
 mkdir -p "$root/config3/realskills"
 ln -s "$root/config3/realskills" "$root/config3/skills-link"
@@ -359,6 +351,26 @@ payload="{\"session_id\":\"test-config3\",\"cwd\":\"$root/config3\"}"
 out=$(printf '%s' "$payload" \
     | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config3/skills-link" bash "$hook" session 2>/dev/null)
 if [ -e "$root/config3/realskills/another" ]; then fail "nothing written through the symlink"; else ok "nothing written through the symlink"; fi
+echo
+
+echo "case 15: SecondBrain leftovers get a reminder, a clean home stays silent"
+home="$root/vaulthome"
+mkdir -p "$home/.basic-memory"
+printf '{"mcpServers":{"basic-memory":{"type":"stdio"}}}' > "$home/.claude.json"
+git init -q "$home/GitProjects/SecondBrain/SecondBrain"
+printf 'only here\n' > "$home/GitProjects/SecondBrain/SecondBrain/2026-08-05.md"
+config_notes=""; config_tags=""
+GIT_FRESHNESS_VAULT_HOME="$home" remind_retired_vault
+contains "$config_notes" "basic-memory MCP entry in ~/.claude.json" "the MCP entry is named"
+contains "$config_notes" "~/.basic-memory" "the index dir is named"
+contains "$config_notes" "~/GitProjects/SecondBrain (1 uncommitted file)" "the clone and its local-only files are named"
+contains "$config_notes" "AskUserQuestion" "the session is told to ask first"
+contains "$config_tags" "SecondBrain leftovers" "the user sees a headline"
+mkdir -p "$root/cleanhome"
+printf '{"mcpServers":{"flare":{}}}' > "$root/cleanhome/.claude.json"
+config_notes=""; config_tags=""
+GIT_FRESHNESS_VAULT_HOME="$root/cleanhome" remind_retired_vault
+is "$config_notes$config_tags" "" "a clean home adds nothing"
 echo
 
 echo "case 16: session start links a skill's workflow script into the workflows dir"

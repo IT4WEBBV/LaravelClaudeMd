@@ -61,11 +61,6 @@ max_fetch_seconds=10    # hard cap on the network call
 fetch_ttl_seconds=900   # skip the network entirely if we fetched within 15 min
 max_listed_files=6      # the conflict list is a prompt, not an inventory
 
-# The SecondBrain vault is synced by vault-sync.sh and never checked here.
-# Resolved with pwd -P so it compares equal to git's --show-toplevel; empty
-# when the vault is not cloned.
-vault_toplevel=$(cd "${VAULT_DIR:-$HOME/GitProjects/SecondBrain/SecondBrain}" 2>/dev/null && pwd -P)
-
 # The repos whose skills are symlinked into the skills dir, colon-separated.
 # Both are overridable, and set to empty, by the tests.
 config_repos="${GIT_FRESHNESS_CONFIG_REPOS-$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd:$HOME/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config}"
@@ -501,6 +496,30 @@ sync_config_repos() {
     done <<< "$(config_repo_list)"
 }
 
+# The SecondBrain vault was retired on one machine (LaravelClaudeMd #64); this
+# reminds the other one to clean up at its next session. Read-only: the session
+# asks before touching anything. Delete this once both machines are clean.
+remind_retired_vault() {
+    local home="${GIT_FRESHNESS_VAULT_HOME-$HOME}" found="" n
+
+    [ "$(grep -c '"basic-memory"' "$home/.claude.json" 2>/dev/null)" -gt 0 ] 2>/dev/null \
+        && found="${found}, basic-memory MCP entry in ~/.claude.json"
+    [ -d "$home/.basic-memory" ] && found="${found}, ~/.basic-memory"
+    if [ -d "$home/GitProjects/SecondBrain" ]; then
+        n=$(git -C "$home/GitProjects/SecondBrain/SecondBrain" status --porcelain 2>/dev/null | grep -c .)
+        case "${n:-0}" in
+            0) found="${found}, ~/GitProjects/SecondBrain" ;;
+            1) found="${found}, ~/GitProjects/SecondBrain (1 uncommitted file)" ;;
+            *) found="${found}, ~/GitProjects/SecondBrain ($n uncommitted files)" ;;
+        esac
+    fi
+    [ -n "$found" ] || return 0
+
+    config_notes="${config_notes}
+  - SecondBrain leftovers on this machine: ${found#, }. The vault is retired (LaravelClaudeMd #64). Offer the cleanup with AskUserQuestion: \`claude mcp remove basic-memory -s user\`, \`uv tool uninstall basic-memory\`, \`rm -rf ~/.basic-memory\`, and grep ~/.claude/projects/*/memory for SecondBrain/basic-memory notes to delete. Ask separately before deleting ~/GitProjects/SecondBrain: uncommitted files there exist nowhere else (the GitHub repo is archived)."
+    config_tags="${config_tags}${config_tags:+, }SecondBrain leftovers found"
+}
+
 # Report on the repo containing $1. Prints hook JSON, or nothing when the path
 # is not a git repo with an origin.
 check_repo() {
@@ -509,13 +528,6 @@ check_repo() {
     cd "$target" 2>/dev/null || return 0
     git rev-parse --git-dir >/dev/null 2>&1 || return 0
     git remote get-url origin >/dev/null 2>&1 || return 0
-
-    # vault-sync.sh pulls and pushes the vault itself. Checking it here would
-    # fetch it concurrently and tell Claude "Do NOT pull" about the one repo
-    # that is meant to be pulled automatically.
-    if [ -n "$vault_toplevel" ] && [ "$(git rev-parse --show-toplevel 2>/dev/null)" = "$vault_toplevel" ]; then
-        return 0
-    fi
 
     fetch_if_stale "$max_fetch_seconds"
 
@@ -668,6 +680,7 @@ case "$mode" in
         [ -n "$repo" ] && [ -d "$repo" ] || repo="$PWD"
 
         sync_config_repos
+        remind_retired_vault
         check_repo "$repo" SessionStart
 
         # check_repo stays silent outside a git repo; config news still gets out.

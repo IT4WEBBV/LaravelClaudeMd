@@ -90,6 +90,12 @@ human-readable name and a static `getOptions()` returning `[['id' => $case->valu
 - Thin controllers: Livewire components preferred for interactive UI, validation in Form Requests or
   inline, business logic in Actions and Services.
 
+#### Flare signals
+A handled situation worth watching (a slide skipped because its media file is missing) is
+`report(new SomeDedicatedException($context))`, not `Log::warning()`: Flare groups it and counts the
+occurrences. Give the exception a `context(): array` with the relevant ids, and report it from one
+place so all occurrences land in one Flare error. `Log::` is for low-value debug output.
+
 ### Frontend Stack
 
 #### Livewire and the it4web packages
@@ -259,46 +265,15 @@ any new skill, and any skill's workflow script into `~/.claude/workflows/`, on e
 names must be unique across the two repos.
 `DevOps-Claude-Config` is a colleague's personal config: link only its `skills/`, never its
 `settings.json` or `CLAUDE.md`. After changing a hook, run its tests in `hooks/tests/`. Machine
-setup and hook wiring: `README.md`.
+setup and hook wiring: `README.md`. Playbooks for porting a LaravelTemplate feature into a project
+(slots, changelog automation, base image upgrade, Pest migration): `docs/playbooks/`.
 
 ---
 
-## Memory (SecondBrain vault)
+## Memory
 
-> **Not live yet.** The cut-over — Tasks 5–6 of `docs/superpowers/plans/2026-09-11-vault-auto-memory.md` —
-> has not run: the vault has no `memory/` folder on origin, and `settings.json` sets neither
-> `autoMemoryDirectory` nor the `vault-sync` hooks. Until it runs:
-> - Auto-memory stays in the default `~/.claude/projects/*/memory`, flat — no `repos/<key>/` folders,
->   and nothing syncs between machines.
-> - The vault is still the basic-memory archival tier: query it through the basic-memory MCP
->   (`search_notes`, `build_context`) when starting project work or making a decision.
-> - To finish it, start `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 claude` from `~`, execute Tasks 5–6, and
->   delete this note.
-
-The rest of this section describes the setup after the cut-over.
-
-Auto-memory lives in the SecondBrain vault — `~/GitProjects/SecondBrain/SecondBrain`, private repo
-`jonneroelofs/SecondBrain` — not in machine-local `~/.claude/projects/*/memory`. The
-`autoMemoryDirectory` setting points every session at its `memory/` folder, so memory is versioned in
-git and shared by both machines. It is the only memory system: save memories the normal auto-memory
-way; there is nothing else to write to.
-
-- **Repo-specific memories** — facts only true inside one repo — go in `memory/repos/<key>/`, with their
-  index line in that folder's own `MEMORY.md`. `<key>` is the repo's GitHub name, lowercased
-  (`IT4WEBBV/ViewieMedia` → `viewiemedia`). Each repo folder has one pointer line in the global
-  `MEMORY.md`: read that repo's index before working in, or answering about, that repo. Everything else
-  is global.
-- **Never store secrets, credentials or client PII** — every memory is pushed to GitHub. `vault-sync.sh`
-  holds back a file that looks like it contains a key; that is a backstop, not a licence.
-- **Syncing is automatic.** `hooks/vault-sync.sh` commits `memory/` and syncs with origin at session start
-  and end. Don't commit or push memory changes by hand.
-- **Vault sync conflicts are yours to resolve** — an exception, for the vault only, to the Git Workflow
-  rule against pulling, rebasing or merging on your own initiative. When the hook reports a conflict,
-  rebase onto the upstream, keep both sides' facts in each conflicted file, continue, push.
-- **A memory saved on the other machine is there at the next session start.**
-- The owner's own notes at the vault root are theirs; the hook never stages them.
-
-Setting a machine up for the vault, and migrating its local memories into it: `README.md`.
+Auto-memory is machine-local (`~/.claude/projects/*/memory`) and does not reach the other machine.
+Knowledge both machines need goes into a repo: this one, a package `CLAUDE.md`, a skill or project docs.
 
 ## Icons
 

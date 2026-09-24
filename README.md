@@ -19,11 +19,10 @@ expects that path. Keep it so Mark's skills work unmodified.
 ## Bootstrapping a new machine
 
 ```bash
-# 1. Clone both config repos and the memory vault into nested wrapper dirs (~/GitProjects/<Repo>/<Repo>/)
-mkdir -p ~/GitProjects/LaravelClaudeMd ~/GitProjects/DevOps-Claude-Config ~/GitProjects/SecondBrain
+# 1. Clone both config repos into nested wrapper dirs (~/GitProjects/<Repo>/<Repo>/)
+mkdir -p ~/GitProjects/LaravelClaudeMd ~/GitProjects/DevOps-Claude-Config
 git clone git@github.com:IT4WEBBV/LaravelClaudeMd.git ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd
 git clone git@github.com:IT4WEBBV/DevOps-Claude-Config.git ~/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config
-git clone git@github.com:jonneroelofs/SecondBrain.git ~/GitProjects/SecondBrain/SecondBrain
 
 # 2. Symlink CLAUDE.md as the global CLAUDE.md
 ln -sfn ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/CLAUDE.md ~/.claude/CLAUDE.md
@@ -36,9 +35,8 @@ for repo in LaravelClaudeMd DevOps-Claude-Config; do
   done
 done
 
-# 4. Make the hooks executable
-chmod +x ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh \
-         ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/vault-sync.sh
+# 4. Make the hook executable
+chmod +x ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh
 ```
 
 Then wire the hooks in `~/.claude/settings.json`. The scripts live in this repo and update with
@@ -46,24 +44,16 @@ every pull, so this wiring is the only per-machine step — and the one thing th
 the other machine on its own:
 
 ```json
-"autoMemoryDirectory": "~/GitProjects/SecondBrain/SecondBrain/memory",
 "hooks": {
   "SessionStart": [
-    { "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh session", "timeout": 20, "statusMessage": "Checking git freshness…" } ] },
-    { "matcher": "startup|resume|clear", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/vault-sync.sh session", "timeout": 20, "statusMessage": "Syncing memory…" } ] }
+    { "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh session", "timeout": 20, "statusMessage": "Checking git freshness…" } ] }
   ],
   "PostToolUse": [
     { "matcher": "Edit|Write", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh edit", "timeout": 20, "statusMessage": "Checking git freshness…" } ] },
     { "matcher": "Bash", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh checkout", "if": "Bash(git checkout:*)", "timeout": 10 } ] }
-  ],
-  "SessionEnd": [
-    { "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/vault-sync.sh end", "timeout": 20 } ] }
   ]
 }
 ```
-
-Leave out `autoMemoryDirectory` and both `vault-sync.sh` entries until the vault cut-over has run
-(see `CLAUDE.md` § Memory): before it, the vault has no `memory/` folder to point at.
 
 `git-freshness.sh` has three modes:
 - `session` — at startup: syncs both config repos (fast-forward only, never over local work) and
@@ -71,13 +61,6 @@ Leave out `autoMemoryDirectory` and both `vault-sync.sh` entries until the vault
   `~/.claude/workflows/`), then checks the launch directory.
 - `edit` — the repo owning the file being written, once per repo per session.
 - `checkout` — drops cached verdicts after a branch switch.
-
-`vault-sync.sh` has two: `session` (commit `memory/`, then fetch, rebase and push — at startup,
-resume and clear) and `end` (commit and push when the session ends).
-
-A machine that already has local memories migrates them once: start a session with
-`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 claude` from `~` and have it follow the vault memory
-`playbook_migrate_machine_memory.md`.
 
 ## Linking the skills
 
@@ -105,14 +88,12 @@ A newly linked skill is picked up by the **next** Claude Code session.
 
 ## Hook tests
 
-Run after changing the matching hook:
+Run after changing the hook:
 
 ```bash
 bash hooks/tests/git-freshness-sync.test.sh
-bash hooks/tests/vault-sync.test.sh
 ```
 
-Both build throwaway repos under `$TMPDIR`. The first covers every branch of the base-branch sync,
+It builds throwaway repos under `$TMPDIR` and covers every branch of the base-branch sync,
 including the sibling-worktree case that is easy to get silently wrong, plus the config-repo sync
-and skill linking; the second covers every sync path of the memory vault, including two machines
-writing at once.
+and skill linking.
