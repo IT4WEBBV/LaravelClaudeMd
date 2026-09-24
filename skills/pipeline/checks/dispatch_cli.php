@@ -5,7 +5,8 @@
  *
  *   interactive:  php dispatch_cli.php next <manifest>
  *                 php dispatch_cli.php returned <manifest> <diff-file>
- *   autoflow:     php dispatch_cli.php launch <manifest> <diff-file> [--from <leg>]
+ *   autoflow:     php dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--mode autoflow|auto] [--decision <text>]...
+ *                 php dispatch_cli.php launch <manifest> <diff-file> [--from <leg>]
  *                 php dispatch_cli.php brief <manifest> <leg> <step>
  *                 php dispatch_cli.php finish <manifest> <decision-json>
  *                 php dispatch_cli.php size <manifest>
@@ -13,8 +14,8 @@
  *
  * `brief` prints the brief as Markdown; `size` and `ui` print a bare value for a step to copy
  * (`Bounded` / `Architectural`, `true` / `false`); every other answer, and a `brief` that halts, is
- * one JSON line. Exits 0 on every decision, a halt included. Exits 1 on a usage error, and when
- * `size` has no readable manifest or `ui` no diff file.
+ * one JSON line. Exits 0 on every decision, a halt included. Exits 1 on a usage error (a `kickoff`
+ * it cannot parse included), and when `size` has no readable manifest or `ui` no diff file.
  */
 
 require_once __DIR__ . '/triggers.php';
@@ -24,6 +25,7 @@ require_once __DIR__ . '/design_size.php';
 require_once __DIR__ . '/dispatch.php';
 require_once __DIR__ . '/brief.php';
 require_once __DIR__ . '/suite.php';
+require_once __DIR__ . '/kickoff.php';
 
 /** @return array{brief: string, before: string} */
 function dispatch_cli_files(string $manifestPath): array
@@ -285,8 +287,57 @@ function dispatch_cli_ui(string $diffPath): ?string
     return is_file($diffPath) ? json_encode(pipeline_triggers((string) file_get_contents($diffPath))['ui']) . "\n" : null;
 }
 
+/**
+ * `kickoff <repo-root> <number|idea> [--light] [--mode autoflow|auto] [--decision <text>]...`; null is a
+ * usage error. `interactive` keeps its session-driven kickoff.
+ *
+ * @return array{repoRoot: string, item: string, mode: string, light: bool, decisions: list<string>}|null
+ */
+function dispatch_cli_kickoff_args(array $arguments): ?array
+{
+    $options = ['mode' => 'autoflow', 'light' => false, 'decisions' => []];
+    $positional = [];
+    while ($arguments !== []) {
+        $argument = (string) array_shift($arguments);
+        if ($argument === '--light') {
+            $options['light'] = true;
+
+            continue;
+        }
+        if ($argument === '--mode' || $argument === '--decision') {
+            $value = array_shift($arguments);
+            if ($value === null) {
+                return null;
+            }
+            if ($argument === '--mode') {
+                $options['mode'] = (string) $value;
+            } else {
+                $options['decisions'][] = (string) $value;
+            }
+
+            continue;
+        }
+        if (str_starts_with($argument, '--')) {
+            return null;
+        }
+        $positional[] = $argument;
+    }
+
+    return count($positional) === 2 && in_array($options['mode'], ['autoflow', 'auto'], true)
+        ? ['repoRoot' => $positional[0], 'item' => $positional[1], ...$options]
+        : null;
+}
+
+function dispatch_cli_kickoff(array $arguments): ?array
+{
+    $parsed = dispatch_cli_kickoff_args($arguments);
+
+    return $parsed === null ? null : pipeline_kickoff($parsed['repoRoot'], $parsed['item'], $parsed);
+}
+
 $flag = array_search('--from', $argv, true);
 $result = match ($argv[1] ?? '') {
+    'kickoff' => dispatch_cli_kickoff(array_slice($argv, 2)),
     'next' => dispatch_cli_next((string) ($argv[2] ?? '')),
     'returned' => dispatch_cli_returned((string) ($argv[2] ?? ''), (string) ($argv[3] ?? '')),
     'launch' => dispatch_cli_launch((string) ($argv[2] ?? ''), (string) ($argv[3] ?? ''), $flag === false ? null : (string) ($argv[$flag + 1] ?? '')),
@@ -298,7 +349,7 @@ $result = match ($argv[1] ?? '') {
 };
 
 if ($result === null) {
-    fwrite(STDERR, "usage: dispatch_cli.php next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] | brief <manifest> <leg> <step> | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> (size needs a readable manifest, ui an existing diff file)\n");
+    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--mode autoflow|auto] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] | brief <manifest> <leg> <step> | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> (size needs a readable manifest, ui an existing diff file)\n");
     exit(1);
 }
 
