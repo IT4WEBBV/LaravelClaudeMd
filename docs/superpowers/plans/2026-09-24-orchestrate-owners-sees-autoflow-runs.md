@@ -19,7 +19,7 @@
 - **Untouched:** `commands.md` §Teardown, `skills/orchestrate/SKILL.md`, everything under `skills/pipeline/`.
 - **Output contract unchanged:** owners on stdout as `name\tid\tstate\tcount`, exit 0; exit 2 with the blocking sessions on stderr and nothing on stdout; no output and exit 0 means orphaned.
 - **A named worktree must equal the worktree asked about**, both through `os.path.abspath(...).rstrip("/")`; never `inside()`.
-- **A mention is not ownership:** user prompt text, a manifest printed by `cat`, or any JSON line without `action` `ready` / `start` never matches.
+- **A mention is not ownership:** user prompt text, a manifest printed by `cat`, or any JSON line without `action` `ready` / `start` never matches. A Bash command that holds a `dispatch_cli.php` call does match, whether it runs the call or only quotes it (a `grep`): accepted, the safe side, and pinned by the `grep` fixture.
 - **Stdlib only.** No new file, no new dependency.
 - **No changelog:** the repo has no `.changelog/` directory and no `CHANGELOG.md`.
 - **Git inside this worktree:** run every command from `cd /Users/jroelofs/GitProjects/LaravelClaudeMd/LaravelClaudeMd/.claude/worktrees/worktree-issue-68-orchestrate-owners-py-cannot-see-another-session-s` or with `git -C /Users/jroelofs/GitProjects/LaravelClaudeMd/LaravelClaudeMd/.claude/worktrees/worktree-issue-68-orchestrate-owners-py-cannot-see-another-session-s`. Stage explicit paths only, never `git add -A`. Conventional messages (`fix(orchestrate): …`, `docs(orchestrate): …`), no Co-Authored-By, no AI attribution.
@@ -31,7 +31,8 @@
 2. **A branch with `/` in it** (`feature/issue-4-x`), so the manifest sits in a subdirectory of `.claude/pipeline/`: the worktree is the path up to `/.claude/pipeline/`, not the manifest's parent. Pinned by `wf-step`, whose manifest is `.claude/pipeline/feature/issue-4-x.json`.
 3. **Prefix trap and nesting:** `Shop-40`'s manifest must not make an owner of `Shop-4` (`wf-prefix`), and a primary checkout must not inherit the runs under its `.claude/worktrees/` (equality, not `inside()`).
 4. **`journal.jsonl` in a workflow directory** has no `cwd`: with per-transcript fail-closed it would turn every workflow session unreadable. `wf-step` carries one and must stay a plain owner.
-5. **A tool call with `"command": null` or no `input`**, a `tool_result` whose `content` is a list of blocks rather than a string, a non-object JSON line: no exception. `named_in_call` coalesces a missing or null command to `""`; `result_text` handles both content shapes (`kick` is the list form, `launch` the string form); `entries` drops non-objects.
+5. **A Bash command that only quotes the call** (`grep -c 'dispatch_cli.php brief $WT/…' …`) makes an owner: the regex sees the command string, not whether the call ran. Accepted (a spurious owner turns *resume* into *ask*), pinned by `grep` so nobody "fixes" it into a false negative.
+6. **A tool call with `"command": null` or no `input`**, a `tool_result` whose `content` is a list of blocks rather than a string, a non-object JSON line: no exception. `named_in_call` coalesces a missing or null command to `""`; `result_text` handles both content shapes (`kick` is the list form, `launch` the string form); `entries` drops non-objects.
 
 ---
 
@@ -110,6 +111,7 @@ $START")"; } > "$P/c/launch.jsonl"                                              
 { entry "$PRIMARY"; printf '{"type":"assistant","cwd":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"t2","name":"Workflow","input":{"name":"pipeline-autoflow","args":%s}}]}}\n' "$PRIMARY" "$START"; } \
   > "$P/c/wfcall.jsonl"                                                                           # the Workflow call -> owner
 { prompt "Run $BRIEF"; result "$(json '{"worktree":"'"$WT"'","mode":"autoflow"}')"; } > "$P/c/mention.jsonl"   # mentions only -> not an owner
+bash_call "grep -c 'dispatch_cli.php brief $WT/.claude/pipeline/b.json' $P/c/wfcall.jsonl" > "$P/c/grep.jsonl"   # a command quoting the call -> owner (accepted: the safe side)
 
 AGENTS='[
  {"id":"aaa","name":"run a","state":"working","sessionId":"aaa"},
@@ -128,13 +130,14 @@ AGENTS='[
  {"id":"kick","name":"kicked off","state":"working","sessionId":"kick"},
  {"id":"launch","name":"launched","state":"blocked","sessionId":"launch"},
  {"id":"wfcall","name":"started the workflow","state":"working","sessionId":"wfcall"},
- {"id":"mention","name":"mentions the brief","state":"working","sessionId":"mention"}
+ {"id":"mention","name":"mentions the brief","state":"working","sessionId":"mention"},
+ {"id":"grep","name":"greps for the brief","state":"working","sessionId":"grep"}
 ]'
 
 fail() { printf 'FAIL owners.py: %s\n' "$1"; exit 1; }
 
 actual="$(printf '%s' "$AGENTS" | python3 "$HERE/../owners.py" "$WT" --projects-dir "$P" --session-id ccc | sort)"
-expected="$(printf 'run a\taaa\tworking\t1\nrun e\teee\tblocked\t1\nworkflow step\twf-step\tworking\t1\nkicked off\tkick\tworking\t1\nlaunched\tlaunch\tblocked\t1\nstarted the workflow\twfcall\tworking\t1\nquoted launch\twf-quoted\tworking\t1\n' | sort)"
+expected="$(printf 'run a\taaa\tworking\t1\nrun e\teee\tblocked\t1\nworkflow step\twf-step\tworking\t1\nkicked off\tkick\tworking\t1\nlaunched\tlaunch\tblocked\t1\nstarted the workflow\twfcall\tworking\t1\nquoted launch\twf-quoted\tworking\t1\ngreps for the brief\tgrep\tworking\t1\n' | sort)"
 [ "$actual" = "$expected" ] || fail "$(printf 'owners\n--- expected\n%s\n--- actual\n%s' "$expected" "$actual")"
 
 # A live session with no transcript at all (the layout moved), rooted inside the worktree: fail closed.
@@ -227,9 +230,11 @@ A session owns a worktree when its state is working or blocked (the live states 
 reports) and one of its transcripts (main, subagents/, or an autoflow workflow's steps under
 subagents/workflows/wf_*/) has an entry that works in it: an entry whose cwd lies inside it, or one
 that names it through the pipeline. An autoflow step runs from the launch directory, so it names
-the worktree instead: a `dispatch_cli.php <subcommand> <worktree>/.claude/pipeline/…` call, a
-kickoff `ready` or launch `start` answer printed in a tool result, or the Workflow call whose args
-are that answer. Every other state (done, failed, stopped, …) and the calling session are skipped.
+the worktree instead: a Bash command holding a `dispatch_cli.php <subcommand>
+<worktree>/.claude/pipeline/…` call, a kickoff `ready` or launch `start` answer printed in a tool
+result, or the Workflow call whose args are that answer. The command is matched as a string, so one
+that only quotes the call (a grep over another run's transcripts) counts too: a spurious owner turns
+resume into a question, never into a second run. Every other state (done, failed, stopped, …) and the calling session are skipped.
 Grepping for the path or the branch is not enough: slot directories are recycled, and every session
 that mapped a worktree mentions it.
 
@@ -243,6 +248,11 @@ session's own cwd, from its `claude agents` row, is inside the worktree, contain
 checkout, ~), lies in the same git repository (a slot's primary checkout), or is missing, it prints
 nothing, names the sessions on stderr and exits 2. That is never "orphaned". An unreadable session
 rooted anywhere else has no path to the worktree and is skipped.
+
+This protects the cwd evidence only. A transcript that still has cwd entries but whose tool_use /
+tool_result blocks moved is read as readable, and its pipeline evidence is silently lost: an
+autoflow run that stops being found after a Claude Code update is a format change first and an
+orphan second.
 """
 import argparse
 import functools
@@ -465,7 +475,9 @@ with
 ```markdown
   An `autoflow` run's steps work from the launch directory, so for those `owners.py` also reads the
   workflow step transcripts and matches what names the run's worktree: its `dispatch_cli.php` calls,
-  kickoff's and launch's answers, and the `Workflow` call.
+  kickoff's and launch's answers, and the `Workflow` call. Fail-closed does not cover that evidence:
+  an `autoflow` run that stops being found after a Claude Code update is a transcript format change
+  first and an orphan second.
 ```
 
 - [ ] **Step 2: Check nothing else still refers to the guard**

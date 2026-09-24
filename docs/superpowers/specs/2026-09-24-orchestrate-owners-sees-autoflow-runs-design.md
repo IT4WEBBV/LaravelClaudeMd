@@ -64,8 +64,12 @@ a worktree when either holds:
    runs.
 
 A mention is still not ownership. A user prompt, a `cat` of a manifest, or a step's prompt text that
-contains the `brief` command does not match: only an executed call, a printed answer, or the
-`Workflow` call does.
+contains the `brief` command does not match: only a Bash command holding the call, a printed answer,
+or the `Workflow` call does. The regex sees the command string, not whether the call ran: a Bash
+command that only quotes `dispatch_cli.php brief <worktree>/.claude/pipeline/…` (a `grep` or
+`python3 -c` over another run's transcripts) makes its session an owner too. That is accepted and
+pinned by a fixture: a spurious owner turns *resume* and teardown into *ask*, never into a double-run,
+so it is not "fixed" into a false negative later.
 
 Together these cover an `autoflow` run from the moment kickoff prints until the launching session
 ends: kickoff's answer, then launch's answer and the `Workflow` call, then each step's `brief`. The
@@ -77,7 +81,7 @@ evidence accumulates in the transcripts, so no window opens between steps, which
 `transcripts()` adds `<projects>/*/<session>/subagents/workflows/wf_*/*.jsonl`, minus files named
 `journal.jsonl` (the workflow's own event log, which has no `cwd` and is not a transcript). Every
 `*.jsonl` is taken, not only `agent-*.jsonl`, so a renamed step file is still read, and fails closed
-below if its format moved.
+below if its format moved in a way that drops `cwd`.
 
 ### Fail closed, per transcript
 
@@ -93,6 +97,16 @@ and silently drop that workflow's evidence. The rule becomes per transcript:
 
 Measured on this machine: of 146 main, 740 subagent and 175 workflow-step transcripts, none lacks a
 `cwd` entry, so the tighter rule costs no false blocks on today's data.
+
+**Fail-closed protects rule 1's evidence, not rule 2's.** "Unreadable" is keyed on `cwd`. Rule 2's
+evidence lives in `message.content[]` `tool_use` / `tool_result` blocks; if a Claude Code release moves
+or renames those while `cwd` stays, every `autoflow` run silently reads as orphaned again and nothing
+exits 2. The docstring and `commands.md` §Owner say so: a transcript that has `cwd` but no readable
+tool blocks is not detected, so a run that stops being found after a Claude Code update is a format
+change first and an orphan second. A tripwire (a `wf_*/` transcript is readable only when it also
+holds a `tool_use` or `tool_result` block) was weighed and left out: 1 of 180 step transcripts on
+this machine is text-only and would block while its session is live, and the rule would sit in the
+code as a guess at the next format rather than a check of this one.
 
 ### Shape of the code
 
@@ -126,12 +140,16 @@ has one, and the pipeline's own prompts do not quote the manifest.
 
 ### Docs
 
-- `owners.py` docstring: the ownership paragraph names rule 2 and the workflow transcripts; the *Fails
-  closed* paragraph says "any one of its transcripts holds no `cwd` entry".
+- `owners.py` docstring: the ownership paragraph names rule 2 and the workflow transcripts, as "a Bash
+  command holding a `dispatch_cli.php` call" (run or only quoted); the *Fails closed* paragraph says
+  "any one of its transcripts holds no `cwd` entry", and that a transcript with `cwd` but moved tool
+  blocks is not detected.
 - `commands.md` §Owner of in-flight work: the interim guard sentence (*"A worktree whose manifest has
   `mode: autoflow` and a `pending` cursor may be another live session's workflow, which `owners.py`
   cannot see yet: …"*) is removed. One sentence says what `owners.py` now reads: `cwd` entries, and for
   `autoflow` runs the run's `dispatch_cli.php` calls, kickoff and launch answers and the `Workflow` call.
+  A second says that fail-closed does not cover that evidence: an `autoflow` run no longer found after
+  a Claude Code update is a transcript format change first and an orphan second.
 - `commands.md` §Teardown: unchanged. A non-zero exit still fails the check.
 
 ## Tests
@@ -150,8 +168,9 @@ globs `workflows/` nor reads anything but `cwd`):
 | `launch` (blocked) | main: `cwd` primary; a string `tool_result` of two lines, `--- b` and the launch `start` answer for `$WT` | owner, count 1 |
 | `wfcall` (working) | main: `cwd` primary; a `Workflow` `tool_use` with `args` the `start` answer for `$WT` | owner, count 1 |
 | `mention` (working) | main: `cwd` primary; a user message whose text is the `brief` command for `$WT`, and a `tool_result` line `{"worktree":"$WT","mode":"autoflow"}` (no `action`) | not an owner |
+| `grep` (working) | main: `cwd` primary; a Bash `tool_use` running `grep -c 'dispatch_cli.php brief $WT/.claude/pipeline/b.json' …`, which quotes the call without running it | owner, count 1 (accepted: the safe side) |
 
-These run in the first multi-row assertion, so the expected owner list grows by the five owners.
+These run in the first multi-row assertion, so the expected owner list grows by the six owners.
 
 Fail closed, per transcript:
 
