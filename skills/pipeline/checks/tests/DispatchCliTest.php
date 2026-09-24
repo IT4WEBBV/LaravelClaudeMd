@@ -560,3 +560,49 @@ it('refuses a kickoff it cannot parse', function (array $arguments) {
     'a flag without its value' => [['69', '--decision']],
     'two items' => [['69', '70']],
 ]);
+
+function kickoff_board(): string
+{
+    return implode("\n", ['## Board', '- org: acme', '- number: 7', '- project-id: PVT_1', '- status-field-id: F_1', '- in-progress-option-id: O_1', '']);
+}
+
+it('claims the issue on a valid board after the create, and says so', function () {
+    $fixture = kickoff_fixture(extraConfig: kickoff_board());
+
+    expect(kickoff($fixture, ['69'])['json'])->toMatchArray(['action' => 'ready', 'notes' => ['#69 is In Progress on board 7']]);
+    expect(array_slice(kickoff_calls($fixture), 2))->toBe([
+        'project item-add 7 --owner acme --url https://github.com/acme/app/issues/69 --format json',
+        'project item-edit --id ITEM_1 --project-id PVT_1 --field-id F_1 --single-select-option-id O_1',
+    ]);
+});
+
+it('reports a board claim that could not be recorded, and still kicks off', function () {
+    $fixture = kickoff_fixture(extraConfig: kickoff_board());
+    touch($fixture['dir'] . '/board-fails');
+
+    $ready = kickoff($fixture, ['69'])['json'];
+
+    expect($ready['action'])->toBe('ready');
+    expect($ready['notes'])->toBe(['the board claim was not recorded: HTTP 401: Bad credentials']);
+});
+
+it('claims nothing when the create fails, and nothing for an idea', function () {
+    $failing = kickoff_fixture("echo denied >&2; exit 1", kickoff_board());
+    expect(kickoff($failing, ['69'])['json']['action'])->toBe('halt');
+    expect(array_filter(kickoff_calls($failing), fn (string $call) => str_starts_with($call, 'project')))->toBe([]);
+
+    $idea = kickoff_fixture(extraConfig: kickoff_board());
+    expect(kickoff($idea, ['Add a toggle'])['json']['notes'])->toBe([]);
+    expect(kickoff_calls($idea))->toBe([]);
+});
+
+it('halts on an invalid board before anything is created', function () {
+    $fixture = kickoff_fixture(extraConfig: "## Board\n- org: acme\n");
+
+    $halt = kickoff($fixture, ['69'])['json'];
+
+    expect($halt['action'])->toBe('halt');
+    expect($halt['reason'])->toContain('the ## Board section is invalid')->toContain('missing: number');
+    expect(kickoff_calls($fixture))->toBe([]);
+    kickoff_left_nothing($fixture);
+});

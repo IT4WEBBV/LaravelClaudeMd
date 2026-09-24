@@ -72,6 +72,7 @@ function pipeline_kickoff(string $repoRoot, string $item, array $options): array
 {
     try {
         $config = pipeline_kickoff_config($repoRoot);
+        $board = pipeline_kickoff_board($config);
         $issue = pipeline_kickoff_issue($repoRoot, $config, $item);
         $branch = pipeline_kickoff_branch($config, $item, $issue);
         $command = pipeline_kickoff_create_command($config, $branch);
@@ -87,7 +88,9 @@ function pipeline_kickoff(string $repoRoot, string $item, array $options): array
         return pipeline_halt("kickoff created {$worktree} but could not finish it, and wrote no manifest: {$failure->getMessage()}; remove the worktree and its branch before kicking off again");
     }
 
-    return ['action' => 'ready', 'manifest' => $manifest, 'worktree' => $worktree, 'branch' => $branch, 'notes' => []];
+    $notes = $issue !== null && $board['state'] === 'valid' ? pipeline_kickoff_claim($repoRoot, $board['board'], $issue) : [];
+
+    return ['action' => 'ready', 'manifest' => $manifest, 'worktree' => $worktree, 'branch' => $branch, 'notes' => $notes];
 }
 
 function pipeline_kickoff_config(string $repoRoot): string
@@ -271,4 +274,33 @@ function pipeline_kickoff_manifest(string $branch, string $worktree, string $ite
         ...($options['light'] ? ['light' => true] : []),
         ...($options['decisions'] === [] ? [] : ['decisions' => $options['decisions']]),
     ];
+}
+
+/** `pipeline_repo_board()`, with `invalid` a machinery failure that halts before anything exists. */
+function pipeline_kickoff_board(string $config): array
+{
+    $board = pipeline_repo_board($config);
+    if ($board['state'] === 'invalid') {
+        throw new PipelineKickoffHalt("the ## Board section is invalid: {$board['error']}");
+    }
+
+    return $board;
+}
+
+/**
+ * engine.md §The work item's two calls. Failing to record the claim is a note, never a halt.
+ *
+ * @param  array{number: int, title: string, url: string}  $issue
+ * @return list<string>
+ */
+function pipeline_kickoff_claim(string $repoRoot, array $board, array $issue): array
+{
+    [$code, $out, $err] = pipeline_kickoff_gh($repoRoot, ['project', 'item-add', $board['number'], '--owner', $board['org'], '--url', $issue['url'], '--format', 'json']);
+    $item = json_decode($out, true)['id'] ?? null;
+    if ($code !== 0 || ! is_string($item)) {
+        return ["the board claim was not recorded: {$err}"];
+    }
+    [$code, , $err] = pipeline_kickoff_gh($repoRoot, ['project', 'item-edit', '--id', $item, '--project-id', $board['project-id'], '--field-id', $board['status-field-id'], '--single-select-option-id', $board['in-progress-option-id']]);
+
+    return [$code === 0 ? "#{$issue['number']} is In Progress on board {$board['number']}" : "the board claim was not recorded: {$err}"];
 }
