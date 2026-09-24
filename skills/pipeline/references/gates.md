@@ -1,17 +1,17 @@
 # Gates — modes, content triggers, and the navigation guardrail
 
-Two kinds of thing shape the chain: **mode-driven station gates** (a human turn, or the engine
-resolving a review itself) and **content triggers** (facts about the diff). The forward-navigation guardrail is
+Two kinds of thing shape the chain: **mode-driven station gates** (a human turn, or a resolve step
+acting on a review) and **content triggers** (facts about the diff). The forward-navigation guardrail is
 a third, separate mechanism — it makes the review *legs* un-skippable *by construction*, not by
 memory, and it reads neither the mode nor anything a review said.
 
 All three are backed by tested Phase A functions in `../checks/pipeline.php` and
 `../checks/triggers.php`. This doc mirrors those functions; keep them in lock-step.
 
-## Modes — one choice, two behaviours
+## Modes — one choice, three modes
 
-`mode` is the only knob, and **anything that is not `auto` behaves as `interactive`** — the
-stricter of the two. That fallback used to be asserted mechanically by `pipeline_resolve_policy()`;
+`mode` is the only knob, and **anything that is neither `auto` nor `autoflow` behaves as
+`interactive`** — the strictest of them. That fallback used to be asserted mechanically by `pipeline_resolve_policy()`;
 the function is gone (its two gates were always identical to each other and a pure function of
 mode), so the rule lives here and has to stay explicit: `manifest_validate` checks key *presence*,
 not value, so a manifest with a mangled `mode` must still fail safe.
@@ -19,9 +19,10 @@ not value, so a manifest with a mangled `mode` must still fail safe.
 | Mode | Behaviour |
 |---|---|
 | **`interactive`** *(default)* | you are present; run one leg, show you the review, wait. Every point in it is yours to judge. Advance by saying so (see navigation). |
-| **`auto`** | run the autonomous legs unattended. The reviews still run; the engine reads them and acts, looping back where the work is wrong and never interrupting on a finding (`engine.md` §`auto`). Hard failures and bound exhaustion still stop. |
+| **`auto`** | run the autonomous legs unattended. The reviews still run; a fresh resolve step reads each and acts, looping back where the work is wrong and never interrupting on a finding (`engine.md` §`auto`). Hard failures and bound exhaustion still stop. |
+| **`autoflow`** | as `auto`, but the loop is the workflow `pipeline-autoflow`, not an agent (`engine.md` §`autoflow`); for the side-by-side comparison, until the keep/revert decision. |
 
-There is no third mode and no per-gate override — both gates behave the same way within a mode.
+There is no per-gate override — both gates behave the same way within a mode.
 The **report-only override** that once existed (`auto` with `plan-approval` flipped to `report` in
 a stored `gate_policy`) is **deleted by decision, not oversight**: two of its three documented
 effects — adjudicate nothing, escalate nothing — are now the default everywhere, which left only
@@ -38,7 +39,7 @@ What no mode can do is stop a review *leg* from running — that is the navigati
 
 `pipeline_triggers($diff, $repoPackageName)` returns four booleans —
 `['package' => bool, 'migration' => bool, 'auth' => bool, 'ui' => bool]`. Three annotate; `ui`
-gates the `verify-ui` leg (next section). Detection is unchanged; what the engine *does* with the
+gates the `verify-ui` leg (next section). Detection is unchanged; what a run *does* with the
 first three is what this section revises.
 
 | Trigger | Detection (`pipeline_triggers`) | Effect |
@@ -46,7 +47,7 @@ first three is what this section revises.
 | touches an `it4web/*` package | `$repoPackageName` starts `it4web/` (the change is *in* a package repo), **or** an added `composer.json` line names an `it4web/*` constraint | annotation |
 | writes a DB migration | an added/changed file path matches `database/migrations/…\.php` | annotation |
 | touches authorization | an added line matches `authorize(` / `Gate::` / `Policy` / `can:` / `->can(` / `middleware('can:` | annotation |
-| the project-vs-package call | **none mechanical** — a `/critique plan` judgment, made in prose (the `plan` rubric asks for it) | the engine acts on it like any other part of the review (`engine.md` §`auto`) |
+| the project-vs-package call | **none mechanical** — a `/critique plan` judgment, made in prose (the `plan` rubric asks for it) | the resolve step acts on it like any other part of the review (`engine.md` §`auto`) |
 
 **On a Bounded design, `migration` and `auth` escalate** instead of only annotating: the design grows
 to Architectural and is re-reviewed (`engine.md` §Design size). The auth match ignores comment and
@@ -80,7 +81,7 @@ skipped entirely (`pipeline_next_leg` steps over it). See `engine.md` for the le
 
 **The `ui` trigger is untouched by the annotation change above.** The other three decide whether a
 *human is asked*, and are now answered with an annotation. This one decides whether a *leg runs* —
-a different question, with a different answer: mandatory, in both modes, unchanged.
+a different question, with a different answer: mandatory, in every mode, unchanged.
 
 ## Navigation guardrail — forward past an un-run gate is refused
 
@@ -95,19 +96,56 @@ a triggered `verify-ui` has not run, and "jump to implement" is refused while `r
 not run. **This refusal is the un-skippable-review promise** — there is no path to a non-draft
 PR that has not passed `review-plan` and `review-pr` against the recorded artifact.
 
-## How the engine calls Phase A
+## Loop-backs — where a looped-back leg goes
 
-The diff for gate detection is the whole change against the base branch; the package trigger
-also needs the repo's own `composer.json` `name`:
+`pipeline_loop_target($leg)` (`../checks/dispatch.php`):
+
+- `review-plan` → `design`
+- `verify-ui` → `implement`
+- `review-pr` → `implement`
+
+Each is bounded to 2 per gate, counted from the gate's `looped-back` ledger entries; the third halts,
+and so does any loop-back once the count is `unknown` (`manifest.md` §Reconstruction). In `auto` and
+`interactive` `pipeline_returned()` evaluates both; in `autoflow` the workflow script does
+(`LOOP_TARGET` and `BOUND` in `../workflow/pipeline-autoflow.js`, starting from `launch`'s ledger
+counts). Keep this list in lock-step with the function and the script: `LockStepTest` fails when
+either drifts from the function.
+
+## How a run calls Phase A
+
+`auto` and `interactive` call it once per step, one command (`engine.md` §The loop). It computes the
+triggers from a diff file the dispatcher (or the session) writes but never reads:
 
 ```bash
-# the change under review
-git diff origin/<base>...HEAD > /tmp/pipeline.diff
+CHECKS="$HOME/.claude/skills/pipeline/checks"
+git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
+php "$CHECKS/dispatch_cli.php" returned <manifest> "<manifest stem>.diff"
+# → {"action":"dispatch","leg":…,"step":…,"inline":…,"prompt":…} | {"action":"retry",…}
+#   | {"action":"halt","reason":…} | {"action":"done"}
+```
 
-# triggers over that diff, with the repo's package name for the in-package case
+`autoflow` calls it at the two edges of a run and once per step (`engine.md` §`autoflow`):
+
+```bash
+CHECKS="$HOME/.claude/skills/pipeline/checks"
+git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
+php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>]
+# → {"action":"start",…} | {"action":"done"} | {"action":"halt","reason":…}
+php "$CHECKS/dispatch_cli.php" brief <manifest> <leg> <step>      # each step's first command
+# → the brief, or {"action":"halt","reason":…}
+php "$CHECKS/dispatch_cli.php" size <manifest>                   # design's last command → Bounded | Architectural
+php "$CHECKS/dispatch_cli.php" ui "<manifest stem>.diff"         # implement's last command → true | false
+php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
+```
+
+A leg that needs the triggers itself — the package annotation, the Bounded escalation check — calls
+`pipeline_triggers()` over the same diff, with the repo's `composer.json` `name` for the in-package
+case:
+
+```bash
 php -r 'require "skills/pipeline/checks/triggers.php";
         echo json_encode(pipeline_triggers(
-          file_get_contents("/tmp/pipeline.diff"),
+          file_get_contents("<manifest stem>.diff"),
           json_decode(file_get_contents("composer.json"), true)["name"] ?? null
         )), "\n";'
 # → {"package":…,"migration":…,"auth":…,"ui":…}
@@ -116,7 +154,8 @@ php -r 'require "skills/pipeline/checks/triggers.php";
 Navigation is pure functions — call `pipeline_can_navigate` / `pipeline_next_leg` /
 `pipeline_gate_legs` directly (they take no I/O). The manifest's `gate_ledger` records which gates
 have run; `pipeline_can_navigate`'s `$doneLegs` is `pipeline_done_legs()` over it, which drops gate
-passes older than the latest `design-size` escalation.
+passes older than the latest `design-size` escalation or plan gap (`engine.md` §Design size) and
+never counts an open entry.
 
 ## Path anchoring — the app root is not always the repo root
 

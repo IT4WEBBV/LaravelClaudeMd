@@ -37,7 +37,8 @@ The PR is found by prefix: `closingIssuesReferences` stays empty until the run's
 
 ## Owner of in-flight work
 
-- **A run this session dispatched:** the dispatch record (agent id → issue) is the owner. Search nothing.
+- **A run this session dispatched:** the dispatch record (agent id for `auto`, the workflow's task
+  id for `autoflow` → issue) is the owner. Search nothing.
 - **Anything else:**
   ```bash
   claude agents --json --all | python3 ~/.claude/skills/orchestrate/owners.py <worktree>
@@ -47,6 +48,9 @@ The PR is found by prefix: `closingIssuesReferences` stays empty until the run's
   transcript, so treat the worktree as owned and ask the owner, quoting the error.
   Only a `working` or `blocked` session owns a worktree; `done`, `failed` and `stopped` rows never do.
   An open PR with no worktree has no owner to find: treat it as orphaned.
+  A worktree whose manifest has `mode: autoflow` and a `pending` cursor may be another live session's
+  workflow, which `owners.py` cannot see yet: ask *adopt* / *leave it out*, never *resume* on "no
+  owner" alone.
 
 ## Dependencies
 
@@ -67,6 +71,8 @@ gh pr view M -R <repo> --json state --jq .state
 
 ## Brief
 
+The `auto` dispatch, one background agent per issue:
+
 ```
 Run /pipeline auto <N> in <owner/repo>. This session sits in the primary checkout <path>.
 
@@ -80,6 +86,61 @@ Pointers: issue #<N>; depends on <#M (PR #P, merged) | none>.
 Return: the PR number, draft or ready, the halt reason if it halted, and its open questions verbatim.
 ```
 Add nothing else (`pipeline` `references/engine.md` §What a leg brief consists of).
+
+## Launch
+
+`autoflow`, per issue N, from the primary checkout: pipeline `SKILL.md` §`autoflow` — how a run starts
+and ends, steps 1–3.
+
+- Kickoff creates the worktree with the declared `worktree.create`; never switch branches in the
+  primary checkout, other runs share it.
+- The owner's settled decisions for N go into the manifest's `decisions`, verbatim; `artifacts.issue`
+  is N; `mode` is `autoflow`.
+- `launch` runs with `PIPELINE_NO_OPEN=1`: the run is unattended. `done` or a halt: report it and
+  start no workflow.
+- Start the workflow `pipeline-autoflow` with `launch`'s JSON as `args`, in the background, and add
+  its task id → N to the dispatch record (the id `TaskStop` takes and the completion notice carries;
+  the `wf_…` run id names the transcript dir). Do not wait on it; its completion notice arrives.
+
+The engine follows the manifest's `mode`, not the batch's argument: `launch` refuses a manifest that is
+not `autoflow`, `next` one that is. A dead session's `autoflow` run: `finish` it with a halt, then a new
+`launch` and workflow.
+
+Commits wanted on a ready PR, after `gh pr ready --undo <P>`:
+
+```bash
+php -r '$m = json_decode(file_get_contents($argv[1]), true); $m["decisions"][] = $argv[2]; file_put_contents($argv[1], json_encode($m, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");' <manifest> "<the owner's request, verbatim>"
+git -C <worktree> diff origin/<base>...HEAD > <manifest stem>.diff
+PIPELINE_NO_OPEN=1 php ~/.claude/skills/pipeline/checks/dispatch_cli.php launch <manifest> <manifest stem>.diff --from review-pr
+```
+
+then a new `pipeline-autoflow` workflow with that JSON.
+
+## Finish
+
+`autoflow`, on a run's completion notice (pipeline `engine.md` §`autoflow` — a program that calls
+agents):
+
+```bash
+php ~/.claude/skills/pipeline/checks/dispatch_cli.php finish <manifest> '<the workflow return, as JSON>'
+gh pr ready <P> -R <repo>                                                      # only when finish printed done
+php ~/.claude/skills/pipeline/checks/run_cost_cli.php <the run's transcript dir>
+git -C <worktree> diff origin/<base>...HEAD > <manifest stem>.diff
+php ~/.claude/skills/pipeline/checks/run_audit.php <manifest> <manifest stem>.diff <the run's transcript dir>
+```
+
+The transcript dir is the `wf_<id>` directory the workflow result names, not the task id. `finish`
+refuses a `done` whose cursor is not on `review-pr`: it records and prints a halt instead. A denied
+`gh pr ready` writes no halt: the manifest already says done and the PR stays draft, so the denial goes
+in the report and the owner runs `gh pr ready` by hand. A workflow that errored: `finish <manifest> '{"action":"halt","reason":"<the error>"}'`. A halt after `handoff`: the reason
+into the PR body, as pipeline `engine.md` §Failure policy — what still stops (*Bound exhaustion*)
+says. No proof page opens on a halt in an unattended batch, unlike pipeline `SKILL.md`'s attended
+"opened once": it opens only on a ready PR (§Proof page).
+
+A stalled run: `TaskStop` its task id first. Only once it reports the task stopped,
+`finish <manifest> '{"action":"halt","reason":"stalled: no notice, commit or PR change for 90 minutes"}'`.
+TaskStop finds nothing: the workflow completed just before, so `finish` its real return instead. A
+notice that arrives after a stall's `finish` is not finished again.
 
 ## Watch
 

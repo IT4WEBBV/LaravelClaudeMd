@@ -261,7 +261,8 @@ $data = request()->validate([
 
 Skills come from two repos, this one and `IT4WEBBV/DevOps-Claude-Config`, with one symlink per skill
 in `~/.claude/skills/`. At session start `hooks/git-freshness.sh` fast-forwards both repos and links
-any new skill, on each machine. Skill names must be unique across the two repos.
+any new skill, and any skill's workflow script into `~/.claude/workflows/`, on each machine. Skill
+names must be unique across the two repos.
 `DevOps-Claude-Config` is a colleague's personal config: link only its `skills/`, never its
 `settings.json` or `CLAUDE.md`. After changing a hook, run its tests in `hooks/tests/`. Machine
 setup and hook wiring: `README.md`. Playbooks for porting a LaravelTemplate feature into a project

@@ -15,14 +15,16 @@ Read/written by the Phase A helpers in `../checks/manifest.php`:
 |---|---|---|
 | `branch` | **required** | run identity (also the manifest filename) |
 | `worktree` | **required** | absolute path of the run's worktree — where every leg operates |
-| `mode` | **required** | `interactive` or `auto` |
-| `cursor` | **required** | current leg + status |
+| `mode` | **required** | `interactive`, `auto` or `autoflow` |
+| `cursor` | **required** | `{leg, status, reason?, retried?}` — the current leg; `status` is `pending` (written by `next`, by `launch --from`, or by `brief` as an `autoflow` step starts), the status the leg returned, `halted` (with `reason`), or `done` (written by `returned` or `finish` on a finished run; `next` and `launch` then answer `done` and dispatch nothing); `reason` only with `halted`; `retried` only after a review step's single retry in `auto` or `interactive` |
 | `pipeline_id` | optional | stable id alongside `branch` |
-| `artifacts` | optional | pointers: spec path, plan path, PR number, issue number (`engine.md` §The work item) |
+| `artifacts` | optional | pointers: idea, spec path, plan path, PR number, issue number (`engine.md` §The work item), `proof` — the proof page `verify-ui` wrote |
 | `last_sha` | optional | HEAD at the last completed leg |
-| `gate_ledger` | optional | the audit trail — each gate's review, what the engine or the human did about it, and the content-trigger annotations (shape below) |
+| `gate_ledger` | optional | the audit trail — each gate's review, what the resolve step or the human did about it, and the content-trigger annotations (shape below) |
 | `lease` | optional | session id + timestamp (single-driver guard) |
 | `suite` | optional | the last full suite: `{tree, outcome: green\|red, passed, failed, at}` — see *Two rules* for why a recomputable field is stored |
+| `decisions` | optional | the settled decisions from the invocation, verbatim, as a list. Every brief carries them (`engine.md` §What a leg brief consists of) |
+| `light` | optional | the invocation's `light`; read only while `design` has not run |
 
 `manifest_validate($data)` returns the list of **missing required keys** — `branch`,
 `worktree`, `mode`, `cursor`. An empty list means valid. Keep this table and that function
@@ -34,7 +36,8 @@ in lock-step: the four required rows above are exactly the four keys the functio
   PR *number*, not the PR. The reviewed diff never carries orchestration bookkeeping. The exception
   is `gate_ledger[].review`: a review has no durable source (`/critique` stores nothing by design)
   and the plan↔review loop runs entirely **before** `handoff`, so there is no PR body to recover it
-  from. Everything else stays a pointer.
+  from. `decisions` is the second exception, for the same reason: the invocation that carried them
+  is gone once the run starts. Everything else stays a pointer.
 - **Recomputable fields are derived at leg start, never trusted from the file.** A field that
   git/gh can recompute (the diff's triggers, whether the PR is ready) is recomputed each leg.
   Storing it is a latent drift bug.
@@ -44,7 +47,7 @@ in lock-step: the four required rows above are exactly the four keys the functio
 
 ## `gate_ledger` — the audit trail that keeps a gate from being decoration
 
-Under `auto` the engine overrules reviewers routinely (`engine.md` §`auto`). That is fine; doing it
+Under `auto` the resolve step overrules reviewers routinely (`engine.md` §`auto`). That is fine; doing it
 *invisibly* is not. So each pass through a gate appends one entry, and the entry is projected onto
 the PR.
 
@@ -75,11 +78,11 @@ the PR.
 | `at` | timestamp; the audit trail's only ordering |
 | `review` | the reviewer's text, verbatim — the one named exception to *Pointers, never content* above |
 | `annotations` | the content triggers that fired (`package`, `migration`, `auth`) — facts, not findings |
-| `actions[].claim` | the point from the review the engine or human acted on |
+| `actions[].claim` | the point from the review the resolve step or human acted on |
 | `actions[].disposition` | `integrated` (edited and committed) \| `recorded` (logged, no edit) \| `open-question` (carried verbatim into the PR body) |
 | `actions[].note` | what was done, or why it was not |
 | `issue_links` | **`pr-review` entries only** — the closing-link reconciliation, one entry per related issue: `{"issue": 1926, "outcome": "closes" \| "stays-open" \| "dropped-but-closes"}` (`engine.md` §Closing links). Absent on a run with no linked issue |
-| `outcome` | `continued` \| `looped-back` \| `halted` \| `escalated` (only on `design-size`) |
+| `outcome` | `continued` \| `looped-back` \| `halted` \| `escalated` (only on `design-size`). **Absent on an open entry**: a review step writes the review without an outcome, and only the resolve step sets it |
 
 **A `verify-ui` entry is the thin shape**: `gate`, `cycle`, `at`, `outcome`, and nothing else —
 no `review`, no `actions`, because nothing reviews it. It exists for two reasons, and both are
@@ -93,6 +96,11 @@ returned, or the judgement in a sentence) and `outcome: escalated`. It is not a 
 counts toward a gate's cycle bound. It resets which gates count as run: `pipeline_done_legs()`
 ignores every gate pass older than it.
 
+**A plan gap** is a `plan-approval` entry written by a leg after `review-plan` on an Architectural
+design (`engine.md` §Design size): `gate`, `leg` (the leg that found the gap), `cycle`, `at`, `reason`
+and `outcome: looped-back`, and no `review`. Unlike an escalation it **is** a loop-back and counts
+toward `review-plan`'s bound; like one, it resets `pipeline_done_legs()`.
+
 **The loop bound is read from here, never from memory.** A review may drive a loop-back twice
 before the third must halt (`engine.md` §failure policy). Count **this gate's entries whose
 `outcome` is `looped-back`** — not its entries in total: a gate's history also holds halts and
@@ -101,16 +109,42 @@ third cycle, halting for no reason. That count is the one place the ledger is *r
 than appended to, and it does not violate the recomputable-fields rule above: it is a fact about
 history, not a cached derivation of current state.
 
-An `interactive` entry is the same shape with the human in the engine's place: `review` and
+An `interactive` entry is the same shape with the human in the resolve step's place: `review` and
 `annotations` still recorded, `actions` holding what the human decided, and their decision as the
 `outcome`.
 
-## Invariant check — every leg opens with one
+## What a leg writes — and who checks it
+
+A leg writes only its results: `artifacts`, `last_sha`, `suite`, its `gate_ledger` entry, and
+`cursor.status` — plus `cursor.reason` when it halts. It never moves `cursor.leg` and never writes a
+brief. In `auto` and `interactive`, after every return `returned` compares the manifest with its
+snapshot (`pipeline_returned()`, `../checks/dispatch.php`) and **halts** when any other key changed,
+when an existing ledger entry was rewritten (the resolve step may only complete the open entry), or
+when the status does not agree with the ledger. In `autoflow` nothing compares: the workflow script
+trusts the status the step returns, `brief` halts a step the ledger does not support, and
+`run_audit.php` reports after the run whether the ledger agrees with what the steps reported
+(`engine.md` §`autoflow`).
+
+| `cursor.status` | Meaning |
+|---|---|
+| `continued` | the step did its work; a review step has appended one open entry |
+| `looped-back` | a resolve step or `verify-ui` sends the work back (`gates.md` §Loop-backs); its entry says so |
+| `halted` | a hard failure; `cursor.reason` says what |
+| `plan-insufficient` | the plan does not cover what the change needs. Bounded: a `design-size` entry with `outcome: escalated` is appended and the design grows. Architectural: a `plan-approval` entry with `outcome: looped-back` is appended and the run loops back to `design` within `review-plan`'s bound (`engine.md` §Design size). Never from a resolve step, which returns `looped-back` instead; a review step that returns it appends no review entry |
+
+Keep this section in lock-step with `LegStatus` and `pipeline_leg_writable_keys()`; `LockStepTest`
+fails when they drift.
+
+## Invariant check — before a run continues
 
 Before running a leg, confirm the file still matches reality:
 
 - the recorded artifact (spec/plan) exists at the recorded ref (`last_sha`),
 - the PR is in the expected state (draft/ready, exists).
+
+In `auto` and `interactive` every leg opens with one. In `autoflow`, `dispatch_cli.php launch` runs
+it once per launch, not per leg — the PR, once there is one, must be an open draft — and halts with
+the mismatch in `cursor.reason`.
 
 **Mismatch → halt**, do not trust the file. A halt is a human resume point, not a silent retry.
 
@@ -124,7 +158,7 @@ Rebuild the cursor by probing **durable state**, then feed the probes to
 |---|---|
 | `spec` | spec file present on the branch (`docs/superpowers/specs/…`) |
 | `plan` | plan file present on the branch (`docs/superpowers/plans/…`) |
-| `planApproved` | the `gate_ledger` holds a `plan-approval` entry with `outcome: continued` newer than the latest `design-size` escalation — a human approval, or the engine's own continue under `auto` — else re-run `review-plan` (a re-review is cheap and stateless) |
+| `planApproved` | the `gate_ledger` holds a `plan-approval` entry with `outcome: continued` newer than the latest `design-size` escalation or plan gap — a human approval, or the resolve step's own continue under `auto` — else re-run `review-plan` (a re-review is cheap and stateless) |
 | `pr` | `gh pr list --head <branch>` → PR number, else null |
 | `implemented` | PR marked ready / implementation commits present |
 | `uiNeeded` | `pipeline_triggers(<diff>)['ui']` over `git diff origin/<base>...HEAD` |
@@ -159,7 +193,7 @@ issue" for work that has one. So a reconstruction that can find no issue says **
 none — and `review-pr` then reports the reconciliation as not performed rather than as clean.
 
 **One field does not reconstruct, and it fails closed.** The `gate_ledger`'s loop-cycle count has
-no durable source — git and gh record *that* a review happened, not how many times the engine
+no durable source — git and gh record *that* a review happened, not how many times the run
 looped back — and the plan↔review loop runs entirely **before** `handoff`, so there is not even a
 PR to have projected it onto. A reconstructed run therefore treats the count as **unknown**, not
 zero, and an unknown count permits **no** further loop-back: the next one halts (`engine.md`
