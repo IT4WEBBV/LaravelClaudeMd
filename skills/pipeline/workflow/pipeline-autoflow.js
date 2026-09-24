@@ -12,31 +12,23 @@ export const meta = {
   ],
 }
 
-// Repeated from pipeline.php (pipeline_legs, pipeline_next_leg) and dispatch.php (pipeline_loop_target,
-// LegStatus::allowedFor, PIPELINE_LOOP_BOUND), which interactive mode uses; LockStepTest fails when
-// LEGS, LOOP_TARGET, ALLOWED or BOUND drift from them. The smoke run in
-// docs/superpowers/plans/2026-09-23-pipeline-auto-workflow.md (Task 6) tests the routing.
-const LEGS = ['design', 'review-plan', 'handoff', 'implement', 'verify-ui', 'review-pr']
-const STEPS = { 'review-plan': ['review', 'resolve'], 'review-pr': ['review', 'resolve'] }
-const LOOP_TARGET = { 'review-plan': 'design', 'verify-ui': 'implement', 'review-pr': 'implement' }
-const ALLOWED = {
-  'design:run': ['continued', 'halted'],
-  review: ['continued', 'halted', 'plan-insufficient'],
-  resolve: ['continued', 'looped-back', 'halted'],
-  'verify-ui:run': ['continued', 'looped-back', 'halted', 'plan-insufficient'],
-  run: ['continued', 'halted', 'plan-insufficient'],
-}
-const BOUND = 2
+// The routing tables are launch's: `tables` in its start answer, built by pipeline_routing_tables() from
+// the functions interactive mode uses. meta.phases repeats the legs as labels only (meta must be a pure
+// literal). AutoflowScriptTest replays this script on launch's answer with agent() faked.
 const COPIED = { design: { size: { type: 'string', enum: ['Bounded', 'Architectural'] } }, implement: { ui: { type: 'boolean' } } }
 const UNSATISFIABLE = { type: 'object', properties: { status: { type: 'string', enum: [] } }, required: ['status'] } // invalid: agent() throws before starting an agent — the smoke run's thrown error
 
-const loops = { 'review-plan': 0, 'verify-ui': 0, 'review-pr': 0, ...args.loops }
-let ui = args.ui
-let size = args.size
-let exempted = false
+function complete(tables) {
+  const { legs, steps, loopTarget, allowed, bound } = tables ?? {}
+  const filled = list => Array.isArray(list) && list.length > 0
+  return filled(legs)
+    && legs.every(leg => filled(steps?.[leg]) && steps[leg].every(step => filled(allowed?.[`${leg}:${step}`])))
+    && typeof loopTarget === 'object' && loopTarget !== null && Object.entries(loopTarget).every(([from, to]) => legs.includes(from) && legs.includes(to))
+    && Number.isInteger(bound)
+}
 
 function nextLeg(leg) {
-  return LEGS.slice(LEGS.indexOf(leg) + 1).find(next => next !== 'verify-ui' || ui)
+  return legs.slice(legs.indexOf(leg) + 1).find(next => next !== 'verify-ui' || ui)
 }
 
 function halt(leg, reason) {
@@ -50,7 +42,7 @@ function briefCommand(leg, step) {
 function schemaFor(leg, step) {
   const copied = COPIED[leg] ?? {}
   const properties = {
-    status: { type: 'string', enum: ALLOWED[`${leg}:${step}`] ?? ALLOWED[step] },
+    status: { type: 'string', enum: allowed[`${leg}:${step}`] },
     reason: { type: 'string' },
     ...copied,
   }
@@ -108,17 +100,24 @@ async function runStep(leg, step) {
   }
 }
 
-if (args.action !== 'start' || !LEGS.includes(args.startLeg)) return halt(args.startLeg ?? 'launch', 'args are not a launch start answer')
-if (args.startStep && !(STEPS[args.startLeg] ?? ['run']).includes(args.startStep)) return halt(args.startLeg, `${args.startLeg} has no ${args.startStep} step`)
+if (args.action !== 'start') return halt(args.startLeg ?? 'launch', 'args are not a launch start answer')
+if (!complete(args.tables)) return halt(args.startLeg ?? 'launch', 'args carry no complete tables: re-run launch from checks that have pipeline_routing_tables()')
+const { legs, steps, loopTarget, allowed, bound } = args.tables
+if (!legs.includes(args.startLeg)) return halt(args.startLeg ?? 'launch', 'args are not a launch start answer')
+if (args.startStep && !steps[args.startLeg].includes(args.startStep)) return halt(args.startLeg, `${args.startLeg} has no ${args.startStep} step`)
 
+const loops = { ...Object.fromEntries(Object.keys(loopTarget).map(gate => [gate, 0])), ...args.loops }
+let ui = args.ui
+let size = args.size
+let exempted = false
 let leg = args.startLeg
 let from = args.startStep
 while (leg) {
-  const all = STEPS[leg] ?? ['run']
-  const steps = from ? all.slice(all.indexOf(from)) : all
+  const all = steps[leg]
+  const remaining = from ? all.slice(all.indexOf(from)) : all
   from = undefined
   let result
-  for (const step of steps) {
+  for (const step of remaining) {
     result = await runStep(leg, step)
     log(`${leg}:${step} ${result.status}${result.reason ? `: ${result.reason}` : ''}`)
     if (result.status !== 'continued') break
@@ -133,12 +132,12 @@ while (leg) {
 
   const gap = result.status === 'plan-insufficient'
   if (!gap && result.status !== 'looped-back') return halt(leg, `unknown status ${result.status}`)
-  const target = gap ? 'design' : LOOP_TARGET[leg]
+  const target = gap ? 'design' : loopTarget[leg]
   if (!target) return halt(leg, `no loop-back from ${leg}`)
   const counted = !(gap && size === 'Bounded' && !exempted) // a Bounded escalation is not a loop-back; escalation is one-way, so once per run
   if (!counted) exempted = true
   const gate = gap ? 'review-plan' : leg
-  if (counted && ++loops[gate] > BOUND) return halt(leg, `${gate}: loop-back bound exhausted`)
+  if (counted && ++loops[gate] > bound) return halt(leg, `${gate}: loop-back bound exhausted`)
   leg = target
 }
 return { action: 'done' }
