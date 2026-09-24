@@ -11,7 +11,8 @@ the worktree instead: a Bash command holding a `dispatch_cli.php <subcommand>
 <worktree>/.claude/pipeline/…` call, a kickoff `ready` or launch `start` answer printed in a tool
 result, or the Workflow call whose args are that answer. The command is matched as a string, so one
 that only quotes the call (a grep over another run's transcripts) counts too: a spurious owner turns
-resume into a question, never into a second run. Every other state (done, failed, stopped, …) and the calling session are skipped.
+resume into a question, never into a second run. Every other state (done, failed, stopped, …) and
+the calling session are skipped.
 Grepping for the path or the branch is not enough: slot directories are recycled, and every session
 that mapped a worktree mentions it.
 
