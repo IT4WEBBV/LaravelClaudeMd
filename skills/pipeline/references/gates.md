@@ -106,10 +106,10 @@ PR that has not passed `review-plan` and `review-pr` against the recorded artifa
 
 Each is bounded to 2 per gate, counted from the gate's `looped-back` ledger entries; the third halts,
 and so does any loop-back once the count is `unknown` (`manifest.md` §Reconstruction). In `auto` and
-`interactive` `pipeline_returned()` evaluates both; in `autoflow` the workflow script does
-(`LOOP_TARGET` and `BOUND` in `../workflow/pipeline-autoflow.js`, starting from `launch`'s ledger
-counts). Keep this list in lock-step with the function and the script: `LockStepTest` fails when
-either drifts from the function.
+`interactive` `pipeline_returned()` evaluates both; in `autoflow` the workflow script does, on
+`tables.loopTarget` and `tables.bound` from `launch`'s `start` answer (`pipeline_routing_tables()`),
+starting from `launch`'s ledger counts. Keep this list in lock-step with the function: `LockStepTest`
+fails when it drifts.
 
 ## How a run calls Phase A
 
