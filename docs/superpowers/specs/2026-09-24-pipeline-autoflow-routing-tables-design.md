@@ -42,11 +42,13 @@ in `launch` changes. `done` and `halt` answers carry no tables, because they sta
 - `const { legs, steps, loopTarget, allowed, bound } = args.tables`, read after the start-answer guard.
   `LEGS`, `STEPS`, `LOOP_TARGET`, `ALLOWED` and `BOUND` are removed.
 - The guard already halts on `args` that are not a `start` answer. It now also halts when `tables` is
-  missing or incomplete, with the same reason, *"args are not a launch start answer"*, and before any
-  agent. **Complete** means all of these hold:
+  missing or incomplete, before any agent, with a reason of its own, *"args carry no complete tables: re-run launch from checks that have pipeline_routing_tables()"*: the
+  likeliest cause is a `launch` from a `checks` directory that predates `tables`, and a reason naming
+  `action` or `startLeg` would send the reader elsewhere. **Complete** means all of these hold:
   - `legs` is a non-empty array;
   - every leg has a non-empty `steps` array;
-  - every `<leg>:<step>` pair has an `allowed` array;
+  - every `<leg>:<step>` pair has a non-empty `allowed` array (an empty one would reach the runtime
+    as an empty enum, which halts without saying why);
   - `loopTarget` is an object whose keys and values are all legs;
   - `bound` is an integer.
   A script that would otherwise route on `undefined` (a schema with no `enum`, `++loops[gate] > undefined`
@@ -98,13 +100,13 @@ and these are not among them.
   | `looped-back` removed from `allowed['review-pr:resolve']`, resolve returns it | `review-pr` | halt *"the agent failed: review-pr:resolve may not return looped-back"*: the schema comes from `allowed` |
   | a Bounded spec, two `plan-approval` loop-backs in the ledger; `handoff` and then `review-plan:review` return `plan-insufficient` | `handoff` | the first is exempt; the second is counted and halts at `review-plan` on the bound |
   | `startStep: resolve` on `handoff` | `handoff` | no agent, halt *"handoff has no resolve step"* |
-  | no `tables`; `allowed` missing `handoff:run`; `steps` missing `verify-ui`; a `loopTarget` to no leg; `bound` `'2'` | `handoff` | no agent, halt *"args are not a launch start answer"* |
+  | no `tables`; `allowed` missing `handoff:run`; `allowed['handoff:run']` empty; `steps` missing `verify-ui`; a `loopTarget` to no leg; `bound` `'2'` | `handoff` | no agent, halt *"args carry no complete tables: re-run launch from checks that have pipeline_routing_tables()"* |
 
-  Against today's script, the rows that change a table, and the missing or incomplete tables, fail: 6 of
-  the 10 tests. That shows the script uses no table of its own.
+  Against today's script, the rows that change a table, and the missing or incomplete tables, fail: 7 of
+  the 11 tests. That shows the script uses no table of its own.
 
-A scratch copy of this branch with the change passes the whole pipeline suite: 260 tests, which is 250
-on main, minus 1, plus 11.
+A scratch copy of this branch with the change passes the whole pipeline suite: 261 tests, which is 250
+on main, minus 1, plus 12.
 
 ### The smoke pass
 
@@ -132,6 +134,7 @@ this:
   - `autoflow` routes on `tables.loopTarget` and `tables.bound` from `launch`;
   - `LockStepTest` holds this list to the function only.
 - The script's header comment.
+- `README.md` §Bootstrapping a new machine: the pipeline suite needs `node` on PATH.
 
 The 2026-09-23 plan and spec are records of what was built, and they stay as they are.
 
@@ -172,7 +175,9 @@ These are the questions brainstorming would have asked, with the answer assumed.
    is enough for this change, which moves only where the routing tables come from.
 6. *Is `node` an acceptable dependency of the pipeline suite?* Yes, and it is required, not skipped: a
    skipped test would hide exactly the drift this issue exists to catch. `node` v24 is on this machine;
-   on a machine without it, the test fails and its message names `node`.
+   on a machine without it, the test fails and its message names `node`. Because that makes `node` a
+   machine-setup requirement for the second machine too, `README.md` §Bootstrapping a new machine says
+   so.
 7. *Where does `pipeline_routing_tables()` live?* In `dispatch.php`, beside `pipeline_steps()`,
    `pipeline_loop_target()`, `LegStatus` and `PIPELINE_LOOP_BOUND`. `dispatch_cli.php` already loads it
    along with `pipeline.php`.

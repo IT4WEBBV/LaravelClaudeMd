@@ -15,8 +15,8 @@
 **Spec:** `docs/superpowers/specs/2026-09-24-pipeline-autoflow-routing-tables-design.md`
 
 **Verified before writing (2026-09-24):**
-- Tasks 1 and 2's code, assembled into a scratch copy of this branch, passes the whole pipeline suite: 260 tests. That is 250 on main, minus `LockStepTest`'s JS half, plus 1 in `DispatchCliTest` and 10 in `AutoflowScriptTest`.
-- Against today's script, `AutoflowScriptTest` has 6 failures and 4 passes. The passes are `a-done`, `b-gap-bound`, the Bounded exemption and the start-step halt, whose routing does not change.
+- Tasks 1 and 2's code, assembled into a scratch copy of this branch, passes the whole pipeline suite: 261 tests. That is 250 on main, minus `LockStepTest`'s JS half, plus 1 in `DispatchCliTest` and 11 in `AutoflowScriptTest`. Re-run after the plan review's edits (the tables halt reason, the non-empty `allowed` check and its dataset case).
+- Against today's script, `AutoflowScriptTest` has 7 failures and 4 passes. The passes are `a-done`, `b-gap-bound`, the Bounded exemption and the start-step halt, whose routing does not change.
 - The harness ran the current script under Node v24.12.0 with top-level `return` and `await` inside an `AsyncFunction` body.
 
 ## Global Constraints
@@ -27,10 +27,10 @@
   - `allowed` is keyed by every `<leg>:<step>` pair of `steps`, and its values are `LegStatus` values;
   - `bound` is `PIPELINE_LOOP_BOUND`.
 - Only the `start` answer carries `tables`. `done` and `halt` do not.
-- The script halts with `args are not a launch start answer`, before any agent, when `tables` is missing or incomplete. Incomplete means any of these:
+- The script halts with `args are not a launch start answer`, before any agent, when `action` is not `start` or `startLeg` is not a leg. It halts with `args carry no complete tables: re-run launch from checks that have pipeline_routing_tables()`, before any agent, when `tables` is missing or incomplete, so a launch from an older `checks` directory names its cause. Incomplete means any of these:
   - `legs` is not a non-empty array;
   - a leg has no non-empty `steps` array;
-  - a `<leg>:<step>` has no `allowed` array;
+  - a `<leg>:<step>` has no non-empty `allowed` array;
   - `loopTarget` is not an object whose keys and values are all legs;
   - `bound` is not an integer.
 - `meta.phases` stays a literal.
@@ -45,7 +45,7 @@
 
 ## Review Focus
 
-1. **A launch from an older `checks` directory**, one without `tables`, reaching the new script (for example a stale `~/.claude/workflows` link on one machine against a fresh checkout on the other) must halt before any agent, not route on `undefined`. Pinned in Task 2 by the `no tables` dataset case.
+1. **A launch from an older `checks` directory**, one without `tables`, reaching the new script (for example a stale `~/.claude/workflows` link on one machine against a fresh checkout on the other) must halt before any agent, not route on `undefined`, with a reason that names `tables` rather than `action` or `startLeg`. Pinned in Task 2 by the `no tables` dataset case.
 2. **A `loops` without a gate's key** (an older or hand-built answer) must still count loop-backs. `++undefined > bound` is never true, so without defaults the bound would never be reached. Pinned in Task 2: `unset($start['loops']['verify-ui'])` in the bound-0 case.
 3. **The Bounded exemption, once per run, with `launch`'s ledger counts already at the bound.** The first `plan-insufficient` is exempt and the second halts. Pinned in Task 2 by the Bounded case.
 4. **A `startStep` the leg does not have** must halt naming it, before any agent, now that `steps` comes from `args`. Pinned in Task 2 by the start-step case.
@@ -63,6 +63,7 @@
 - Modify `skills/pipeline/workflow/pipeline-autoflow.js`: read the tables from `args`.
 - Modify `skills/pipeline/checks/tests/LockStepTest.php`: drop the JS half.
 - Modify `skills/pipeline/references/engine.md` and `skills/pipeline/references/gates.md`: the docs.
+- Modify `README.md`: `node` as a machine-setup requirement of the pipeline suite.
 
 ---
 
@@ -338,10 +339,11 @@ it('halts before any agent when launch\'s tables are missing or incomplete', fun
     $replay = autoflow_replay($break(autoflow_start('handoff')), []);
 
     expect($replay['labels'])->toBe([]);
-    expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'handoff', 'reason' => 'args are not a launch start answer']);
+    expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'handoff', 'reason' => 'args carry no complete tables: re-run launch from checks that have pipeline_routing_tables()']);
 })->with([
     'no tables' => [function (array $start) { unset($start['tables']); return $start; }],
     'a step without statuses' => [function (array $start) { unset($start['tables']['allowed']['handoff:run']); return $start; }],
+    'a step with an empty status list' => [function (array $start) { $start['tables']['allowed']['handoff:run'] = []; return $start; }],
     'a leg without steps' => [function (array $start) { unset($start['tables']['steps']['verify-ui']); return $start; }],
     'a loop-back to no leg' => [function (array $start) { $start['tables']['loopTarget']['review-pr'] = 'nowhere'; return $start; }],
     'a bound that is not a number' => [function (array $start) { $start['tables']['bound'] = '2'; return $start; }],
@@ -352,7 +354,7 @@ it('halts before any agent when launch\'s tables are missing or incomplete', fun
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter=AutoflowScriptTest`
 
-Expected: 6 failed, 4 passed. The failures are `routes by the tables it is given` (today's script ignores `tables.bound`) and all five `missing or incomplete` cases (today's script never looks at `tables`). The four that pass are `walks to done`, `halts on launch's bound`, `exempts one Bounded escalation` and `halts a start step`, whose routing this task does not change.
+Expected: 7 failed, 4 passed. The failures are `routes by the tables it is given` (today's script ignores `tables.bound`) and all six `missing or incomplete` cases (today's script never looks at `tables`). The four that pass are `walks to done`, `halts on launch's bound`, `exempts one Bounded escalation` and `halts a start step`, whose routing this task does not change.
 
 - [ ] **Step 4: Make the script read `args.tables`**: `skills/pipeline/workflow/pipeline-autoflow.js`
 
@@ -378,8 +380,9 @@ Put `complete()` in their place, directly above `nextLeg()`, and make `nextLeg()
 ```js
 function complete(tables) {
   const { legs, steps, loopTarget, allowed, bound } = tables ?? {}
-  return Array.isArray(legs) && legs.length > 0
-    && legs.every(leg => Array.isArray(steps?.[leg]) && steps[leg].length > 0 && steps[leg].every(step => Array.isArray(allowed?.[`${leg}:${step}`])))
+  const filled = list => Array.isArray(list) && list.length > 0
+  return filled(legs)
+    && legs.every(leg => filled(steps?.[leg]) && steps[leg].every(step => filled(allowed?.[`${leg}:${step}`])))
     && typeof loopTarget === 'object' && loopTarget !== null && Object.entries(loopTarget).every(([from, to]) => legs.includes(from) && legs.includes(to))
     && Number.isInteger(bound)
 }
@@ -398,8 +401,10 @@ In `schemaFor()`, the status enum has no fallback key:
 Replace the two guard lines, `if (args.action !== 'start' || !LEGS.includes(…` and `if (args.startStep && !(STEPS[…`, and the `let leg = args.startLeg` line after them, with:
 
 ```js
-if (args.action !== 'start' || !complete(args.tables) || !args.tables.legs.includes(args.startLeg)) return halt(args.startLeg ?? 'launch', 'args are not a launch start answer')
+if (args.action !== 'start') return halt(args.startLeg ?? 'launch', 'args are not a launch start answer')
+if (!complete(args.tables)) return halt(args.startLeg ?? 'launch', 'args carry no complete tables: re-run launch from checks that have pipeline_routing_tables()')
 const { legs, steps, loopTarget, allowed, bound } = args.tables
+if (!legs.includes(args.startLeg)) return halt(args.startLeg ?? 'launch', 'args are not a launch start answer')
 if (args.startStep && !steps[args.startLeg].includes(args.startStep)) return halt(args.startLeg, `${args.startLeg} has no ${args.startStep} step`)
 
 const loops = { ...Object.fromEntries(Object.keys(loopTarget).map(gate => [gate, 0])), ...args.loops }
@@ -435,7 +440,7 @@ In `skills/pipeline/checks/tests/LockStepTest.php`, delete the whole third test,
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`
 
-Expected: green, 260 passed.
+Expected: green, 261 passed.
 
 - [ ] **Step 7: Commit**
 
@@ -451,6 +456,7 @@ git commit -m "pipeline-autoflow: route by launch's tables; a replay test replac
 **Files:**
 - Modify: `skills/pipeline/references/engine.md` (§`autoflow` — a program that calls agents; §A plan gap on an Architectural design)
 - Modify: `skills/pipeline/references/gates.md` (§Loop-backs)
+- Modify: `README.md` (§Bootstrapping a new machine)
 
 - [ ] **Step 1: `engine.md` §`autoflow`**
 
@@ -487,8 +493,9 @@ with
 In the same bullet, replace the sentence `A status it cannot route halts, and so do `args` that are not a `launch` `start` answer.` (it wraps across two lines) with:
 
 ```markdown
-A status it cannot route halts, and so do `args` that are not a `launch` `start` answer, `tables`
-missing or incomplete included; `AutoflowScriptTest` replays the script on `launch`'s answer.
+A status it cannot route halts, and so do `args` that are not a `launch` `start` answer; `tables`
+missing or incomplete halts with a reason that names them. `AutoflowScriptTest` replays the script
+on `launch`'s answer.
 ```
 
 - [ ] **Step 2: `engine.md` §A plan gap on an Architectural design**
@@ -525,21 +532,30 @@ Run: `grep -rnE 'LOOP_TARGET|const BOUND|script.s .BOUND' skills/pipeline skills
 
 Expected: no output.
 
-- [ ] **Step 4: Run every suite**
+- [ ] **Step 4: `README.md` §Bootstrapping a new machine**
+
+After the paragraph that ends with the `git-freshness.sh` modes list (the `checkout` bullet), before `## Linking the skills`, add:
+
+```markdown
+The pipeline skill's suite needs `node` on PATH: `AutoflowScriptTest` replays the autoflow Workflow
+script under it, and fails rather than skips without it, so a machine without `node` has a red suite.
+```
+
+- [ ] **Step 5: Run every suite**
 
 Run each of the three suites under *Global Constraints*.
 
-Expected: the pipeline suite green with 260 passed, the critique suite green, and `owners_test.sh` passing.
+Expected: the pipeline suite green with 261 passed, the critique suite green, and `owners_test.sh` passing.
 
-- [ ] **Step 5: The Workflow smoke pass, when this session has the Workflow tool**
+- [ ] **Step 6: The Workflow smoke pass, when this session has the Workflow tool**
 
 With the Workflow tool: follow the 2026-09-23 plan, Task 6, Steps 3 to 5, for `a-done` and `b-gap-bound` only. Use this worktree's `skills/pipeline/workflow/pipeline-autoflow.js` as `scriptPath`, and `"mode":"autoflow"` in the scenario manifests. The `launch` lines now carry `tables`; pass them unchanged as `args` with the `stub` key. Record the labels, the return and the cursor after `finish` for both, for the PR body.
 
 Without the Workflow tool (an `autoflow` implement step cannot start agents, so it cannot start a Workflow): do not halt. Record for the PR body: *"Workflow smoke pass not run (no Workflow tool in the implementing session): `a-done` and `b-gap-bound` are replayed by `AutoflowScriptTest`; the Workflow run of both is left for review."*
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add skills/pipeline/references/engine.md skills/pipeline/references/gates.md
+git add skills/pipeline/references/engine.md skills/pipeline/references/gates.md README.md
 git commit -m "pipeline docs: autoflow routes by launch's tables; AutoflowScriptTest replaces the script's lock-step match (#71)"
 ```
