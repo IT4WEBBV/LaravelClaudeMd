@@ -11,9 +11,9 @@
  */
 function pipeline_leg_overrides(string $mode): array
 {
-    $auto = $mode === 'autoflow';
+    $autoflow = $mode === 'autoflow';
     $actOnReview = [
-        'Act on the open review with the edit/rework boundary (engine.md §`auto`): integrate and commit edits and small fixes; where the review says the work is fundamentally wrong, loop back.',
+        'Act on the open review with the edit/rework boundary (engine.md §Resolving a review): integrate and commit edits and small fixes; where the review says the work is fundamentally wrong, loop back.',
         'Change nothing the review did not name.',
         'Carry anything unresolved verbatim as an open question.',
     ];
@@ -29,13 +29,13 @@ function pipeline_leg_overrides(string $mode): array
             'Commit the spec, then the plan: two commits. Set `artifacts.spec` and `artifacts.plan`.',
         ],
         'review-plan:review' => [
-            $auto ? $yourself('plan', 'the spec and the plan') : 'Invoke `/critique plan` on the spec and the plan.',
+            $autoflow ? $yourself('plan', 'the spec and the plan') : 'Invoke `/critique plan` on the spec and the plan.',
             'Append its review verbatim as a new `plan-approval` ledger entry with `gate`, `leg`, `cycle`, `at`, `review` and `annotations`, and no `outcome`.',
             'Act on nothing. Read-only on the checkout; the manifest is the only file you write.',
         ],
         'review-plan:resolve' => [
             ...$actOnReview,
-            ...($auto ? [] : ['The independent read (engine.md §`auto`) is available.']),
+            ...($autoflow ? [] : ['The independent read (engine.md §Resolving a review) is available.']),
             $completeEntry,
         ],
         'handoff:run' => [
@@ -48,7 +48,7 @@ function pipeline_leg_overrides(string $mode): array
             'Leave the PR draft; this overrides any mark-ready instruction in the plan, the PR comment, or `work-on`\'s own logic.',
             'Add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch.',
             'Files or behaviour the plan does not name: return `plan-insufficient` with the reason instead of improvising.',
-            ...($auto ? ['Execute the plan inline, task by task; no subagents.'] : []),
+            ...($autoflow ? ['Execute the plan inline, task by task; no subagents.'] : []),
         ],
         'verify-ui:run' => [
             'Bring the dev stack up if it is down. Invoke `browser-verification`.',
@@ -56,19 +56,19 @@ function pipeline_leg_overrides(string $mode): array
             'Append the thin `verify-ui` entry with outcome `continued`, or `looped-back` when the check fails.',
         ],
         'review-pr:review' => [
-            ($auto ? $yourself('pr', 'the PR') . ' State the suite line above.' : 'Invoke `/critique pr`, stating the suite line above.') . ' ' . $checks,
+            ($autoflow ? $yourself('pr', 'the PR') . ' State the suite line above.' : 'Invoke `/critique pr`, stating the suite line above.') . ' ' . $checks,
             'Append its review verbatim as a new `pr-review` ledger entry with `gate`, `leg`, `cycle`, `at`, `review` and `annotations`, and no `outcome`.',
             'Act on nothing. Read-only on the checkout; the manifest is the only file you write.',
         ],
         'review-pr:resolve' => [
             'You are the finish step.',
             ...$actOnReview,
-            $auto ? 'On a loop-back, stop there: no suite.' : 'On a loop-back, stop there: no suite, no `gh pr ready`.',
+            $autoflow ? 'On a loop-back, stop there: no suite.' : 'On a loop-back, stop there: no suite, no `gh pr ready`.',
             'Run the suite unless engine.md §Suite reuse finds this tree green; record `suite`.',
             'Reconcile the closing links (engine.md §Closing links) and write `issue_links` on the entry.',
             'When `artifacts.proof` is set, rewrite the proof page with the final open questions and ledger.',
             $completeEntry,
-            ($auto ? 'Leave the PR draft; the session that launched the run marks it ready.' : 'Run `gh pr ready`.') . ' The last action is `proof_cli.php open` on `artifacts.proof` (engine.md §The proof store).',
+            ($autoflow ? 'Leave the PR draft; the session that launched the run marks it ready.' : 'Run `gh pr ready`.') . ' The last action is `proof_cli.php open` on `artifacts.proof` (engine.md §The proof store).',
         ],
     ];
 }

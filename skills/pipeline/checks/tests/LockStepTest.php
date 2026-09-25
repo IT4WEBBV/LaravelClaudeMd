@@ -32,3 +32,14 @@ it('keeps gates.md in lock-step with the loop-back targets', function () {
         }
     }
 });
+
+it('keeps every engine.md section a brief names', function () {
+    preg_match_all('/^## (.+?)(?: — .*)?$/m', (string) file_get_contents(__DIR__ . '/../../references/engine.md'), $headings);
+    $lines = array_merge(...array_values(pipeline_leg_overrides('autoflow')), ...array_values(pipeline_leg_overrides('interactive')));
+    preg_match_all('/§([^,):;]+)/', implode("\n", $lines), $names);
+
+    expect($names[1])->not->toBeEmpty();
+    foreach ($names[1] as $name) {
+        expect(array_filter($headings[1], fn (string $heading) => str_starts_with($name, $heading)))->not->toBeEmpty("engine.md has no section '{$name}'");
+    }
+});

@@ -3,7 +3,7 @@
 function brief_manifest(string $leg, array $extra = []): array
 {
     return [
-        'branch' => 'feature/x', 'worktree' => '/tmp/wt', 'mode' => 'auto',
+        'branch' => 'feature/x', 'worktree' => '/tmp/wt', 'mode' => 'interactive',
         'cursor' => ['leg' => $leg, 'status' => 'pending'],
         'artifacts' => ['idea' => '/tmp/idea.md', 'spec' => 'docs/spec.md', 'plan' => null, 'pr' => 42, 'issue' => null],
         'decisions' => ['The engine never edits.'],
@@ -39,9 +39,7 @@ it('has overrides for every leg and step, in autoflow and interactive', function
     }
 });
 
-it('briefs an auto run exactly as an interactive one: the dispatcher\'s steps can dispatch', function () {
-    expect(pipeline_leg_overrides('auto'))->toBe(pipeline_leg_overrides('interactive'));
-    expect(pipeline_brief_return('implement', 'run', 'auto'))->toBe(pipeline_brief_return('implement', 'run', 'interactive'));
+it('briefs an interactive run without autoflow\'s lines: its steps can dispatch', function () {
     expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))
         ->not->toContain('The owner authorised this run')
         ->not->toContain('`cd /tmp/wt`')
@@ -52,7 +50,7 @@ it('carries the pointers, the settled decisions and the suite line', function ()
     $brief = pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/wt/.claude/pipeline/feature-x.json');
 
     expect($brief)
-        ->toContain('`implement` leg, `run` step, of a `/pipeline auto` run')
+        ->toContain('`implement` leg, `run` step, of a `/pipeline interactive` run')
         ->toContain('/tmp/wt/.claude/pipeline/feature-x.json')
         ->toContain('- spec: `docs/spec.md`')
         ->toContain('- pr: `42`')
