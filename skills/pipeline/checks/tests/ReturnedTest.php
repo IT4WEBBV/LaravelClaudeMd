@@ -7,7 +7,7 @@ $open = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' =
 function returned_before(string $leg, array $ledger = [], array $cursor = []): array
 {
     return [
-        'branch' => 'feature/x', 'worktree' => '/tmp/wt', 'mode' => 'auto',
+        'branch' => 'feature/x', 'worktree' => '/tmp/wt', 'mode' => 'interactive',
         'cursor' => ['leg' => $leg, 'status' => 'pending', ...$cursor],
         'artifacts' => ['spec' => 'docs/spec.md', 'plan' => 'docs/plan.md', 'pr' => null, 'issue' => null],
         'last_sha' => 'aaa1111', 'gate_ledger' => $ledger,
@@ -145,7 +145,7 @@ it('halts on every return it cannot account for', function (array $after, string
 
     return [
         'a moved cursor' => [returned_after($before, 'continued', [$old, $open], ['cursor' => ['leg' => 'handoff', 'status' => 'continued']]), 'cursor.leg'],
-        'a dispatcher key' => [returned_after($before, 'continued', [$old, $open], ['mode' => 'interactive']), 'mode'],
+        'a dispatcher key' => [returned_after($before, 'continued', [$old, $open], ['mode' => 'autoflow']), 'mode'],
         'a new top-level key' => [returned_after($before, 'continued', [$old, $open], ['notes' => 'x']), 'notes'],
         'a rewritten entry' => [returned_after($before, 'continued', [[...$old, 'review' => 'edited'], $open]), 'ledger entry 0'],
         'an unknown status' => [returned_after($before, 'done', [$old, $open]), 'not a leg status'],
@@ -227,7 +227,7 @@ it('names what a step reported that its manifest does not say', function (string
 it('reports a manifest problem before anything the step reported', function () {
     $before = returned_before('handoff');
 
-    expect(pipeline_reported_problem($before, returned_after($before, 'continued', null, ['mode' => 'auto', 'branch' => 'other']), ['status' => 'halted'], DesignSize::Architectural))
+    expect(pipeline_reported_problem($before, returned_after($before, 'continued', null, ['mode' => 'interactive', 'branch' => 'other']), ['status' => 'halted'], DesignSize::Architectural))
         ->toBe('the leg changed branch, which only the dispatcher writes');
 });
 

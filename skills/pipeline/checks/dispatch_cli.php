@@ -5,7 +5,7 @@
  *
  *   interactive:  php dispatch_cli.php next <manifest>
  *                 php dispatch_cli.php returned <manifest> <diff-file>
- *   autoflow:     php dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--mode autoflow|auto] [--decision <text>]...
+ *   autoflow:     php dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--decision <text>]...
  *                 php dispatch_cli.php launch <manifest> <diff-file> [--from <leg>]
  *                 php dispatch_cli.php brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]]
  *                 php dispatch_cli.php finish <manifest> <decision-json>
@@ -67,8 +67,10 @@ function dispatch_cli_next(string $manifestPath): array
     if ($manifest === null) {
         return pipeline_halt("no readable manifest at {$manifestPath}");
     }
-    if (($manifest['mode'] ?? null) === 'autoflow') {
-        return pipeline_halt('an autoflow run resumes with launch, not next');
+    $mode = (string) ($manifest['mode'] ?? '');
+    $refusal = pipeline_retired_mode($mode) ?? ($mode === 'autoflow' ? 'an autoflow run resumes with launch, not next' : null);
+    if ($refusal !== null) {
+        return pipeline_halt($refusal);
     }
     if (dispatch_cli_finished($manifest)) {
         return ['action' => 'done'];
@@ -91,10 +93,12 @@ function dispatch_cli_invalid(array $manifest): ?string
     return in_array($manifest['cursor']['leg'] ?? null, pipeline_legs(), true) ? null : 'the manifest is invalid: cursor.leg is not a leg';
 }
 
-/** `launch`, `brief` and `finish` serve `autoflow` runs only; a valid manifest of any other mode resumes with `next`. */
+/** `launch`, `brief` and `finish` serve `autoflow` runs only; a valid manifest of any other mode but the removed `auto` resumes with `next`. */
 function dispatch_cli_mode_problem(string $refusal, array $manifest): ?string
 {
-    return $manifest['mode'] === 'autoflow' ? null : "{$refusal}; this run's mode is {$manifest['mode']} (resume it with /pipeline, which uses next)";
+    $mode = (string) ($manifest['mode'] ?? '');
+
+    return pipeline_retired_mode($mode) ?? ($mode === 'autoflow' ? null : "{$refusal}; this run's mode is {$mode} (resume it with /pipeline, which uses next)");
 }
 
 /** Finished: `status: done` as this dispatcher writes it, or the old engine's `leg: done`. */
@@ -109,6 +113,10 @@ function dispatch_cli_returned(string $manifestPath, string $diffPath): array
     $after = manifest_read($manifestPath);
     if ($before === null || $after === null || ! is_file($diffPath)) {
         return pipeline_halt('cannot check the return: the snapshot, the manifest or the diff file is missing');
+    }
+    $retired = pipeline_retired_mode((string) ($before['mode'] ?? ''));
+    if ($retired !== null) {
+        return pipeline_halt($retired);
     }
 
     $triggers = pipeline_triggers((string) file_get_contents($diffPath));
@@ -376,8 +384,9 @@ function dispatch_cli_ui(string $diffPath): ?string
 }
 
 /**
- * `kickoff <repo-root> <number|idea> [--light] [--mode autoflow|auto] [--decision <text>]...`; null is a
- * usage error. `interactive` keeps its session-driven kickoff.
+ * `kickoff <repo-root> <number|idea> [--light] [--decision <text>]...`; null is a usage error. `--mode
+ * autoflow` is accepted and changes nothing; `--mode auto` parses, so that `dispatch_cli_kickoff()` can
+ * halt it by name. `interactive` keeps its session-driven kickoff.
  *
  * @return array{repoRoot: string, item: string, mode: string, light: bool, decisions: list<string>}|null
  */
@@ -419,8 +428,12 @@ function dispatch_cli_kickoff_args(array $arguments): ?array
 function dispatch_cli_kickoff(array $arguments): ?array
 {
     $parsed = dispatch_cli_kickoff_args($arguments);
+    if ($parsed === null) {
+        return null;
+    }
+    $retired = pipeline_retired_mode($parsed['mode']);
 
-    return $parsed === null ? null : pipeline_kickoff($parsed['repoRoot'], $parsed['item'], $parsed);
+    return $retired === null ? pipeline_kickoff($parsed['repoRoot'], $parsed['item'], $parsed) : pipeline_halt($retired);
 }
 
 /**
@@ -474,7 +487,7 @@ $result = match ($argv[1] ?? '') {
 };
 
 if ($result === null) {
-    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--mode autoflow|auto] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> (size needs a readable manifest, ui an existing diff file)\n");
+    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> (size needs a readable manifest, ui an existing diff file)\n");
     exit(1);
 }
 

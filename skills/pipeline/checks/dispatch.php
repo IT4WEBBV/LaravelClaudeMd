@@ -105,10 +105,18 @@ function pipeline_step(array $manifest, string $leg): string
     return pipeline_open_entry(pipeline_ledger($manifest), pipeline_gate_of($leg)) === null ? 'review' : 'resolve';
 }
 
-/** Anything that is neither `auto` nor `autoflow` behaves as interactive (`gates.md` §Modes): the human designs and resolves. */
+/** Anything that is not `autoflow` behaves as interactive (`gates.md` §Modes): the human designs and resolves. */
 function pipeline_runs_inline(string $mode, string $leg, string $step): bool
 {
-    return ! in_array($mode, ['auto', 'autoflow'], true) && ($leg === 'design' || $step === 'resolve');
+    return $mode !== 'autoflow' && ($leg === 'design' || $step === 'resolve');
+}
+
+/** `auto`, the dispatcher engine, was removed (#87): every command refuses it by naming the mode that replaced it. */
+function pipeline_retired_mode(string $mode): ?string
+{
+    return $mode === 'auto'
+        ? 'mode auto was removed; autoflow is the unattended mode: kick off without --mode, and resume an auto manifest by setting its mode to autoflow and running launch'
+        : null;
 }
 
 /** @return list<string> the only manifest keys a leg may change; `cursor.*` is one level down */

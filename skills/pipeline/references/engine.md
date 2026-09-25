@@ -6,16 +6,18 @@ are `gates.md`. This file is the operational procedure.
 
 ## The loop
 
-All three modes walk the same legs with the same briefs, which `autoflow` extends (§What a leg brief
+Both modes walk the same legs with the same briefs, which `autoflow` extends (§What a leg brief
 consists of). They differ in who holds the loop:
 
 | Mode | Who holds the loop | Commands |
 |---|---|---|
-| `auto` | the dispatcher, one background agent (§The dispatcher) | `next` / `returned`, below |
 | `interactive` | the session; the human resolves each review (§Interactive) | `next` / `returned`, below |
 | `autoflow` | the saved workflow `pipeline-autoflow`, a program (§`autoflow`) | `launch` / `brief` / `finish` |
 
-`launch` refuses a manifest whose mode is not `autoflow`, and `next` refuses one whose mode is.
+`launch` refuses a manifest whose mode is not `autoflow`, and `next` refuses one whose mode is. Every
+command, `kickoff --mode auto` included, refuses `auto`, the dispatcher engine #87 removed, with a halt
+that names `autoflow` (`pipeline_retired_mode()`). An `auto` manifest resumes once its `mode` says
+`autoflow`, through `launch`.
 
 ```
 read manifest (or reconstruct it)          # manifest_read / manifest_infer_cursor
@@ -48,7 +50,7 @@ step runs.
 
 - **Every step is a fresh agent** briefed by `pipeline_brief($manifest, $leg, $manifestPath, $step)`
   (`../checks/brief.php`). It writes its results and a status into the manifest (`manifest.md`
-  §What a leg writes) and replies with one line. The dispatcher never reads that reply for content:
+  §What a leg writes) and replies with one line. The session never reads that reply for content:
   `returned` compares the manifest with the snapshot taken at dispatch and **halts** on anything it
   cannot account for.
 - **Legs never pick the next leg and never write a brief.** `pipeline_returned()`
@@ -60,32 +62,6 @@ step runs.
   and then regain control": a skill that tail-calls its successor (as `brainstorming` invokes
   `writing-plans`) would never return, so an inline auto-continuation would silently walk past the
   next gate. A lost step **halts the chain; it never skips a gate.**
-
-## The dispatcher — what it does, and never does
-
-`/pipeline auto` runs the loop in **one background agent, the dispatcher**, launched by the invoking
-session (the main session or `orchestrate`). Its steps are depth 2; `/critique`'s reviewer and the
-independent read are depth 3.
-
-**It keeps:** kickoff (`dispatch_cli.php kickoff --mode auto`, §Kickoff), the invariant check
-(`manifest.md`), `dispatch_cli.php` (which holds `manifest_validate`, `manifest_write`,
-`pipeline_next_leg`, the loop bound and the return checks), navigation through
-`pipeline_can_navigate`, and the halts (§Failure policy).
-
-**It never** reads an artifact, a review, a diff or test output; never edits; never runs the suite.
-Diffs go to a file that only `dispatch_cli.php` reads. Of this document it needs only §The loop, this
-section, §The work item, §Kickoff, §Failure policy and §Navigation; each step's brief names the
-sections that step needs.
-
-**Its peak context stays under 150k per run.** After the dispatcher's completion notice, the invoking
-session runs
-
-```bash
-php ~/.claude/skills/pipeline/checks/engine_peak_cli.php <the dispatcher's agent id>
-```
-
-and reports its line with the run's result. Over 150k is an **annotation, never a halt**. Baseline
-before this design: median peak 253k; engines 18.1 percent of all usage since 2026-09-14.
 
 ## `autoflow` — a program that calls agents
 
@@ -127,7 +103,7 @@ launched the run, with its reason.
   code.
   `tables` is what the script routes by, `pipeline_routing_tables()`: the legs in order, each leg's
   steps, the loop-back targets, the statuses per `<leg>:<step>` and the bound, built from the
-  functions `auto` and `interactive` route by, so the script keeps no copy of them.
+  functions `interactive` routes by, so the script keeps no copy of them.
 - **The script** gives each step a schema whose `status` allows only what that step may return
   (`tables.allowed`, from `LegStatus::allowedFor()`), continues, loops back or returns on that status,
   counts each loop-back against `tables.bound`, 2 per gate (`gates.md` §Loop-backs), and returns `{action: done}` or
@@ -166,7 +142,7 @@ launched the run, with its reason.
 **The check at the next boundary.** The script routes on the `status` a step returns; the step's
 return is checked at the next command, by a separate process and no extra agent. `brief`, told by
 `--after` which step returned, compares the manifest with that step's snapshot, as `returned` does in
-`auto`: `pipeline_reported_problem()` (`../checks/dispatch.php`) runs `pipeline_return_problem()` and
+`interactive`: `pipeline_reported_problem()` (`../checks/dispatch.php`) runs `pipeline_return_problem()` and
 then compares what the script was told with what the manifest and the tree say — the status with
 `cursor.status`, `ui` with `pipeline_triggers()` over the implement step's own `<manifest stem>.diff`
 (one older than its snapshot halts), `size` with the spec's header. A halt writes
@@ -210,7 +186,7 @@ how each station's dispatch is done by the step itself. And the auto-mode classi
 the brainstorm) and for every `resolve` step: the session shows the review from the open ledger entry,
 the human decides, the session carries that out — on `review-pr` including the finish work below —
 completes the entry with the human's `actions` and `outcome`, and runs `returned`. Every other step is
-dispatched as in `auto`. After each step the session stops and continues when the human says so
+dispatched to a fresh background agent. After each step the session stops and continues when the human says so
 (§Navigation), as `interactive` always has.
 
 ## The work item — resolved before anything is created
@@ -297,11 +273,11 @@ latent drift bug. The issue number is a pointer, which is what the manifest is f
 
 ## Kickoff — resolve the worktree, then start the loop
 
-**In `auto` and `autoflow`, kickoff is one tested command** that does §The work item and this
-section in one call and leaves the session nothing to judge:
+**In `autoflow`, kickoff is one tested command** that does §The work item and this section in one
+call and leaves the session nothing to judge:
 
 ```bash
-php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--mode autoflow|auto] [--decision "<verbatim>"]…
+php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--decision "<verbatim>"]…
 ```
 
 It runs the declared `worktree.create` as declared, from the primary checkout, with only `<branch>`
@@ -416,7 +392,7 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 | Leg | Invokes | Interactive form | Autonomous form | Manifest I/O |
 |---|---|---|---|---|
 | **design** *(compound)* | `superpowers:brainstorming`, then `superpowers:writing-plans` for an **Architectural** design (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it); for a **Bounded** design, brainstorming's Bounded path with no `writing-plans` (§Design size) | human drives the brainstorm dialogue; if brainstorming classifies Bounded without `light`, the pipeline asks (§Design size); re-invoke `/pipeline` to continue | a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions. The brief says which path is permitted: Bounded only with `light`, otherwise Architectural | writes spec + plan pointers; the size is the spec's `**Design size:**` header, never stored |
-| **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | two steps (`pipeline_step`): a **review** agent invokes `/critique plan` (in `autoflow` it applies `/critique plan`'s procedure itself: it cannot start a reviewer) and appends the review verbatim as an open `plan-approval` entry; a fresh **resolve** agent acts on it (§`auto`) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
+| **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | two steps (`pipeline_step`): a **review** agent invokes `/critique plan` (in `autoflow` it applies `/critique plan`'s procedure itself: it cannot start a reviewer) and appends the review verbatim as an open `plan-approval` entry; a fresh **resolve** agent acts on it (§Resolving a review) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth. References the issue **without a closing keyword** (§Closing links) — this PR carries no implementation yet | writes the PR# pointer |
 | **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links (§Closing links — `review-pr` reconciles them before the PR goes ready). **Leaves the PR draft** (below). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, writes the run's page to the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — the payload carries `nameWithOwner`, `pr` and `issue` so the page can link back to both — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
@@ -439,14 +415,14 @@ the exact header line and `Architectural` for anything else, so every older spec
 
 ### Who picks the size — always a human
 
-`/pipeline [interactive|auto|autoflow] [light] <idea | number | spec-path>`. The word `light` **permits** Bounded.
+`/pipeline [interactive|autoflow] [light] <idea | number | spec-path>`. The word `light` **permits** Bounded.
 It matters only while `design` has not run; on a resume the size comes from the spec and `light` is
 ignored, with a note saying so.
 
 | | with `light` | without `light` |
 |---|---|---|
 | `interactive` | brainstorming runs normally; Bounded when it classifies Bounded | when brainstorming classifies Bounded, **ask** as one multiple-choice question: *"This looks like a small change: continue with a short design (Bounded), or write the full spec and plan?"* Yes → Bounded. No → tell brainstorming to take the Architectural path |
-| `auto`, `autoflow` | the design brief permits the Bounded path | the design brief requires the Architectural path |
+| `autoflow` | the design brief permits the Bounded path | the design brief requires the Architectural path |
 
 brainstorming's own rule applies in every cell: *when in doubt between two paths, take the heavier
 one.* A classification never selects Bounded on its own authority.
@@ -476,7 +452,7 @@ The spec:
 <the observable result>
 
 ## Assumptions
-<auto and autoflow only: each question that would have been asked, and the answer assumed>
+<autoflow only: each question that would have been asked, and the answer assumed>
 ```
 
 The plan:
@@ -503,8 +479,7 @@ the code they name.
 - first thing in every later step, except a resolve step, which loops back instead (below).
 
 On escalation the step appends the `design-size` entry and returns `plan-insufficient`; the run goes
-back to `design` (`pipeline_returned()` in `auto` and `interactive`, the workflow script in
-`autoflow`), whose brief asks for the grow form.
+back to `design` (`pipeline_returned()` in `interactive`, the workflow script in `autoflow`), whose brief asks for the grow form.
 
 ```bash
 CHECKS="$HOME/.claude/skills/pipeline/checks"
@@ -525,7 +500,7 @@ php -r 'require $argv[1] . "/triggers.php"; require $argv[1] . "/design_size.php
   the package's own PR; it keeps its annotation.
 - **Judgement also escalates:**
   - brainstorming's ratchet upgrades the path;
-  - an `auto` or `autoflow` assumption turns out to change what gets built;
+  - an `autoflow` assumption turns out to change what gets built;
   - `implement` needs files or behaviour the plan did not name. The implement subagent returns
     **"plan insufficient"** instead of improvising.
 
@@ -549,7 +524,7 @@ past the re-review.
 - it does not count toward `review-plan`'s cycle bound;
 - once the PR exists, bound exhaustion follows the after-`handoff` rule (§Failure policy).
 
-In `auto` and `interactive`, `pipeline_route` sends every Bounded `plan-insufficient` to `design`
+In `interactive`, `pipeline_route` sends every Bounded `plan-insufficient` to `design`
 without counting repeats, and relies on the grow-form brief to make the spec Architectural; `autoflow`
 exempts one per run and counts the rest toward `review-plan`'s bound.
 
@@ -562,7 +537,7 @@ of the plan approval**: the plan passed `review-plan` and turned out not to cove
 1. The step appends `{gate: 'plan-approval', leg: <its leg>, cycle, at, reason, outcome: 'looped-back'}`
    and returns `plan-insufficient`. A return without that entry halts.
 2. The run goes back to `design` through the same bound as a `review-plan` loop-back
-   (`pipeline_loop_back()` in `auto` and `interactive`, `tables.bound` in `autoflow`): the entry
+   (`pipeline_loop_back()` in `interactive`, `tables.bound` in `autoflow`): the entry
    counts toward the 2 cycles, and the third halts — before
    `handoff` with no push, after it with the PR left draft (§Failure policy).
 3. `design` extends the plan, and the spec where it must say more, to cover the entry's `reason`;
@@ -577,7 +552,7 @@ escalation returns `looped-back`: its open entry is completed and no bound is ch
 `implement` then finds the plan short, it reports the gap itself. **A review step that returns
 `plan-insufficient` appends no review entry**, so an escalation found after the review was written
 cannot leave a stale open review behind. In `autoflow` a resolve step's schema has no
-`plan-insufficient`; in `auto` and `interactive` `pipeline_returned()` halts on either.
+`plan-insufficient`; in `interactive` `pipeline_returned()` halts on either.
 
 ## The proof store — where the visual record actually lives
 
@@ -630,7 +605,7 @@ compatible with the non-goal "no persistent state not reconstructable from git +
 `write` runs at least twice per run — `verify-ui` builds the page, `review-pr` finalises it — so
 opening from `write` would open the same page two or more times; a separate subcommand invoked once,
 at completion, is the only shape that opens once. A run that **halts** after the page exists opens it
-on the same rule: the dispatcher runs `proof_cli.php open <artifacts.proof>` when that pointer is set (in `autoflow`, the invoking session after `finish`), because a halted run is exactly the one a human is about to go looking at: one
+on the same rule: the session that holds the run (in `autoflow`, the invoking session after `finish`) runs `proof_cli.php open <artifacts.proof>` when that pointer is set, because a halted run is exactly the one a human is about to go looking at: one
 `open`, at whatever turns out to be the run's last action.
 
 **A run with no page opens nothing.** A backend-only run never triggers `ui`, so `verify-ui` never
@@ -746,8 +721,8 @@ reconciliation ran there and produced an answer, so it is reported like any othe
 ## What a leg brief consists of
 
 Every brief is generated by `pipeline_brief($manifest, $leg, $manifestPath, $step)`
-(`../checks/brief.php`); nobody writes one by hand — not the dispatcher, not the invoking session, not
-a leg, not a coordinator. In `auto` and `interactive` `next` writes it to `<manifest stem>.brief.md`
+(`../checks/brief.php`); nobody writes one by hand — not the invoking session, not a leg, not a
+coordinator. In `interactive` `next` writes it to `<manifest stem>.brief.md`
 and the dispatch prompt is one line naming that file; in `autoflow` the step prints its own with
 `dispatch_cli.php brief`. A brief consists of:
 
@@ -766,8 +741,7 @@ review step applies `/critique`'s procedure itself — Stage 0, Stage 1 and the 
 cannot start the reviewer, so `--verify` and `alternatives` are unavailable; `review-plan`'s resolve
 step has no independent read; `implement` executes the plan inline, with no subagents; the finish step
 leaves the PR draft; every step works from `cd <worktree>` and is told the owner authorised the run;
-and `## Return` asks for a structured `{status, reason}` instead of a line. `auto` and `interactive`
-briefs are identical.
+and `## Return` asks for a structured `{status, reason}` instead of a line.
 
 **A review step's brief is crafted context** (`../../critique/SKILL.md` §Reviewer contract): pointers,
 decisions and overrides — never an earlier review, an earlier action, or another step's output.
@@ -880,17 +854,17 @@ php -r 'require $argv[1] . "/suite.php";
 - **Failure to compute the key** (`pipeline_git` throws) is a machinery failure. Run the suite; never
   assume reuse.
 
-## `auto` — a fresh agent resolves the review
+## Resolving a review — the resolve step acts on it
 
-`interactive` gives every resolve step to the human (§Interactive). Everything below is the resolve
-step of `auto` and `autoflow`, which differ only where this section says so.
+In `autoflow` a fresh resolve agent acts on each review; in `interactive` the session does, with the
+human deciding (§Interactive). Both keep the edit/rework boundary below; the rest is `autoflow`'s.
 
 **A review is prose, not a verdict.** `/critique` returns the review it wrote — no severity ranking,
 no verdict enum, no structured block (`../../critique/SKILL.md`). The review step stores it verbatim in
 the open ledger entry; the resolve step reads it the way a person would and acts on its own judgment.
 The risk position behind that: the pipeline never merges, so every output is a PR read before merge
-and the worst case is a discarded branch, while a needless interrupt costs the one thing `auto` exists
-to protect.
+and the worst case is a discarded branch, while a needless interrupt costs the one thing `autoflow`
+exists to protect.
 
 **What the resolve step does with a review** — and its brief says so:
 
@@ -907,12 +881,7 @@ to protect.
 - **Log** the actions and the outcome on the open entry (`manifest.md`), projected onto the PR.
   *Overruling a reviewer is fine; overruling one invisibly is what turns a gate into decoration.*
 
-**Why a fresh agent, not the dispatcher.** The rule this replaces kept review fixes inside the
-engine because a fresh agent must first re-read what the engine held (spec 2026-09-14 §5, n=2). The
-2026-09-22 audit measured the other side: in-engine review-fix phases cost a median 0.92M weighted
-tokens at 250k+ context, against about 0.4–0.5M for a fresh agent doing the same work.
-
-**Outside `autoflow` an independent read is available, and is not a routing rule.** At `review-plan` the
+**In `interactive` an independent read is available, and is not a routing rule.** At `review-plan` the
 resolve step is judging a critique of a plan another agent wrote, with the author's framing in the
 spec. So where
 acting on a point is expensive and the resolve step doubts it, it dispatches a **fresh agent that never
@@ -923,11 +892,12 @@ a workflow agent cannot start one, and its step prompt says so.
 
 ## Failure policy — what still stops
 
-Under `auto` and `autoflow` these are the only stops. **No finding stops a run.**
+Under `autoflow` these are the only stops. **No finding stops a run.**
 
 - **Hard failure** — a station errors: tests won't go green, a tool dies, the stack won't start,
-  `work-on` hits a blocker, or a review step returns nothing after a single retry (`dispatch_cli.php`
-  answers `retry` once, then `halt`). → **halt.** `returned` writes the failure to the manifest
+  `work-on` hits a blocker, or a review step returns nothing after a single retry (in `interactive`
+  `returned` answers `retry` once, then `halt`). → **halt.** `finish` (`returned` in `interactive`)
+  writes the failure to the manifest
   (`cursor.status: halted`, `cursor.reason`); a human resumes. **No silent retry** beyond that one — a retry hides
   the failure and the machinery may be in an unknown state.
   - **A halted manifest is the one the check rejected.** When the reason names a key the leg was not
@@ -963,8 +933,8 @@ Under `auto` and `autoflow` these are the only stops. **No finding stops a run.*
     `gh pr edit <pr> --body-file "$TMPDIR/body.md"`), stop. In `autoflow` the invoking session does
     this after `finish`, and opens the proof page once when `artifacts.proof` is set (§The proof store).
   - The entry is not marked halted: the resolve step records `outcome: looped-back` as it returns,
-    and the dispatcher halts through the cursor (`cursor.status: halted`, `cursor.reason`) — in
-    `autoflow`, `finish` does.
+    and `finish` halts the run through the cursor (`cursor.status: halted`, `cursor.reason`) —
+    `returned` in `interactive`.
   - `pipeline_returned()` does the counting: count the cycles as the number of that gate's `gate_ledger` entries whose `outcome` is
     **`looped-back`** (`manifest.md`) — not its entries in total, which also include human-ordered
     re-reviews and would over-count into a spurious stop — and never from an in-memory counter. In
@@ -982,9 +952,9 @@ Under `auto` and `autoflow` these are the only stops. **No finding stops a run.*
 - **Mechanical-check exhaustion** (§Mechanical checks) — a check failure that survives its 2 fix
   attempts, or more than two `@phpstan-ignore` suppressions in one run → **the same
   bound-exhaustion halt.**
-- **A return the dispatcher cannot account for** — a moved cursor, a key only the dispatcher writes,
-  a rewritten ledger entry, a status the ledger does not support (`manifest.md` §What a leg writes) →
-  **halt**, with `returned`'s reason; in `autoflow`, with the next `brief`'s or `finish`'s, which also
+- **A return the checks cannot account for** — a moved cursor, a key only the engine writes, a
+  rewritten ledger entry, a status the ledger does not support (`manifest.md` §What a leg writes) →
+  **halt**, with the next `brief`'s or `finish`'s reason (`returned`'s in `interactive`), which also
   halt on a status, `ui` or `size` the step returned to the script that its manifest, diff or spec
   does not bear out.
 - **An `autoflow` step the run cannot accept** — a status the step may not return fails the step's
@@ -994,7 +964,7 @@ Under `auto` and `autoflow` these are the only stops. **No finding stops a run.*
   `{"action":"halt","reason":…}` records it; the cursor names the step that was running.
 - **Playwright genuinely unavailable** → **halt.** No visual claim without proof.
 
-In `interactive` mode every gate stops anyway, so the human sees the review and none of the `auto`
+In `interactive` mode every gate stops anyway, so the human sees the review and none of `autoflow`'s
 resolution runs.
 
 The scary content facts — a migration, an authorization change, a shared package — **do not stop

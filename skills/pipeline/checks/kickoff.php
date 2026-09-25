@@ -2,8 +2,8 @@
 
 /**
  * `dispatch_cli.php kickoff` (`../references/engine.md` §Kickoff): §The work item and §Kickoff in one
- * call for the unattended modes. Every value comes from the repo's config, gh or git; a value kickoff
- * would have to compute is a halt.
+ * call for the unattended mode, `autoflow`. Every value comes from the repo's config, gh or git; a
+ * value kickoff would have to compute is a halt.
  */
 
 require_once __DIR__ . '/board.php';
