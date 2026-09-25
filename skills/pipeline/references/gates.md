@@ -131,7 +131,8 @@ CHECKS="$HOME/.claude/skills/pipeline/checks"
 git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
 php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>]
 # → {"action":"start",…} | {"action":"done"} | {"action":"halt","reason":…}
-php "$CHECKS/dispatch_cli.php" brief <manifest> <leg> <step>      # each step's first command
+php "$CHECKS/dispatch_cli.php" brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui …] [--size …]]
+#   each step's first command; the flags name the step before it, on every step but the run's first
 # → the brief, or {"action":"halt","reason":…}
 php "$CHECKS/dispatch_cli.php" size <manifest>                   # design's last command → Bounded | Architectural
 php "$CHECKS/dispatch_cli.php" ui "<manifest stem>.diff"         # implement's last command → true | false

@@ -296,9 +296,14 @@ These are the questions brainstorming would have asked, with the answer assumed.
 8. *Malformed flags?* A usage error (exit 1), the same as a `kickoff` that `dispatch_cli.php` cannot
    parse. The script builds the flags and `AutoflowScriptTest` pins them. Values are not parsed: `--ui`
    is compared as the string `true` or `false`, which is what the `ui` command prints.
-9. *Runs launched before the merge?* The script and `checks` both come from the primary checkout.
-   An in-flight run whose script predates this change passes no flags, so its `brief`s check nothing,
-   which is today's behaviour. There is no newer script paired with older checks.
+9. *Runs launched before the merge?* The script and `checks` both come from the primary checkout, so
+   a run in flight when `main` takes this merge gets the new `brief` under it, and halts once. If the
+   Workflow runtime holds the script it loaded at start, which passes no flags, the next `brief` writes
+   the run's first snapshot and the one after halts with "a snapshot of the `<X>` step exists, but the
+   script names no step before `<Y>`". If the runtime re-reads the script, the next `brief` carries
+   `--after X` over no snapshot and halts "cannot check the `X` step's return: no snapshot at …".
+   Either way the cursor names `X`, a step that had completed, and `launch` resumes the run by
+   re-running it; nothing is lost but that step. There is no newer script paired with older checks.
 10. *How is the smoke pass shown?* By the replay smoke pass in the suite, and by a Workflow run when the
     tool is there (*The Workflow smoke pass*).
 11. *`pipeline_ledger()`: where, and which reads?* In `manifest.php`, next to the other manifest

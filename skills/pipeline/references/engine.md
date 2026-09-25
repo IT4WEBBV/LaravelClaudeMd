@@ -149,8 +149,8 @@ launched the run, with its reason.
   its results into the manifest (`manifest.md` §What a leg writes) and returns `{status, reason}`;
   `implement` also returns `ui`, copied from `dispatch_cli.php ui <diff>` (`pipeline_triggers()` over
   its diff), and `design` returns `size`, copied from `dispatch_cli.php size <manifest>`
-  (`DesignSize::fromSpec()` over the spec it committed). Both are required on every return of their step and ignored on a halt;
-  the script takes `ui` only from `implement` and `size` only from `design`.
+  (`DesignSize::fromSpec()` over the spec it committed). Both are required on every return of their
+  step and ignored on a halt; the script takes `ui` only from `implement` and `size` only from `design`.
 - **`finish`** records the return: `done` sets `cursor.status: done`, but only with the cursor on
   `review-pr` — anywhere else it records the halt "the workflow returned done at <leg>" — and only when
   the last snapshot is `review-pr`'s resolve step's and that step's return holds (§The check at the next
