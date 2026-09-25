@@ -17,7 +17,8 @@
 
 **Verified before writing (2026-09-25):**
 - All of this plan's code and docs were assembled into a scratch copy of this branch (at `883e557`), and the whole pipeline suite passes there: 298 tests, against 261 on main. The count is 261, minus 1 (the `done` row of the `finish` dataset, which becomes its own test in Task 4), plus 38 new: 21 in `DispatchCliTest`, 13 in `ReturnedTest`, 1 in `ManifestTest` and 3 in `AutoflowScriptTest`. The critique suite passes too: 14 tests.
-- The new tests run against today's code: 36 fail and 2 pass. The two that pass are the replay smoke pass's clean walk and "checks nothing on the first step of a run". Both pin behaviour that must not change: a legitimate run is not halted, and the first step of a run is not checked.
+- The plan review's resolve step (cycle 1) then added the flag-drop guard to Task 3 (`launch` removes the snapshot; a flagless `brief` over another step's snapshot halts), one more `DispatchCliTest` row (the retry without flags), and the implement prompt's wording to Task 5. The counts below include them: 299 tests, 39 new, 22 of them in `DispatchCliTest`. Those additions were not re-run in the scratch copy.
+- The new tests run against today's code: 37 fail and 2 pass. The two that pass are the replay smoke pass's clean walk and "launch removes an earlier run's snapshot, so the first brief of a run checks nothing". Both pin behaviour that must not change: a legitimate run is not halted, and the first step of a run is not checked.
 - **`vendor/` must be a real directory, not a symlink to the primary checkout's.** Pest takes the project root from the real path of `vendor/`. With a symlinked `vendor/`, the in-process tests load the primary checkout's `tests/Pest.php` and its `checks/*.php`, so they test `main`'s code. The tests that spawn `dispatch_cli.php` still run this branch's code, so the mix fails in confusing ways. This worktree has a real copy at the time of writing. If yours does not: `rm vendor; cp -R <primary checkout>/vendor vendor` (it is gitignored).
 
 ## Global Constraints
@@ -30,6 +31,7 @@
   - `cannot check the <after> step's return: no snapshot at <before path>`
   - `the <next> step returned nothing and changed the manifest`
   - `the snapshot is of the <snapshot> step, but the script says <after> returned: it did not run brief`
+  - `a snapshot of the <snapshot> step exists, but the script names no step before <next>`
   - `the <leg> <step> step returned without writing the manifest`
   - `the <leg> <step> step returned <reported> to the script but wrote <status> into the manifest`
   - `the implement step returned ui: <reported>, but its diff says <true|false>`
@@ -37,7 +39,7 @@
   - `the implement step did not write <stem>.diff`
   - `the workflow returned done, but the last snapshot is of the <snapshot> step`
   - `the workflow returned done, but there is no snapshot at <before path>`
-- `launch` does not change. `next` and `returned` do not change.
+- `launch` changes in one way: when it answers `start`, it removes `dispatch_cli_files($manifestPath)['before']`. A `launch` that halts or answers `done` leaves it. `next` and `returned` do not change.
 - `pipeline_ledger()` returns `$manifest['gate_ledger'] ?? []`. After Task 1, `grep -rn "gate_ledger'\] ??" skills/pipeline/checks` finds only its body.
 - Suites (from the worktree root, on the host):
   - `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`
@@ -49,7 +51,8 @@ These are inputs the spec implies but no *Done when* item names, each with the t
 
 - **A legitimate return that is not `continued`** must pass the check. Examples: an Architectural plan gap from `implement`, a Bounded escalation from a review step, a `review-pr` loop-back, a `verify-ui` loop-back. A false halt here would stop every run that loops. Pinned by Task 2's "passes the returns that route elsewhere".
 - **The script's Opus retry of a review step** runs `brief` twice for the same step with the same flags. The second `brief` must brief, not halt. Pinned by Task 3's retry test, and by Task 5's clean walk, where `review-pr:review` returns `null` once.
-- **A relaunch after a halt.** The first `brief` sees an old snapshot and a `halted` cursor, and must not check them. Pinned by Task 3's "checks nothing on the first step of a run".
+- **A relaunch after a halt.** The first `brief` sees a `halted` cursor, and must not check it. `launch` has removed the old snapshot, which would otherwise read as that step's own and halt the retry rule. Pinned by Task 3's "launch removes an earlier run's snapshot".
+- **A step agent that drops the flags** from the brief command it copies must not skip the check silently. Pinned by the flagless row of Task 3's "halts a brief told of a step that left no snapshot, not its own, or none", while the flagless retry of a run's first step still briefs (Task 3's retry dataset).
 - **A stale `<stem>.diff`**, written by the invoking session before `launch`, must not stand in for the implement step's own. Pinned by Task 3's "a diff older than the step" row.
 - **A halt that lands on the wrong leg** would let a resume walk past the failure. Pinned by Task 4's "keeps the leg of a halt the manifest already records", and end to end by Task 5's replay smoke pass, which runs `finish` on the script's halt.
 
@@ -57,9 +60,9 @@ These are inputs the spec implies but no *Done when* item names, each with the t
 
 - Modify `skills/pipeline/checks/manifest.php`: `pipeline_ledger()`.
 - Modify `skills/pipeline/checks/dispatch.php`: `pipeline_reported_problem()`, and the ledger reads.
-- Modify `skills/pipeline/checks/dispatch_cli.php`: `brief`'s flags and boundary check, `finish`'s check and halt rule, `dispatch_cli_files()['diff']`, the usage docblock and line, and the ledger reads.
+- Modify `skills/pipeline/checks/dispatch_cli.php`: `brief`'s flags and boundary check, `launch`'s removal of the snapshot, `finish`'s check and halt rule, `dispatch_cli_files()['diff']`, the usage docblock and line, and the ledger reads.
 - Modify `skills/pipeline/checks/brief.php` and `skills/pipeline/checks/run_audit.php`: the ledger reads; `run_audit.php`'s docblock.
-- Modify `skills/pipeline/workflow/pipeline-autoflow.js`: `last` and `briefCommand()`.
+- Modify `skills/pipeline/workflow/pipeline-autoflow.js`: `last`, `briefCommand()`, and the implement prompt's step 4.
 - Modify `skills/pipeline/checks/tests/autoflow_replay.mjs`: `prompts`, `null` returns, and `steps` mode.
 - Tests: `ManifestTest.php`, `ReturnedTest.php`, `DispatchCliTest.php`, `AutoflowScriptTest.php`.
 - Docs: `skills/pipeline/references/engine.md`, `skills/pipeline/references/manifest.md`, `skills/orchestrate/references/commands.md`.
@@ -233,7 +236,7 @@ git commit -m "feat(pipeline): pipeline_reported_problem() checks a step's retur
 ### Task 3: `brief` checks the step before it
 
 **Files:**
-- Modify: `skills/pipeline/checks/dispatch_cli.php` (`dispatch_cli_files()`, `dispatch_cli_brief()` and three new functions after it, the argument parser before `$flag = array_search(...)`, the `'brief'` arm, the usage docblock and line)
+- Modify: `skills/pipeline/checks/dispatch_cli.php` (`dispatch_cli_files()`, `dispatch_cli_launch()`, `dispatch_cli_brief()` and three new functions after it, the argument parser before `$flag = array_search(...)`, the `'brief'` arm, the usage docblock and line)
 - Test: `skills/pipeline/checks/tests/DispatchCliTest.php`
 
 **Interfaces:**
@@ -339,14 +342,16 @@ it('halts the next brief when the script was told another status or size than th
     'no size' => [['--status', 'continued'], 'the design step returned size nothing, but the spec says Architectural'],
 ]);
 
-it('checks nothing on the first step of a run, even over an earlier run\'s snapshot', function () {
+it('launch removes an earlier run\'s snapshot, so the first brief of a run checks nothing', function () {
     $fixture = boundary_fixture('handoff', 'run');
     dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => ['leg' => 'handoff', 'status' => 'halted', 'reason' => 'an earlier run']]);
 
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json']['action'])->toBe('start');
+    expect(is_file($fixture['before']))->toBeFalse();
     expect(dispatch_cli(['brief', $fixture['manifest'], 'handoff', 'run'])['stdout'])->toContain('`handoff` leg, `run` step');
 });
 
-it('halts a brief told of a step that left no snapshot, or not its own', function () {
+it('halts a brief told of a step that left no snapshot, not its own, or none', function () {
     $bare = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'handoff', 'status' => 'continued']]);
     expect(boundary_brief($bare, 'implement', 'run', 'handoff:run', ['--status', 'continued'])['json'])
         ->toBe(['action' => 'halt', 'reason' => "cannot check the handoff run step's return: no snapshot at {$bare['before']}"]);
@@ -356,18 +361,27 @@ it('halts a brief told of a step that left no snapshot, or not its own', functio
     dispatch_leg_writes($other['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued']]);
     expect(boundary_brief($other, 'implement', 'run', 'handoff:run', ['--status', 'continued'])['json'])
         ->toBe(['action' => 'halt', 'reason' => 'the snapshot is of the design run step, but the script says handoff run returned: it did not run brief']);
+
+    $dropped = boundary_fixture('handoff', 'run');
+    dispatch_leg_writes($dropped['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued'], 'artifacts' => [...$m['artifacts'], 'pr' => 7]]);
+    expect(dispatch_cli(['brief', $dropped['manifest'], 'implement', 'run'])['json'])
+        ->toBe(['action' => 'halt', 'reason' => 'a snapshot of the handoff run step exists, but the script names no step before implement run']);
+    expect(manifest_read($dropped['manifest'])['cursor'])->toMatchArray(['leg' => 'handoff', 'status' => 'halted']);
 });
 
-it('briefs a review step again after an attempt that returned nothing, unless that attempt wrote', function () {
+it('briefs a review step again after an attempt that returned nothing, unless that attempt wrote', function (array $flags) {
     $fixture = boundary_fixture('review-pr', 'review', ['cursor' => ['leg' => 'review-pr', 'status' => 'pending']]);
-    $again = fn () => boundary_brief($fixture, 'review-pr', 'review', 'implement:run', ['--status', 'continued', '--ui', 'false']);
+    $again = fn () => dispatch_cli(['brief', $fixture['manifest'], 'review-pr', 'review', ...$flags]);
 
     expect($again()['stdout'])->toContain('`review-pr` leg, `review` step');
 
     dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'last_sha' => 'ccc3333']);
     expect($again()['json'])->toBe(['action' => 'halt', 'reason' => 'the review-pr review step returned nothing and changed the manifest']);
     expect(manifest_read($fixture['manifest'])['cursor'])->toMatchArray(['leg' => 'review-pr', 'status' => 'halted']);
-});
+})->with([
+    'after the step before it' => [['--after', 'implement:run', '--status', 'continued', '--ui', 'false']],
+    'as the run\'s first step, without flags' => [[]],
+]);
 
 it('refuses a brief it cannot parse', function (array $arguments) {
     $fixture = dispatch_fixture(['mode' => 'autoflow']);
@@ -387,7 +401,7 @@ it('refuses a brief it cannot parse', function (array $arguments) {
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter=DispatchCliTest`
-Expected: the new tests fail except "checks nothing on the first step of a run". Today `brief` takes no snapshot and ignores the flags: `boundary_fixture()` passes, but no halt comes, and the clean return's snapshot assertion fails. The usage cases exit 0.
+Expected: the new tests fail except "launch removes an earlier run's snapshot". Today `brief` takes no snapshot and ignores the flags: `boundary_fixture()` passes, but no halt comes, and the clean return's snapshot assertion fails. The usage cases exit 0.
 
 - [ ] **Step 3: Implement**
 
@@ -440,28 +454,27 @@ function dispatch_cli_brief(string $manifestPath, string $leg, string $step, arr
 
 /**
  * What stops `$next` from being briefed after the step `--after` names: null when nothing does, or
- * when no step ran before it in this run.
+ * when no step ran before it in this run (no `--after`, and `launch` left no snapshot). A brief
+ * without `--after` over another step's snapshot halts: the step agent dropped the script's flags.
  *
  * @return array{leg: string, reason: string}|null
  */
 function dispatch_cli_boundary_problem(string $manifestPath, array $manifest, string $next, array $reported): ?array
 {
     $after = $reported['after'] ?? null;
-    if ($after === null) {
-        return null;
-    }
     $files = dispatch_cli_files($manifestPath);
     $before = manifest_read($files['before']);
     $snapshot = dispatch_cli_snapshot_step($before);
-    $afterLeg = explode(':', $after)[0];
     $label = fn (string $pair) => str_replace(':', ' ', $pair);
 
     return match (true) {
-        $snapshot === null => ['leg' => $afterLeg, 'reason' => "cannot check the {$label($after)} step's return: no snapshot at {$files['before']}"],
+        $snapshot === null && $after === null => null,
+        $snapshot === null => ['leg' => explode(':', $after)[0], 'reason' => "cannot check the {$label($after)} step's return: no snapshot at {$files['before']}"],
         $snapshot === $next => pipeline_normalized($before) === pipeline_normalized($manifest)
             ? null
             : ['leg' => $before['cursor']['leg'], 'reason' => "the {$label($next)} step returned nothing and changed the manifest"],
-        $snapshot !== $after => ['leg' => $afterLeg, 'reason' => "the snapshot is of the {$label($snapshot)} step, but the script says {$label($after)} returned: it did not run brief"],
+        $after === null => ['leg' => $before['cursor']['leg'], 'reason' => "a snapshot of the {$label($snapshot)} step exists, but the script names no step before {$label($next)}"],
+        $snapshot !== $after => ['leg' => explode(':', $after)[0], 'reason' => "the snapshot is of the {$label($snapshot)} step, but the script says {$label($after)} returned: it did not run brief"],
         default => dispatch_cli_return_problem($manifestPath, $before, $manifest, $reported),
     };
 }
@@ -490,6 +503,16 @@ function dispatch_cli_return_problem(string $manifestPath, array $before, array 
 
     return $reason === null ? null : ['leg' => $leg, 'reason' => $reason];
 }
+```
+
+In `dispatch_cli_launch()`, directly before its `return [` with `'action' => 'start'`, remove an earlier run's snapshot, so a snapshot on disk is always this run's (a `launch` that halts or answers `done` returns before this line and leaves it for §Failure policy's repair):
+
+```php
+    $snapshot = dispatch_cli_files($manifestPath)['before'];
+    if (is_file($snapshot)) {
+        unlink($snapshot);
+    }
+
 ```
 
 Directly before `$flag = array_search('--from', $argv, true);`:
@@ -553,7 +576,7 @@ Then the usage text:
 
 - [ ] **Step 4: Run the pipeline suite**
 
-Expected: 293 passed. Task 2 left 275; this task adds 18.
+Expected: 294 passed. Task 2 left 275; this task adds 19.
 
 - [ ] **Step 5: Commit**
 
@@ -677,7 +700,7 @@ function dispatch_cli_finish_problem(string $manifestPath, array $manifest): ?st
 
 - [ ] **Step 4: Run the pipeline suite**
 
-Expected: 295 passed (293, minus the removed `done` row, plus 3).
+Expected: 296 passed (294, minus the removed `done` row, plus 3).
 
 - [ ] **Step 5: Commit**
 
@@ -853,7 +876,7 @@ it('walks stub steps that write what their briefs ask to done, through a retried
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter=AutoflowScriptTest`
-Expected: two FAIL. The prompts carry no flags, so the leave-open run walks on into `handoff:run` and further. The clean walk passes before the script change too, because `brief` checks nothing without flags. It pins that a legitimate run is not halted once the flags are there.
+Expected: three FAIL. The prompts carry no flags. So the brief-command test sees bare commands, and from the second step on each flagless `brief` finds the step before it's snapshot and halts (Task 3's flag-drop guard): the leave-open run halts at `review-plan:resolve`'s brief instead of `handoff`'s, and the clean walk halts at `review-plan:review`'s. Once the flags are there, the clean walk pins that a legitimate run is not halted.
 
 - [ ] **Step 3: Implement** (in `pipeline-autoflow.js`)
 
@@ -876,9 +899,11 @@ After `let from = args.startStep` add `let last`. In the step loop, directly aft
 
 `last` is read only inside `briefCommand()`, which runs only after the guards, so its `let` below the function declarations is fine. `reason` stays out of the flags.
 
+In `stepPrompt()`'s `implement` line, `4. After the last commit, run` becomes `4. Before returning (after the last commit, when there is one), run`. The next `brief` halts on a `<stem>.diff` older than the implement snapshot, and it checks every implement return, so a `plan-insufficient` found before the first commit must write the diff too. Nothing pins the prompt's wording, so the suite does not change for it.
+
 - [ ] **Step 4: Run the pipeline suite**
 
-Expected: 298 passed.
+Expected: 299 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -945,7 +970,10 @@ then compares what the script was told with what the manifest and the tree say �
 `cursor: {leg: <the step that failed>, status: halted, reason}`, so a resume re-runs that step. Without
 `--after` (the run's first step) nothing is checked. A snapshot of the very step being briefed is the
 script's Opus retry of a review step that returned nothing: an unchanged manifest is briefed again, a
-changed one halts. `finish` runs the same check for `review-pr`'s resolve step before it records `done`.
+changed one halts. `launch` removes an earlier run's snapshot when it answers `start`, so a `brief`
+without `--after` that finds a snapshot of another step halts: the step agent dropped the flags it was
+given, and the check cannot be skipped by leaving them out. `finish` runs the same check for
+`review-pr`'s resolve step before it records `done`.
 What a step claims about work outside the manifest is caught by the next gate (`review-plan` reads the
 spec and plan, `review-pr` the code). After every run the invoking session reports two facts with the
 result:
@@ -1001,7 +1029,7 @@ left a return that does not hold (an open `pr-review` entry, a key only the engi
 and prints a halt instead.
 ```
 
-This replaces the two lines that end *"…it records and prints a halt instead."*.
+Splice, do not replace whole lines: line 136 of `commands.md` carries the end of the old sentence (*"…it records and prints a halt instead."*) and, on the same line, the start of the next one (*"A denied `gh pr ready` writes no halt: …"*). Replace only the text from *"The transcript dir is"* through *"a halt instead."*, keep *"A denied `gh pr ready` …"* and what follows, and rewrap that paragraph to the file's width.
 
 - [ ] **Step 5: `run_audit.php`'s docblock**
 
@@ -1030,7 +1058,7 @@ If the session does not have the tool (an `autoflow` implement step cannot start
 - [ ] **Step 8: Both suites**
 
 Run both suites from *Global Constraints*.
-Expected: pipeline 298 passed, critique 14 passed.
+Expected: pipeline 299 passed, critique 14 passed.
 
 - [ ] **Step 9: Commit**
 

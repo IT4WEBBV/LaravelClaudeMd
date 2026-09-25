@@ -57,17 +57,23 @@ appends the flags from it. Stub prompts use the same `briefCommand()`, so a smok
 `brief` still validates the manifest and the mode first, and touches nothing when either fails. Then,
 before the step check (`pipeline_step_problem()`):
 
-1. **No `--after`**: this is the run's first step. Nothing is checked, even when a snapshot from an
-   earlier run is on disk.
+1. **No `--after` and no `<stem>.before.json`**: this is the run's first step. Nothing is checked.
+   `launch` removes the snapshot an earlier run left (below), so a run's first `brief` finds none.
 2. **`--after` and no `<stem>.before.json`**: halt with *"cannot check the `<after>` step's return: no
    snapshot at `<path>`"*.
 3. **The snapshot is the requested step's own**: the step the snapshot was taken for is `<leg>:<step>`
-   itself. This is the script's retry of a review step that returned nothing:
+   itself, with or without `--after`. This is the script's retry of a review step that returned
+   nothing, the run's first step included:
    - the manifest is unchanged since the snapshot: brief the step again, with no check;
    - it changed: halt with *"the `<leg>` `<step>` step returned nothing and changed the manifest"*.
-4. **The snapshot is not `--after`'s**: halt with *"the snapshot is of the `<snap>` step, but the script
+4. **No `--after`, and a snapshot of another step**: halt with *"a snapshot of the `<snap>` step
+   exists, but the script names no step before `<leg> <step>`"*. The script names the step before on
+   every step but the run's first, so a brief without `--after` over another step's snapshot is a step
+   agent that dropped the flags from the command it copied. Without this halt the worker would decide
+   whether the checker runs, and a skipped check would leave no trace.
+5. **The snapshot is not `--after`'s**: halt with *"the snapshot is of the `<snap>` step, but the script
    says `<after>` returned: it did not run brief"*.
-5. **Otherwise**, the check below. A problem halts.
+6. **Otherwise**, the check below. A problem halts.
 
 The step a snapshot was taken for is read from the snapshot itself, as `returned` reads it: the leg is
 its `cursor.leg`, the step is `pipeline_step()` over its ledger. `brief`'s own step check guarantees that
@@ -76,7 +82,14 @@ stays the plain manifest that `next` writes too, and §Failure policy's *repair 
 `<stem>.before.json`* reads the same in every mode.
 
 A `brief` that passes writes `cursor: {leg, status: pending}` as today, then the snapshot of that
-manifest, then prints the brief. `launch` does not change.
+manifest, then prints the brief.
+
+`launch` changes in one way: when it answers `start`, it removes `<stem>.before.json` (only
+`dispatch_cli.php` reads it), so a snapshot on disk is always the current run's. §Failure policy's
+repair from the snapshot happens before the next `launch`, so nothing it needs is lost, and a `launch`
+that halts or answers `done` leaves the snapshot alone. Without the removal, a relaunch after a halt
+would halt at once: its first `brief` is for the step that failed, whose own snapshot is still there,
+over a manifest that now says `halted` (case 3).
 
 ### The check
 
@@ -101,10 +114,16 @@ Messages name a step as *"the `<leg>` `<step>` step"*, as `returned`'s do:
    `<reported>`, but the spec says `<size>`"*.
 
 `$size` is `dispatch_cli_design_size($after)`, as `returned` reads it. `$diffUi` is
-`pipeline_triggers()['ui']` over `<stem>.diff`, which the implement prompt already writes after its last
-commit. The file has to be the step's own: `brief` halts with *"the implement step did not write
+`pipeline_triggers()['ui']` over `<stem>.diff`, which the implement prompt already has the step write.
+The file has to be the step's own: `brief` halts with *"the implement step did not write
 `<stem>.diff`"* when it is missing or older than the snapshot, because the invoking session writes
 the same file before `launch`, and a stale copy would make the check compare the wrong diff.
+
+So the step must write the diff on every return it makes, not only after a commit. The script takes
+`ui` from `implement` on every status, so the check runs after a `plan-insufficient` too, and an
+implement step that finds an Architectural plan gap before its first commit would otherwise halt the
+next `brief` falsely. The implement prompt's step 4 says *"After the last commit, run …"* today; it
+becomes *"Before returning (after the last commit, when there is one), run …"*.
 
 ### Where a halt lands
 
@@ -162,9 +181,11 @@ behaviour does not change. The new code reads the ledger through it too.
   - `brief` after a clean return → the brief as today, with the cursor and the snapshot now on the new
     step;
   - `--status` disagreeing with the manifest, and `--size` disagreeing with the spec → halt;
-  - no `--after` → no check, even over a stale snapshot; `--after` with no snapshot → halt; `--after`
-    naming a step the snapshot is not of → halt;
-  - the retry: the same step with an unchanged manifest → the brief; with a changed one → halt;
+  - `launch` removes an earlier run's snapshot, and the flagless `brief` after it checks nothing, over
+    a `halted` cursor too; `--after` with no snapshot → halt; `--after` naming a step the snapshot is
+    not of → halt; no `--after` over a snapshot of another step → halt;
+  - the retry, with the flags and as the run's first step without them: the same step with an
+    unchanged manifest → the brief; with a changed one → halt;
   - `finish` `done` with an open `pr-review` entry → halt, not `done`; `finish` `done` over a snapshot
     that is not `review-pr:resolve`'s → halt; the existing `done` case gains a clean resolve;
   - `finish` with a halt return keeps a `halted` cursor's leg.
@@ -206,7 +227,8 @@ scenario, so the owner can run it before merging.
   - the step-agent line of the diagram and the *A step* bullet: the flags, and what `brief` checks;
   - the *`finish`* bullet: the check before `done`, and the rule that a `halted` cursor keeps its leg;
   - *No check on what a step reports* is rewritten as *The check at the next boundary*: what is checked,
-    by which command, and that `run_audit.php` stays as the after-run report. Its last sentence, which
+    by which command, that `launch` removes an earlier run's snapshot so a flagless `brief` over another
+    step's snapshot can halt, and that `run_audit.php` stays as the after-run report. Its last sentence, which
     says a `MISMATCH` is the trigger for adding a check, becomes a statement that a `MISMATCH` now
     means a check has a hole.
 - `references/engine.md` §Failure policy: *A return the dispatcher cannot account for* names `brief`
@@ -215,6 +237,8 @@ scenario, so the owner can run it before merging.
 - `references/manifest.md` §What a leg writes: *In `autoflow` nothing compares* is replaced by the
   boundary check.
 - `dispatch_cli.php`'s usage docblock and its usage line: `brief`'s flags.
+- `pipeline-autoflow.js`'s implement prompt, step 4: *"Before returning (after the last commit, when
+  there is one), run …"* instead of *"After the last commit, run …"* (§The check).
 - `skills/orchestrate/references/commands.md` §Finish: `finish` refuses a `done` whose last step's
   return does not hold, as well as one whose cursor is not on `review-pr`.
 - `run_audit.php`'s docblock: it reports after the run; the check at each boundary is `brief`'s.
@@ -248,7 +272,10 @@ These are the questions brainstorming would have asked, with the answer assumed.
    reason in *Alternatives considered*.
 2. *How does `brief` know which step just ended, and whether one did?* The script tells it:
    `--after <leg>:<step>` plus the reported values. No `--after` means the first step of the run, which
-   is checked by nothing, so `launch` does not need to clear an old snapshot.
+   is checked by nothing. The step agent copies that command, so it could drop the flags and skip the
+   check without a trace. So `launch` removes an earlier run's snapshot, and a `brief` without
+   `--after` halts over a snapshot of another step. The only snapshot a flagless `brief` can then find
+   is its own step's: the Opus retry of a run's first step.
 3. *Should the status be cross-checked, beyond `ui` and `size`?* Yes. Otherwise a resolve step that
    records `looped-back` and returns `continued` passes the ledger check while the script walks on,
    which is the kind of gap this issue closes.
