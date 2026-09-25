@@ -3,18 +3,24 @@
 /**
  * What one `/pipeline autoflow` run cost (spec 2026-09-23 §Measurement), weighted as the 2026-09-22 token
  * audit weighs usage (`usage.py`). Assistant messages are deduplicated by `message.id`, the last
- * occurrence winning; context per call = input + cache writes + cache reads.
+ * occurrence winning; context per call = input + cache writes + cache reads. And how long it took (spec
+ * 2026-09-25): wall time per step, the part of it spent waiting on tools, the run's span.
  */
 
 const PIPELINE_COST_WEIGHTS = ['input' => 1.0, 'write5m' => 1.25, 'write1h' => 2.0, 'read' => 0.1, 'output' => 5.0];
+
+/** @return list<array> the lines that decode to a JSON object */
+function pipeline_jsonl(string $jsonl): array
+{
+    return array_values(array_filter(array_map(fn (string $line) => json_decode($line, true), explode("\n", $jsonl)), 'is_array'));
+}
 
 /** @return list<array> one usage block per API call */
 function pipeline_transcript_usage(string $jsonl): array
 {
     $usage = [];
-    foreach (explode("\n", $jsonl) as $line) {
-        $entry = json_decode($line, true);
-        $message = is_array($entry) ? ($entry['message'] ?? null) : null;
+    foreach (pipeline_jsonl($jsonl) as $entry) {
+        $message = $entry['message'] ?? null;
         if (! is_array($message) || ($message['role'] ?? null) !== 'assistant' || empty($message['usage'])) {
             continue;
         }
@@ -63,9 +69,8 @@ function pipeline_transcript_cost(string $jsonl): array
 function pipeline_run_journal(string $jsonl): array
 {
     $steps = [];
-    foreach (explode("\n", $jsonl) as $line) {
-        $entry = json_decode($line, true);
-        $agent = is_array($entry) ? ($entry['agentId'] ?? null) : null;
+    foreach (pipeline_jsonl($jsonl) as $entry) {
+        $agent = $entry['agentId'] ?? null;
         if ($agent === null) {
             continue;
         }
@@ -80,7 +85,83 @@ function pipeline_run_journal(string $jsonl): array
     return array_values($steps);
 }
 
-/** @param list<array{label: string, calls: int, cost: float, peak: int}> $steps */
+/** A record's `timestamp` as Unix seconds with milliseconds; null when it has none that parses (`''` would parse as now). */
+function pipeline_record_time(array $entry): ?float
+{
+    $timestamp = $entry['timestamp'] ?? null;
+    if (! is_string($timestamp) || $timestamp === '') {
+        return null;
+    }
+    try {
+        return (float) (new DateTimeImmutable($timestamp))->format('U.u');
+    } catch (Exception) {
+        return null;
+    }
+}
+
+/**
+ * The length of the intervals' union, so overlapping (parallel) tool calls count once. Sorted by start,
+ * each interval adds only the part past the furthest end so far; one that ends before it starts adds 0.
+ *
+ * @param list<array{float, float}> $intervals
+ */
+function pipeline_union_seconds(array $intervals): float
+{
+    usort($intervals, fn (array $a, array $b) => $a[0] <=> $b[0]);
+    $total = 0.0;
+    $reach = -INF;
+    foreach ($intervals as [$start, $end]) {
+        $total += max(0.0, $end - max($start, $reach));
+        $reach = max($reach, $end);
+    }
+
+    return $total;
+}
+
+/**
+ * How long one step agent ran: its earliest to latest record, and the union of each `tool_use` to its
+ * `tool_result`. A call without result, or a result without call, adds nothing.
+ *
+ * @return array{start: ?float, end: ?float, wall: float, waiting: float}
+ */
+function pipeline_transcript_time(string $jsonl): array
+{
+    $times = [];
+    $calls = [];
+    $intervals = [];
+    foreach (pipeline_jsonl($jsonl) as $entry) {
+        $time = pipeline_record_time($entry);
+        if ($time === null) {
+            continue;
+        }
+        $times[] = $time;
+        $content = $entry['message']['content'] ?? null;
+        foreach (is_array($content) ? $content : [] as $block) {
+            $type = $block['type'] ?? null;
+            if ($type === 'tool_use') {
+                $calls[(string) ($block['id'] ?? '')] = $time;
+            }
+            $called = $type === 'tool_result' ? ($calls[(string) ($block['tool_use_id'] ?? '')] ?? null) : null;
+            if ($called !== null) {
+                $intervals[] = [$called, $time];
+            }
+        }
+    }
+
+    return $times === []
+        ? ['start' => null, 'end' => null, 'wall' => 0.0, 'waiting' => 0.0]
+        : ['start' => min($times), 'end' => max($times), 'wall' => max($times) - min($times), 'waiting' => pipeline_union_seconds($intervals)];
+}
+
+/** The run's span, earliest step start to latest step end, over the steps that have one. */
+function pipeline_run_seconds(array $steps): float
+{
+    $timed = array_filter($steps, fn (array $step) => $step['start'] !== null);
+
+    return $timed === [] ? 0.0 : max(array_column($timed, 'end')) - min(array_column($timed, 'start'));
+}
+
+/** @param list<array{label: string, calls: int, cost: float, peak: int, start: ?float, end: ?float, wall: float, waiting: float}> $steps */
 function pipeline_run_cost_lines(array $steps): array
 {
     if ($steps === []) {
@@ -89,7 +170,7 @@ function pipeline_run_cost_lines(array $steps): array
     $largest = array_reduce($steps, fn (?array $carry, array $step) => $carry === null || $step['peak'] > $carry['peak'] ? $step : $carry);
 
     return [
-        ...array_map(fn (array $step) => sprintf('%s: %.2fM over %d calls, peak %dk', $step['label'], $step['cost'] / 1e6, $step['calls'], intdiv($step['peak'], 1000)), $steps),
-        sprintf('run: %.2fM weighted over %d steps; largest step peak %dk (%s)', array_sum(array_column($steps, 'cost')) / 1e6, count($steps), intdiv($largest['peak'], 1000), $largest['label']),
+        ...array_map(fn (array $step) => sprintf('%s: %.2fM over %d calls, peak %dk, %.1f min (%.1f waiting on tools)', $step['label'], $step['cost'] / 1e6, $step['calls'], intdiv($step['peak'], 1000), $step['wall'] / 60, $step['waiting'] / 60), $steps),
+        sprintf('run: %.2fM weighted over %d steps in %.1f min; largest step peak %dk (%s)', array_sum(array_column($steps, 'cost')) / 1e6, count($steps), pipeline_run_seconds($steps) / 60, intdiv($largest['peak'], 1000), $largest['label']),
     ];
 }

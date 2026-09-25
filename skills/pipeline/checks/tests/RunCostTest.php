@@ -1,13 +1,26 @@
 <?php
 
-function cost_call(string $id, int $input, int $write, int $read, int $output = 50, ?array $split = null): string
+function cost_call(string $id, int $input, int $write, int $read, int $output = 50, ?array $split = null, ?string $at = null): string
 {
     $usage = ['input_tokens' => $input, 'cache_creation_input_tokens' => $write, 'cache_read_input_tokens' => $read, 'output_tokens' => $output];
     if ($split !== null) {
         $usage['cache_creation'] = $split;
     }
+    $record = ['type' => 'assistant', 'message' => ['id' => $id, 'role' => 'assistant', 'usage' => $usage]];
 
-    return json_encode(['type' => 'assistant', 'message' => ['id' => $id, 'role' => 'assistant', 'usage' => $usage]]);
+    return json_encode($at === null ? $record : [...$record, 'timestamp' => "2026-09-25T{$at}Z"]);
+}
+
+/** An assistant record calling tool $id at $at (`HH:MM:SS.mmm`, 2026-09-25 UTC). */
+function cost_tool_use(string $id, string $at): string
+{
+    return json_encode(['type' => 'assistant', 'timestamp' => "2026-09-25T{$at}Z", 'message' => ['role' => 'assistant', 'content' => [['type' => 'tool_use', 'id' => $id, 'name' => 'Bash', 'input' => []]]]]);
+}
+
+/** A user record answering tool $id at $at. */
+function cost_tool_result(string $id, string $at): string
+{
+    return json_encode(['type' => 'user', 'timestamp' => "2026-09-25T{$at}Z", 'message' => ['role' => 'user', 'content' => [['type' => 'tool_result', 'tool_use_id' => $id, 'content' => 'ok']]]]);
 }
 
 /** A workflow run's transcript dir: a journal naming each agent's label and result, and each agent's transcript. */
@@ -55,6 +68,37 @@ it('weighs each call as the token audit does, once per message id', function () 
     expect(pipeline_transcript_cost(''))->toBe(['calls' => 0, 'cost' => 0.0, 'peak' => 0]);
 });
 
+it('times a transcript from its earliest to its latest record, counting overlapping tool waits once', function () {
+    $time = pipeline_transcript_time(implode("\n", [
+        cost_call('m1', 1, 0, 0, 50, null, '10:00:00.000'),
+        '{"type":"user","timestamp":"2026-09-25T10:00:10.000Z","message":{"role":"user","content":"the brief"}}',
+        cost_tool_use('t1', '10:01:00.000'),
+        cost_tool_use('t2', '10:01:00.500'),
+        cost_tool_result('t2', '10:02:00.000'),
+        cost_tool_result('t1', '10:03:00.000'),
+        cost_tool_use('t3', '10:05:00.000'),
+        cost_tool_result('t3', '10:06:30.000'),
+        cost_tool_use('t4', '10:07:00.000'),
+        cost_tool_result('t9', '10:07:30.000'),
+        cost_tool_use('t5', '10:04:00.000'),
+        cost_tool_result('t5', '10:03:30.000'),
+        cost_call('m2', 1, 0, 0),
+        '{"type":"user","timestamp":"not a time","message":{"role":"user","content":"hi"}}',
+        '{"type":"user","timestamp":"","message":{"role":"user","content":"hi"}}',
+        'not json',
+        '',
+        cost_call('m0', 1, 0, 0, 50, null, '09:59:00.250'),
+    ]));
+
+    // t1 and t2 overlap: 10:01:00 to 10:03:00 is 120 s; t3 adds 90 s; t4 (no result), t9 (no call) and t5 (result before call) add nothing
+    expect($time['start'])->toEqualWithDelta((float) strtotime('2026-09-25T09:59:00Z') + 0.25, 0.001);
+    expect($time['end'])->toEqualWithDelta((float) strtotime('2026-09-25T10:07:30Z'), 0.001);
+    expect($time['wall'])->toEqualWithDelta(509.75, 0.001);
+    expect($time['waiting'])->toEqualWithDelta(210.0, 0.001);
+    expect(pipeline_transcript_time("not json\n" . cost_call('m1', 1, 0, 0)))->toBe(['start' => null, 'end' => null, 'wall' => 0.0, 'waiting' => 0.0]);
+    expect(pipeline_transcript_time(''))->toBe(['start' => null, 'end' => null, 'wall' => 0.0, 'waiting' => 0.0]);
+});
+
 it('reads a run\'s steps from its journal, in the order they started', function () {
     $journal = implode("\n", [
         '{"type":"launched"}',
@@ -70,17 +114,40 @@ it('reads a run\'s steps from its journal, in the order they started', function 
     ]);
 });
 
-it('prints the cost per step and the largest step peak, always exiting 0', function () {
+it('prints the cost and minutes per step, the run\'s span and the largest step peak, always exiting 0', function () {
     $dir = cost_run([
-        'a1' => ['review-plan:review', implode("\n", [cost_call('m1', 3, 20000, 0), cost_call('m2', 1, 1000, 140000, 50, ['ephemeral_5m_input_tokens' => 0, 'ephemeral_1h_input_tokens' => 1000])]), ['status' => 'continued']],
-        'a2' => ['implement:run', cost_call('m3', 0, 0, 300000, 2000), ['status' => 'continued', 'ui' => false]],
+        'a1' => ['review-plan:review', implode("\n", [
+            cost_call('m1', 3, 20000, 0, 50, null, '10:00:00.000'),
+            cost_tool_use('t1', '10:00:30.000'),
+            cost_tool_result('t1', '10:02:00.000'),
+            cost_call('m2', 1, 1000, 140000, 50, ['ephemeral_5m_input_tokens' => 0, 'ephemeral_1h_input_tokens' => 1000], '10:06:00.000'),
+        ]), ['status' => 'continued']],
+        'a2' => ['implement:run', implode("\n", [
+            cost_call('m3', 0, 0, 300000, 2000, null, '10:07:00.000'),
+            cost_tool_use('t2', '10:08:00.000'),
+            cost_tool_result('t2', '10:20:00.000'),
+        ]), ['status' => 'continued', 'ui' => false]],
     ]);
 
+    // the run spans 10:00 to 10:20, a minute longer than its steps' 6.0 + 13.0: the gap between them counts
     expect(checks_cli('run_cost_cli.php', [$dir]))->toBe(['code' => 0, 'stdout' => implode("\n", [
-        'review-plan:review: 0.04M over 2 calls, peak 141k',
-        'implement:run: 0.04M over 1 calls, peak 300k',
-        'run: 0.08M weighted over 2 steps; largest step peak 300k (implement:run)',
+        'review-plan:review: 0.04M over 2 calls, peak 141k, 6.0 min (1.5 waiting on tools)',
+        'implement:run: 0.04M over 1 calls, peak 300k, 13.0 min (12.0 waiting on tools)',
+        'run: 0.08M weighted over 2 steps in 20.0 min; largest step peak 300k (implement:run)',
     ])]);
     expect(checks_cli('run_cost_cli.php', ['/nonexistent']))->toBe(['code' => 0, 'stdout' => 'run: not measured (no step transcripts)']);
     expect(checks_cli('run_cost_cli.php', [])['code'])->toBe(0);
+});
+
+it('prints a step without timestamps as 0.0 min and spans the run over the timed steps only', function () {
+    $dir = cost_run([
+        'a1' => ['design:run', implode("\n", [cost_call('m1', 3, 20000, 0, 50, null, '10:00:00.000'), cost_call('m2', 3, 20000, 0, 50, null, '10:06:30.000')]), ['status' => 'continued']],
+        'a2' => ['handoff:run', cost_call('m3', 0, 0, 300000, 2000), ['status' => 'continued']],
+    ]);
+
+    expect(checks_cli('run_cost_cli.php', [$dir])['stdout'])->toBe(implode("\n", [
+        'design:run: 0.05M over 2 calls, peak 20k, 6.5 min (0.0 waiting on tools)',
+        'handoff:run: 0.04M over 1 calls, peak 300k, 0.0 min (0.0 waiting on tools)',
+        'run: 0.09M weighted over 2 steps in 6.5 min; largest step peak 300k (handoff:run)',
+    ]));
 });
