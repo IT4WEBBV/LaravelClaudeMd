@@ -8,22 +8,23 @@ memory, and it reads neither the mode nor anything a review said.
 All three are backed by tested Phase A functions in `../checks/pipeline.php` and
 `../checks/triggers.php`. This doc mirrors those functions; keep them in lock-step.
 
-## Modes — one choice, three modes
+## Modes — one choice, two modes
 
-`mode` is the only knob, and **anything that is neither `auto` nor `autoflow` behaves as
-`interactive`** — the strictest of them. That fallback used to be asserted mechanically by `pipeline_resolve_policy()`;
-the function is gone (its two gates were always identical to each other and a pure function of
-mode), so the rule lives here and has to stay explicit: `manifest_validate` checks key *presence*,
-not value, so a manifest with a mangled `mode` must still fail safe.
+`mode` is the only knob, and **anything that is not `autoflow` behaves as `interactive`** — the
+stricter of the two. The one exception is `auto`, the engine #87 removed: every command refuses a
+manifest that still says `auto`, naming `autoflow` (`engine.md` §The loop). That fallback used to be
+asserted mechanically by `pipeline_resolve_policy()`; the function is gone (its two gates were always
+identical to each other and a pure function of mode), so the rule lives here and has to stay
+explicit: `manifest_validate` checks key *presence*, not value, so a manifest with a mangled `mode`
+must still fail safe.
 
 | Mode | Behaviour |
 |---|---|
 | **`interactive`** *(default)* | you are present; run one leg, show you the review, wait. Every point in it is yours to judge. Advance by saying so (see navigation). |
-| **`auto`** | run the autonomous legs unattended. The reviews still run; a fresh resolve step reads each and acts, looping back where the work is wrong and never interrupting on a finding (`engine.md` §`auto`). Hard failures and bound exhaustion still stop. |
-| **`autoflow`** | as `auto`, but the loop is the workflow `pipeline-autoflow`, not an agent (`engine.md` §`autoflow`); for the side-by-side comparison, until the keep/revert decision. |
+| **`autoflow`** | run the autonomous legs unattended; the loop is the workflow `pipeline-autoflow` (`engine.md` §`autoflow`). The reviews still run; a fresh resolve step reads each and acts, looping back where the work is wrong and never interrupting on a finding (`engine.md` §Resolving a review). Hard failures and bound exhaustion still stop. |
 
 There is no per-gate override — both gates behave the same way within a mode.
-The **report-only override** that once existed (`auto` with `plan-approval` flipped to `report` in
+The **report-only override** that once existed (an unattended run with `plan-approval` flipped to `report` in
 a stored `gate_policy`) is **deleted by decision, not oversight**: two of its three documented
 effects — adjudicate nothing, escalate nothing — are now the default everywhere, which left only
 "do not loop me back to `design`", and that did not justify a stored per-gate field of its own.
@@ -47,7 +48,7 @@ first three is what this section revises.
 | touches an `it4web/*` package | `$repoPackageName` starts `it4web/` (the change is *in* a package repo), **or** an added `composer.json` line names an `it4web/*` constraint | annotation |
 | writes a DB migration | an added/changed file path matches `database/migrations/…\.php` | annotation |
 | touches authorization | an added line matches `authorize(` / `Gate::` / `Policy` / `can:` / `->can(` / `middleware('can:` | annotation |
-| the project-vs-package call | **none mechanical** — a `/critique plan` judgment, made in prose (the `plan` rubric asks for it) | the resolve step acts on it like any other part of the review (`engine.md` §`auto`) |
+| the project-vs-package call | **none mechanical** — a `/critique plan` judgment, made in prose (the `plan` rubric asks for it) | the resolve step acts on it like any other part of the review (`engine.md` §Resolving a review) |
 
 **On a Bounded design, `migration` and `auth` escalate** instead of only annotating: the design grows
 to Architectural and is re-reviewed (`engine.md` §Design size). The auth match ignores comment and
@@ -105,7 +106,7 @@ PR that has not passed `review-plan` and `review-pr` against the recorded artifa
 - `review-pr` → `implement`
 
 Each is bounded to 2 per gate, counted from the gate's `looped-back` ledger entries; the third halts,
-and so does any loop-back once the count is `unknown` (`manifest.md` §Reconstruction). In `auto` and
+and so does any loop-back once the count is `unknown` (`manifest.md` §Reconstruction). In
 `interactive` `pipeline_returned()` evaluates both; in `autoflow` the workflow script does, on
 `tables.loopTarget` and `tables.bound` from `launch`'s `start` answer (`pipeline_routing_tables()`),
 starting from `launch`'s ledger counts. Keep this list in lock-step with the function: `LockStepTest`
@@ -113,8 +114,8 @@ fails when it drifts.
 
 ## How a run calls Phase A
 
-`auto` and `interactive` call it once per step, one command (`engine.md` §The loop). It computes the
-triggers from a diff file the dispatcher (or the session) writes but never reads:
+`interactive` calls it once per step, one command (`engine.md` §The loop). It computes the triggers
+from a diff file the session writes but never reads:
 
 ```bash
 CHECKS="$HOME/.claude/skills/pipeline/checks"
