@@ -133,12 +133,14 @@ php ~/.claude/skills/pipeline/checks/run_audit.php <manifest> <manifest stem>.di
 ```
 
 The transcript dir is the `wf_<id>` directory the workflow result names, not the task id. `finish`
-refuses a `done` whose cursor is not on `review-pr`: it records and prints a halt instead. A denied
-`gh pr ready` writes no halt: the manifest already says done and the PR stays draft, so the denial goes
-in the report and the owner runs `gh pr ready` by hand. A workflow that errored: `finish <manifest> '{"action":"halt","reason":"<the error>"}'`. A halt after `handoff`: the reason
-into the PR body, as pipeline `engine.md` §Failure policy — what still stops (*Bound exhaustion*)
-says. No proof page opens on a halt in an unattended batch, unlike pipeline `SKILL.md`'s attended
-"opened once": it opens only on a ready PR (§Proof page).
+refuses a `done` whose cursor is not on `review-pr`, or whose last step, `review-pr`'s resolve step,
+left a return that does not hold (an open `pr-review` entry, a key only the engine writes): it records
+and prints a halt instead. A denied `gh pr ready` writes no halt: the manifest already says done and
+the PR stays draft, so the denial goes in the report and the owner runs `gh pr ready` by hand. A
+workflow that errored: `finish <manifest> '{"action":"halt","reason":"<the error>"}'`. A halt
+after `handoff`: the reason into the PR body, as pipeline `engine.md` §Failure policy — what still
+stops (*Bound exhaustion*) says. No proof page opens on a halt in an unattended batch, unlike pipeline
+`SKILL.md`'s attended "opened once": it opens only on a ready PR (§Proof page).
 
 A stalled run: `TaskStop` its task id first. Only once it reports the task stopped,
 `finish <manifest> '{"action":"halt","reason":"stalled: no notice, commit or PR change for 90 minutes"}'`.

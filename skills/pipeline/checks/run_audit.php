@@ -2,7 +2,8 @@
 
 /**
  * After a `/pipeline autoflow` run: the two things the workflow takes on report (spec 2026-09-23 §No check
- * on what a step reports), as facts. A MISMATCH is the trigger for adding a check, never a halt.
+ * on what a step reports), as facts. Each step's return is checked at the next `brief` (engine.md
+ * §`autoflow`, The check at the next boundary); a MISMATCH here means that check has a hole, never a halt.
  *
  *   php run_audit.php <manifest> <final PR diff> <run transcript dir>
  *
@@ -93,6 +94,6 @@ if ($manifest === null || $diff === null || $journal === null) {
     exit(0);
 }
 
-$ledger = $manifest['gate_ledger'] ?? [];
+$ledger = pipeline_ledger($manifest);
 echo implode("\n", [run_audit_ui(pipeline_triggers($diff), $ledger), ...run_audit_gates(pipeline_run_journal($journal), $ledger)]), "\n";
 exit(0);

@@ -96,7 +96,7 @@ steps, the loop-backs, their bounds and the halts are JavaScript, and agents exi
 invoking session   dispatch_cli.php kickoff → dispatch_cli.php launch → Workflow pipeline-autoflow (args: launch's JSON)
                    … on its return: dispatch_cli.php finish → gh pr ready | halt duties → report
 workflow script    per step: agent(prompt, {schema}) → {status, reason, ui, size} → next step, loop-back or return
-step agent         dispatch_cli.php brief <manifest> <leg> <step> → the leg's work → the manifest → {status, reason}
+step agent         dispatch_cli.php brief <manifest> <leg> <step> [--after …] → the leg's work → the manifest → {status, reason}
 ```
 
 ```bash
@@ -139,29 +139,47 @@ launched the run, with its reason.
   missing or incomplete halts with a reason that names them. `AutoflowScriptTest` replays the script
   on `launch`'s answer. A review step runs on Fable, and once more on Opus when it returns nothing;
   `handoff` runs at low effort; a step that throws or returns nothing halts the run.
-- **A step** first runs `dispatch_cli.php brief <manifest> <leg> <step>`. It writes
-  `cursor: {leg, status: pending}` — so after a `TaskStop` or a dead session the cursor still names the
-  step that was running — and prints the brief, or prints a halt when the ledger does not support the
-  step (`resolve` with no open review, `review` with one already open). The step writes its results
-  into the manifest (`manifest.md` §What a leg writes) and returns `{status, reason}`; `implement`
-  also returns `ui`, copied from `dispatch_cli.php ui <diff>` (`pipeline_triggers()` over its diff),
-  and `design` returns `size`, copied from `dispatch_cli.php size <manifest>` (`DesignSize::fromSpec()`
-  over the spec it committed). Both are required on every return of their step and ignored on a halt;
-  the script takes `ui` only from `implement` and `size` only from `design`.
+- **A step** first runs `dispatch_cli.php brief <manifest> <leg> <step>`, followed on every step but
+  the run's first by what the step before it returned: `--after <leg>:<step> --status <status>`, plus
+  `--ui` after `implement` and `--size` after `design` (§The check at the next boundary). It checks that
+  return, then writes `cursor: {leg, status: pending}` — so after a `TaskStop` or a dead session the
+  cursor still names the step that was running — and the snapshot `<manifest stem>.before.json`, and
+  prints the brief. It prints a halt instead when the return does not hold, or when the ledger does not
+  support the step (`resolve` with no open review, `review` with one already open). The step writes
+  its results into the manifest (`manifest.md` §What a leg writes) and returns `{status, reason}`;
+  `implement` also returns `ui`, copied from `dispatch_cli.php ui <diff>` (`pipeline_triggers()` over
+  its diff), and `design` returns `size`, copied from `dispatch_cli.php size <manifest>`
+  (`DesignSize::fromSpec()` over the spec it committed). Both are required on every return of their
+  step and ignored on a halt; the script takes `ui` only from `implement` and `size` only from `design`.
 - **`finish`** records the return: `done` sets `cursor.status: done`, but only with the cursor on
-  `review-pr` — anywhere else it records the halt "the workflow returned done at <leg>"; a halt sets
-  `cursor: {leg, status: halted, reason}`, keeping the cursor's leg when the return names none of the
-  pipeline's. When the workflow itself errored, pass `{"action":"halt","reason":"<the error>"}`: the
-  cursor keeps the step that was running. When `finish` prints `done` the invoking session then runs
-  **`gh pr ready <pr>`** (§Who takes the PR out of draft); on a halt after `handoff`, §Failure
-  policy's duties.
+  `review-pr` — anywhere else it records the halt "the workflow returned done at <leg>" — and only when
+  the last snapshot is `review-pr`'s resolve step's and that step's return holds (§The check at the next
+  boundary); otherwise it records that halt. A halt sets `cursor: {leg, status: halted, reason}`,
+  keeping the cursor's leg when the cursor already says `halted` (`brief` or the step wrote it, on the
+  step that failed) or when the return names none of the pipeline's legs. When the workflow itself
+  errored, pass `{"action":"halt","reason":"<the error>"}`: the cursor keeps the step that was
+  running. When `finish` prints `done` the invoking session then runs **`gh pr ready <pr>`** (§Who
+  takes the PR out of draft); on a halt after `handoff`, §Failure policy's duties.
 - **Resume** is `/pipeline` as always: `launch` starts from the cursor, and the step it names runs
   again.
 
-**No check on what a step reports.** The script trusts each step's `status`. A step that claims work it
-did not do is caught by the next gate (`review-plan` reads the spec and plan, `review-pr` the code), and
-`implement`'s `ui` is a copy of `pipeline_triggers()`' output, not a judgement. After every run the
-invoking session reports two facts with the result:
+**The check at the next boundary.** The script routes on the `status` a step returns; the step's
+return is checked at the next command, by a separate process and no extra agent. `brief`, told by
+`--after` which step returned, compares the manifest with that step's snapshot, as `returned` does in
+`auto`: `pipeline_reported_problem()` (`../checks/dispatch.php`) runs `pipeline_return_problem()` and
+then compares what the script was told with what the manifest and the tree say — the status with
+`cursor.status`, `ui` with `pipeline_triggers()` over the implement step's own `<manifest stem>.diff`
+(one older than its snapshot halts), `size` with the spec's header. A halt writes
+`cursor: {leg: <the step that failed>, status: halted, reason}`, so a resume re-runs that step. Without
+`--after` (the run's first step) nothing is checked. A snapshot of the very step being briefed is the
+script's Opus retry of a review step that returned nothing: an unchanged manifest is briefed again, a
+changed one halts. `launch` removes an earlier run's snapshot when it answers `start`, so a `brief`
+without `--after` that finds a snapshot of another step halts: the step agent dropped the flags it was
+given, and the check cannot be skipped by leaving them out. `finish` runs the same check for
+`review-pr`'s resolve step before it records `done`.
+What a step claims about work outside the manifest is caught by the next gate (`review-plan` reads the
+spec and plan, `review-pr` the code). After every run the invoking session reports two facts with the
+result:
 
 ```bash
 php "$CHECKS/run_cost_cli.php" <the run's transcript dir>
@@ -174,7 +192,8 @@ the Workflow result. `run_cost_cli.php` prints per step the weighted cost, the p
 time and the part of it spent waiting on tools, and on its `run:` line the total, the run's span in
 minutes and the largest step peak. `run_audit.php` prints whether `ui` over the final diff agrees with
 a `verify-ui` entry, and whether each gate's newest ledger entries agree with what the steps reported.
-A `MISMATCH` is the trigger for adding a check on step returns, never a halt.
+It stays as the after-run report: with the boundary check in place a `MISMATCH` means the check has a
+hole, never a halt.
 
 **Where a step works.** The worktree travels in the brief (*"Work only in `<worktree>`"*) and in
 absolute paths, never in the launch directory: `orchestrate` launches up to four runs from its primary
@@ -913,7 +932,7 @@ Under `auto` and `autoflow` these are the only stops. **No finding stops a run.*
   the failure and the machinery may be in an unknown state.
   - **A halted manifest is the one the check rejected.** When the reason names a key the leg was not
     allowed to change, repair it from `<manifest stem>.before.json`, the snapshot taken at dispatch,
-    before the next `next`; otherwise the run resumes with the leg's change in place.
+    before the next `next` or `launch`; otherwise the run resumes with the leg's change in place.
   - **In `autoflow`** a review step that returns nothing runs once more, on Opus; a step that throws,
     any other step that returns nothing, or a station that would need an agent the step cannot start,
     halts at once. The halt reaches the invoking session as the workflow's return, and `finish` writes it to
@@ -965,7 +984,9 @@ Under `auto` and `autoflow` these are the only stops. **No finding stops a run.*
   bound-exhaustion halt.**
 - **A return the dispatcher cannot account for** — a moved cursor, a key only the dispatcher writes,
   a rewritten ledger entry, a status the ledger does not support (`manifest.md` §What a leg writes) →
-  **halt**, with `returned`'s reason.
+  **halt**, with `returned`'s reason; in `autoflow`, with the next `brief`'s or `finish`'s, which also
+  halt on a status, `ui` or `size` the step returned to the script that its manifest, diff or spec
+  does not bear out.
 - **An `autoflow` step the run cannot accept** — a status the step may not return fails the step's
   schema, and `brief` halts a step the ledger does not support (`resolve` with no open review,
   `review` with one already open) → **halt**.

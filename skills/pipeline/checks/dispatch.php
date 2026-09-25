@@ -102,7 +102,7 @@ function pipeline_step(array $manifest, string $leg): string
         return 'run';
     }
 
-    return pipeline_open_entry($manifest['gate_ledger'] ?? [], pipeline_gate_of($leg)) === null ? 'review' : 'resolve';
+    return pipeline_open_entry(pipeline_ledger($manifest), pipeline_gate_of($leg)) === null ? 'review' : 'resolve';
 }
 
 /** Anything that is neither `auto` nor `autoflow` behaves as interactive (`gates.md` §Modes): the human designs and resolves. */
@@ -186,7 +186,33 @@ function pipeline_return_problem(array $before, array $after, string $leg, strin
         return 'the leg halted without a reason';
     }
 
-    return pipeline_ledger_problem($before['gate_ledger'] ?? [], $after['gate_ledger'] ?? [], $status, $leg, $step, $size);
+    return pipeline_ledger_problem(pipeline_ledger($before), pipeline_ledger($after), $status, $leg, $step, $size);
+}
+
+/**
+ * `autoflow`'s check at the next step boundary (`brief` and `finish`): the step the snapshot was taken
+ * for, against the manifest it left and what it returned to the script. `$reported` holds the flags
+ * `brief` was given (`status`, and `ui` or `size`, as strings); `$diffUi` is `pipeline_triggers()['ui']`
+ * over the step's diff, read only after `implement`.
+ */
+function pipeline_reported_problem(array $before, array $after, array $reported, DesignSize $size, ?bool $diffUi = null): ?string
+{
+    [$before, $after] = [pipeline_normalized($before), pipeline_normalized($after)];
+    $leg = $before['cursor']['leg'];
+    $step = pipeline_step($before, $leg);
+    if ($after === $before) {
+        return "the {$leg} {$step} step returned without writing the manifest";
+    }
+
+    $told = fn (string $key) => (string) ($reported[$key] ?? 'nothing');
+    $status = (string) ($after['cursor']['status'] ?? '');
+
+    return pipeline_return_problem($before, $after, $leg, $step, $size) ?? match (true) {
+        $told('status') !== $status => "the {$leg} {$step} step returned {$told('status')} to the script but wrote {$status} into the manifest",
+        $leg === 'implement' && $told('ui') !== json_encode($diffUi) => "the implement step returned ui: {$told('ui')}, but its diff says " . json_encode($diffUi),
+        $leg === 'design' && $told('size') !== $size->value => "the design step returned size {$told('size')}, but the spec says {$size->value}",
+        default => null,
+    };
 }
 
 /** @return list<string> top-level keys, and `cursor.*` one level down, whose values differ */
@@ -264,8 +290,8 @@ function pipeline_route(array $after, string $leg, string $step, array $triggers
         LegStatus::Halted => pipeline_halt((string) $after['cursor']['reason']),
         LegStatus::PlanInsufficient => $size === DesignSize::Bounded
             ? pipeline_dispatch('design')
-            : pipeline_loop_back($after['gate_ledger'] ?? [], 'review-plan'),
-        LegStatus::LoopedBack => pipeline_loop_back($after['gate_ledger'] ?? [], $leg),
+            : pipeline_loop_back(pipeline_ledger($after), 'review-plan'),
+        LegStatus::LoopedBack => pipeline_loop_back(pipeline_ledger($after), $leg),
         LegStatus::Continued => pipeline_continue($leg, $step, $triggers),
     };
 }
@@ -333,7 +359,7 @@ function pipeline_step_problem(array $manifest, string $leg, string $step): ?str
         return "{$leg} has no {$step} step";
     }
     $gate = pipeline_gate_of($leg);
-    $open = pipeline_open_entry($manifest['gate_ledger'] ?? [], $gate);
+    $open = pipeline_open_entry(pipeline_ledger($manifest), $gate);
 
     return match (true) {
         $step === 'resolve' && $open === null => "no open {$gate} review to resolve",

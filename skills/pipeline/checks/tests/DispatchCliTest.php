@@ -15,7 +15,7 @@ function dispatch_fixture(array $manifest = []): array
     ]);
     file_put_contents($dir . '/pipeline.diff', '');
 
-    return ['dir' => $dir, 'manifest' => $path, 'diff' => $dir . '/pipeline.diff', 'brief' => $dir . '/.claude/pipeline/feature-x.brief.md', 'before' => $dir . '/.claude/pipeline/feature-x.before.json'];
+    return ['dir' => $dir, 'manifest' => $path, 'diff' => $dir . '/pipeline.diff', 'brief' => $dir . '/.claude/pipeline/feature-x.brief.md', 'before' => $dir . '/.claude/pipeline/feature-x.before.json', 'stepDiff' => $dir . '/.claude/pipeline/feature-x.diff'];
 }
 
 function dispatch_cli(array $arguments, array $env = []): array
@@ -301,13 +301,182 @@ it('records the workflow\'s return with finish', function (string $leg, string $
     expect(dispatch_cli(['finish', $fixture['manifest'], $decision])['code'])->toBe(0);
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe($cursor);
 })->with([
-    'done' => ['review-pr', '{"action":"done"}', ['leg' => 'review-pr', 'status' => 'done']],
     'done before review-pr' => ['implement', '{"action":"done"}', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'the workflow returned done at implement']],
     'a halt naming its leg' => ['implement', '{"action":"halt","leg":"verify-ui","reason":"stub halt"}', ['leg' => 'verify-ui', 'status' => 'halted', 'reason' => 'stub halt']],
     'a halt naming no leg of the pipeline' => ['implement', '{"action":"halt","leg":"launch","reason":"args are not a launch start answer"}', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'args are not a launch start answer']],
     'a halt from the invoking session' => ['implement', '{"action":"halt","reason":"the workflow errored"}', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'the workflow errored']],
     'no decision' => ['implement', 'not json', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'the workflow returned no decision: not json']],
 ]);
+
+/** An `autoflow` run whose `$leg` `$step` was briefed as a run's first step: its snapshot is on disk. */
+function boundary_fixture(string $leg, string $step, array $manifest = []): array
+{
+    $fixture = dispatch_fixture(['mode' => 'autoflow', ...$manifest]);
+    expect(dispatch_cli(['brief', $fixture['manifest'], $leg, $step])['stdout'])->toContain("`{$leg}` leg, `{$step}` step");
+
+    return $fixture;
+}
+
+/** The step the script briefs next, told what the step before it returned. */
+function boundary_brief(array $fixture, string $leg, string $step, string $after, array $reported): array
+{
+    return dispatch_cli(['brief', $fixture['manifest'], $leg, $step, '--after', $after, ...$reported]);
+}
+
+function boundary_open(string $gate = 'plan-approval'): array
+{
+    return ['gate' => $gate, 'leg' => pipeline_leg_of_gate($gate), 'cycle' => 1, 'at' => '2026-09-25T10:00:00Z', 'review' => 'r', 'annotations' => []];
+}
+
+it('halts the next brief when a resolve step left its entry open, with the cursor on that step', function () {
+    $fixture = boundary_fixture('review-plan', 'resolve', ['gate_ledger' => [boundary_open()]]);
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued']]);
+
+    $halt = boundary_brief($fixture, 'handoff', 'run', 'review-plan:resolve', ['--status', 'continued'])['json'];
+
+    $reason = "the resolve step must set the open plan-approval entry's outcome to continued";
+    expect($halt)->toBe(['action' => 'halt', 'reason' => $reason]);
+    expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-plan', 'status' => 'halted', 'reason' => $reason]);
+});
+
+it('halts the next brief when implement reported ui false on a UI diff, or wrote no diff of its own', function (bool $stale, string $reason) {
+    $fixture = boundary_fixture('implement', 'run');
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued'], 'last_sha' => 'bbb2222']);
+    file_put_contents($fixture['stepDiff'], dispatch_ui_diff());
+    if ($stale) {
+        touch($fixture['stepDiff'], time() - 60);
+    }
+
+    $halt = boundary_brief($fixture, 'review-pr', 'review', 'implement:run', ['--status', 'continued', '--ui', 'false'])['json'];
+
+    expect($halt)->toBe(['action' => 'halt', 'reason' => str_replace('<diff>', $fixture['stepDiff'], $reason)]);
+    expect(manifest_read($fixture['manifest'])['cursor'])->toMatchArray(['leg' => 'implement', 'status' => 'halted']);
+})->with([
+    'ui false on a UI diff' => [false, 'the implement step returned ui: false, but its diff says true'],
+    'a diff older than the step' => [true, 'the implement step did not write <diff>'],
+]);
+
+it('halts the next brief when a step changed what only the engine writes', function (callable $change, string $reason) {
+    $passed = [...boundary_open(), 'actions' => [], 'outcome' => 'continued'];
+    $fixture = boundary_fixture('handoff', 'run', ['gate_ledger' => [$passed]]);
+    dispatch_leg_writes($fixture['manifest'], $change);
+
+    expect(boundary_brief($fixture, 'implement', 'run', 'handoff:run', ['--status', 'continued'])['json'])->toBe(['action' => 'halt', 'reason' => $reason]);
+    expect(manifest_read($fixture['manifest'])['cursor'])->toMatchArray(['leg' => 'handoff', 'status' => 'halted']);
+})->with([
+    'a moved cursor' => [fn (array $m) => [...$m, 'cursor' => ['leg' => 'implement', 'status' => 'continued']], 'the leg changed cursor.leg, which only the dispatcher writes'],
+    'a rewritten ledger entry' => [fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued'], 'gate_ledger' => [[...$m['gate_ledger'][0], 'outcome' => 'looped-back']]], 'the leg rewrote ledger entry 0'],
+]);
+
+it('briefs the next step after a clean return, and takes its snapshot', function () {
+    $fixture = boundary_fixture('handoff', 'run');
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued'], 'artifacts' => [...$m['artifacts'], 'pr' => 7]]);
+
+    $result = boundary_brief($fixture, 'implement', 'run', 'handoff:run', ['--status', 'continued']);
+
+    expect($result['stdout'])->toContain('`implement` leg, `run` step')->toContain('- pr: `7`');
+    expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'implement', 'status' => 'pending']);
+    expect(manifest_read($fixture['before']))->toBe(manifest_read($fixture['manifest']));
+});
+
+it('halts the next brief when the script was told another status or size than the step wrote', function (array $reported, string $reason) {
+    $fixture = boundary_fixture('design', 'run', ['cursor' => ['leg' => 'design', 'status' => 'pending'], 'artifacts' => ['spec' => 'spec.md', 'plan' => null, 'pr' => null, 'issue' => null]]);
+    file_put_contents($fixture['dir'] . '/spec.md', "# x — design\n\n**Design size:** Architectural\n");
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued'], 'last_sha' => 'aaa1111']);
+
+    expect(boundary_brief($fixture, 'review-plan', 'review', 'design:run', $reported)['json'])->toBe(['action' => 'halt', 'reason' => $reason]);
+})->with([
+    'another status' => [['--status', 'halted', '--size', 'Architectural'], 'the design run step returned halted to the script but wrote continued into the manifest'],
+    'another size' => [['--status', 'continued', '--size', 'Bounded'], 'the design step returned size Bounded, but the spec says Architectural'],
+    'no size' => [['--status', 'continued'], 'the design step returned size nothing, but the spec says Architectural'],
+]);
+
+it('launch removes an earlier run\'s snapshot, so the first brief of a run checks nothing', function () {
+    $fixture = boundary_fixture('handoff', 'run');
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => ['leg' => 'handoff', 'status' => 'halted', 'reason' => 'an earlier run']]);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json']['action'])->toBe('start');
+    expect(is_file($fixture['before']))->toBeFalse();
+    expect(dispatch_cli(['brief', $fixture['manifest'], 'handoff', 'run'])['stdout'])->toContain('`handoff` leg, `run` step');
+});
+
+it('halts a brief told of a step that left no snapshot, not its own, or none', function () {
+    $bare = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'handoff', 'status' => 'continued']]);
+    expect(boundary_brief($bare, 'implement', 'run', 'handoff:run', ['--status', 'continued'])['json'])
+        ->toBe(['action' => 'halt', 'reason' => "cannot check the handoff run step's return: no snapshot at {$bare['before']}"]);
+    expect(manifest_read($bare['manifest'])['cursor'])->toMatchArray(['leg' => 'handoff', 'status' => 'halted']);
+
+    $other = boundary_fixture('design', 'run', ['cursor' => ['leg' => 'design', 'status' => 'pending']]);
+    dispatch_leg_writes($other['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued']]);
+    expect(boundary_brief($other, 'implement', 'run', 'handoff:run', ['--status', 'continued'])['json'])
+        ->toBe(['action' => 'halt', 'reason' => 'the snapshot is of the design run step, but the script says handoff run returned: it did not run brief']);
+
+    $dropped = boundary_fixture('handoff', 'run');
+    dispatch_leg_writes($dropped['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued'], 'artifacts' => [...$m['artifacts'], 'pr' => 7]]);
+    expect(dispatch_cli(['brief', $dropped['manifest'], 'implement', 'run'])['json'])
+        ->toBe(['action' => 'halt', 'reason' => 'a snapshot of the handoff run step exists, but the script names no step before implement run']);
+    expect(manifest_read($dropped['manifest'])['cursor'])->toMatchArray(['leg' => 'handoff', 'status' => 'halted']);
+});
+
+it('briefs a review step again after an attempt that returned nothing, unless that attempt wrote', function (array $flags) {
+    $fixture = boundary_fixture('review-pr', 'review', ['cursor' => ['leg' => 'review-pr', 'status' => 'pending']]);
+    $again = fn () => dispatch_cli(['brief', $fixture['manifest'], 'review-pr', 'review', ...$flags]);
+
+    expect($again()['stdout'])->toContain('`review-pr` leg, `review` step');
+
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'last_sha' => 'ccc3333']);
+    expect($again()['json'])->toBe(['action' => 'halt', 'reason' => 'the review-pr review step returned nothing and changed the manifest']);
+    expect(manifest_read($fixture['manifest'])['cursor'])->toMatchArray(['leg' => 'review-pr', 'status' => 'halted']);
+})->with([
+    'after the step before it' => [['--after', 'implement:run', '--status', 'continued', '--ui', 'false']],
+    'as the run\'s first step, without flags' => [[]],
+]);
+
+it('refuses a brief it cannot parse', function (array $arguments) {
+    $fixture = dispatch_fixture(['mode' => 'autoflow']);
+
+    expect(dispatch_cli(['brief', $fixture['manifest'], ...$arguments])['code'])->toBe(1);
+})->with([
+    'no step' => [['handoff']],
+    'an unknown flag' => [['handoff', 'run', '--sideways', 'x']],
+    'a flag without its value' => [['handoff', 'run', '--after']],
+    'an --after that is no step' => [['handoff', 'run', '--after', 'handoff:review', '--status', 'continued']],
+    'a status without --after' => [['handoff', 'run', '--status', 'continued']],
+    'a flag given twice' => [['handoff', 'run', '--after', 'design:run', '--status', 'continued', '--status', 'halted']],
+]);
+
+it('finishes only after a review-pr resolve step whose return holds', function () {
+    $open = boundary_open('pr-review');
+    $fixture = boundary_fixture('review-pr', 'resolve', ['cursor' => ['leg' => 'review-pr', 'status' => 'pending'], 'gate_ledger' => [$open]]);
+    $finish = fn () => dispatch_cli(['finish', $fixture['manifest'], '{"action":"done"}'])['json'];
+
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued']]);
+    expect($finish())->toBe(['action' => 'halt', 'reason' => "the resolve step must set the open pr-review entry's outcome to continued"]);
+    expect(manifest_read($fixture['manifest'])['cursor'])->toMatchArray(['leg' => 'review-pr', 'status' => 'halted']);
+
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => ['leg' => 'review-pr', 'status' => 'continued'], 'gate_ledger' => [[...$open, 'actions' => [], 'outcome' => 'continued']]]);
+    expect($finish())->toBe(['action' => 'done']);
+    expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-pr', 'status' => 'done']);
+});
+
+it('refuses done when the last snapshot is not review-pr\'s resolve step, or there is none', function () {
+    $review = boundary_fixture('review-pr', 'review', ['cursor' => ['leg' => 'review-pr', 'status' => 'pending']]);
+    dispatch_leg_writes($review['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued'], 'gate_ledger' => [boundary_open('pr-review')]]);
+    expect(dispatch_cli(['finish', $review['manifest'], '{"action":"done"}'])['json'])
+        ->toBe(['action' => 'halt', 'reason' => 'the workflow returned done, but the last snapshot is of the review-pr review step']);
+
+    $bare = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'review-pr', 'status' => 'pending']]);
+    expect(dispatch_cli(['finish', $bare['manifest'], '{"action":"done"}'])['json'])
+        ->toBe(['action' => 'halt', 'reason' => "the workflow returned done, but there is no snapshot at {$bare['before']}"]);
+});
+
+it('keeps the leg of a halt the manifest already records', function () {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'review-plan', 'status' => 'halted', 'reason' => 'from brief']]);
+
+    dispatch_cli(['finish', $fixture['manifest'], '{"action":"halt","leg":"handoff","reason":"from brief"}']);
+
+    expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-plan', 'status' => 'halted', 'reason' => 'from brief']);
+});
 
 it('halts a launch on a manifest without a mode, printing only the JSON line', function () {
     $fixture = dispatch_fixture();

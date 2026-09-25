@@ -120,10 +120,11 @@ A leg writes only its results: `artifacts`, `last_sha`, `suite`, its `gate_ledge
 brief. In `auto` and `interactive`, after every return `returned` compares the manifest with its
 snapshot (`pipeline_returned()`, `../checks/dispatch.php`) and **halts** when any other key changed,
 when an existing ledger entry was rewritten (the resolve step may only complete the open entry), or
-when the status does not agree with the ledger. In `autoflow` nothing compares: the workflow script
-trusts the status the step returns, `brief` halts a step the ledger does not support, and
-`run_audit.php` reports after the run whether the ledger agrees with what the steps reported
-(`engine.md` §`autoflow`).
+when the status does not agree with the ledger. In `autoflow` the next `brief` (or, after the last
+step, `finish`) makes the same comparison against that step's snapshot, and also halts when the status,
+`ui` or `size` the step returned to the script disagrees with the manifest, its diff or the spec
+(`engine.md` §`autoflow`, *The check at the next boundary*). `run_audit.php` still reports after the
+run whether the ledger agrees with what the steps reported.
 
 | `cursor.status` | Meaning |
 |---|---|

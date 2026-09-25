@@ -7,7 +7,7 @@
  *                 php dispatch_cli.php returned <manifest> <diff-file>
  *   autoflow:     php dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--mode autoflow|auto] [--decision <text>]...
  *                 php dispatch_cli.php launch <manifest> <diff-file> [--from <leg>]
- *                 php dispatch_cli.php brief <manifest> <leg> <step>
+ *                 php dispatch_cli.php brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]]
  *                 php dispatch_cli.php finish <manifest> <decision-json>
  *                 php dispatch_cli.php size <manifest>
  *                 php dispatch_cli.php ui <diff-file>
@@ -15,7 +15,7 @@
  * `brief` prints the brief as Markdown; `size` and `ui` print a bare value for a step to copy
  * (`Bounded` / `Architectural`, `true` / `false`); every other answer, and a `brief` that halts, is
  * one JSON line. Exits 0 on every decision, a halt included. Exits 1 on a usage error (a `kickoff`
- * it cannot parse included), and when `size` has no readable manifest or `ui` no diff file.
+ * or a `brief` it cannot parse included), and when `size` has no readable manifest or `ui` no diff file.
  */
 
 require_once __DIR__ . '/triggers.php';
@@ -27,12 +27,12 @@ require_once __DIR__ . '/brief.php';
 require_once __DIR__ . '/suite.php';
 require_once __DIR__ . '/kickoff.php';
 
-/** @return array{brief: string, before: string} */
+/** @return array{brief: string, before: string, diff: string} */
 function dispatch_cli_files(string $manifestPath): array
 {
     $stem = preg_replace('/\.json$/', '', $manifestPath);
 
-    return ['brief' => "{$stem}.brief.md", 'before' => "{$stem}.before.json"];
+    return ['brief' => "{$stem}.brief.md", 'before' => "{$stem}.before.json", 'diff' => "{$stem}.diff"];
 }
 
 function dispatch_cli_emit(string $manifestPath, array $manifest, string $action = 'dispatch'): array
@@ -156,7 +156,7 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
         if (! in_array($from, pipeline_legs(), true)) {
             return pipeline_halt("cannot re-arm the run at '{$from}': not a leg");
         }
-        if (! pipeline_can_navigate($manifest['cursor']['leg'], $from, pipeline_done_legs($manifest['gate_ledger'] ?? []), $triggers)) {
+        if (! pipeline_can_navigate($manifest['cursor']['leg'], $from, pipeline_done_legs(pipeline_ledger($manifest)), $triggers)) {
             return pipeline_halt("cannot re-arm the run at {$from}: a gate before it has not run");
         }
         $manifest = [...$manifest, 'cursor' => ['leg' => $from, 'status' => 'pending']];
@@ -171,11 +171,16 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
         return dispatch_cli_halt($manifestPath, $manifest, $leg, $problem);
     }
 
+    $snapshot = dispatch_cli_files($manifestPath)['before'];
+    if (is_file($snapshot)) {
+        unlink($snapshot);
+    }
+
     return [
         'action' => 'start',
         'startLeg' => $leg,
         'startStep' => pipeline_step($manifest, $leg),
-        'loops' => pipeline_loop_counts($manifest['gate_ledger'] ?? []),
+        'loops' => pipeline_loop_counts(pipeline_ledger($manifest)),
         'ui' => $triggers['ui'],
         'size' => dispatch_cli_design_size($manifest)->value,
         'manifest' => $manifestPath,
@@ -221,29 +226,96 @@ function dispatch_cli_pr_view(string $worktree, int|string $pr): ?array
     return is_array($view) ? $view : null;
 }
 
-/** An `autoflow` step's first command: the step the script chose becomes the cursor, then its brief. */
-function dispatch_cli_brief(string $manifestPath, string $leg, string $step): array|string
+/**
+ * An `autoflow` step's first command. It checks the step before it when the script names one
+ * (`--after`), then the step the script chose becomes the cursor, the snapshot is taken, and the brief
+ * is printed. A halt from that check leaves the cursor on the step that failed it.
+ *
+ * @param array{after?: string, status?: string, ui?: string, size?: string} $reported
+ */
+function dispatch_cli_brief(string $manifestPath, string $leg, string $step, array $reported = []): array|string
 {
     $manifest = manifest_read($manifestPath);
     if ($manifest === null) {
         return pipeline_halt("no readable manifest at {$manifestPath}");
     }
-    $problem = dispatch_cli_invalid($manifest)
-        ?? dispatch_cli_mode_problem('brief serves autoflow steps', $manifest)
-        ?? pipeline_step_problem($manifest, $leg, $step);
+    $problem = dispatch_cli_invalid($manifest) ?? dispatch_cli_mode_problem('brief serves autoflow steps', $manifest);
+    if ($problem !== null) {
+        return pipeline_halt($problem);
+    }
+    $boundary = dispatch_cli_boundary_problem($manifestPath, $manifest, "{$leg}:{$step}", $reported);
+    if ($boundary !== null) {
+        return dispatch_cli_halt($manifestPath, $manifest, $boundary['leg'], $boundary['reason']);
+    }
+    $problem = pipeline_step_problem($manifest, $leg, $step);
     if ($problem !== null) {
         return pipeline_halt($problem);
     }
     $manifest = [...$manifest, 'cursor' => ['leg' => $leg, 'status' => 'pending']];
     manifest_write($manifestPath, $manifest);
+    manifest_write(dispatch_cli_files($manifestPath)['before'], $manifest);
 
     return pipeline_brief($manifest, $leg, $manifestPath, $step);
 }
 
 /**
+ * What stops `$next` from being briefed after the step `--after` names: null when nothing does, or
+ * when no step ran before it in this run (no `--after`, and `launch` left no snapshot). A brief
+ * without `--after` over another step's snapshot halts: the step agent dropped the script's flags.
+ *
+ * @return array{leg: string, reason: string}|null
+ */
+function dispatch_cli_boundary_problem(string $manifestPath, array $manifest, string $next, array $reported): ?array
+{
+    $after = $reported['after'] ?? null;
+    $files = dispatch_cli_files($manifestPath);
+    $before = manifest_read($files['before']);
+    $snapshot = dispatch_cli_snapshot_step($before);
+    $label = fn (string $pair) => str_replace(':', ' ', $pair);
+
+    return match (true) {
+        $snapshot === null && $after === null => null,
+        $snapshot === null => ['leg' => explode(':', $after)[0], 'reason' => "cannot check the {$label($after)} step's return: no snapshot at {$files['before']}"],
+        $snapshot === $next => pipeline_normalized($before) === pipeline_normalized($manifest)
+            ? null
+            : ['leg' => $before['cursor']['leg'], 'reason' => "the {$label($next)} step returned nothing and changed the manifest"],
+        $after === null => ['leg' => $before['cursor']['leg'], 'reason' => "a snapshot of the {$label($snapshot)} step exists, but the script names no step before {$label($next)}"],
+        $snapshot !== $after => ['leg' => explode(':', $after)[0], 'reason' => "the snapshot is of the {$label($snapshot)} step, but the script says {$label($after)} returned: it did not run brief"],
+        default => dispatch_cli_return_problem($manifestPath, $before, $manifest, $reported),
+    };
+}
+
+/** `<leg>:<step>` the snapshot was taken for, as `returned` reads it; null when there is no valid snapshot. */
+function dispatch_cli_snapshot_step(?array $before): ?string
+{
+    if ($before === null || dispatch_cli_invalid($before) !== null) {
+        return null;
+    }
+    $leg = $before['cursor']['leg'];
+
+    return "{$leg}:" . pipeline_step($before, $leg);
+}
+
+/** `pipeline_reported_problem()` over the snapshot, with the design size and, after `implement`, the step's own diff. */
+function dispatch_cli_return_problem(string $manifestPath, array $before, array $manifest, array $reported): ?array
+{
+    $leg = $before['cursor']['leg'];
+    $files = dispatch_cli_files($manifestPath);
+    if ($leg === 'implement' && (! is_file($files['diff']) || filemtime($files['diff']) < filemtime($files['before']))) {
+        return ['leg' => $leg, 'reason' => "the implement step did not write {$files['diff']}"];
+    }
+    $diffUi = $leg === 'implement' ? pipeline_triggers((string) file_get_contents($files['diff']))['ui'] : null;
+    $reason = pipeline_reported_problem($before, $manifest, $reported, dispatch_cli_design_size($manifest), $diffUi);
+
+    return $reason === null ? null : ['leg' => $leg, 'reason' => $reason];
+}
+
+/**
  * Records the workflow's return; anything that is not `done` is a halt, and a halt with no reason says
- * so. `done` counts only on `review-pr`: nothing else may lead to `gh pr ready`. A halt that names no
- * leg of the pipeline keeps the cursor's, so a later `launch` can still read the run.
+ * so. `done` counts only on `review-pr`, and only when its resolve step's return holds: nothing else
+ * may lead to `gh pr ready`. A halt keeps the cursor's leg when the cursor already records a halt
+ * (`brief` or the step wrote it there) or when the return names no leg of the pipeline, so a later
+ * `launch` resumes at the step that failed.
  */
 function dispatch_cli_finish(string $manifestPath, string $decisionJson): array
 {
@@ -259,19 +331,34 @@ function dispatch_cli_finish(string $manifestPath, string $decisionJson): array
     $decision = json_decode($decisionJson, true);
     $decision = is_array($decision) ? $decision : [];
     if (($decision['action'] ?? null) === 'done') {
-        return $leg === 'review-pr'
-            ? dispatch_cli_done($manifestPath, $manifest)
-            : dispatch_cli_halt($manifestPath, $manifest, $leg, "the workflow returned done at {$leg}");
+        $problem = $leg === 'review-pr' ? dispatch_cli_finish_problem($manifestPath, $manifest) : "the workflow returned done at {$leg}";
+
+        return $problem === null ? dispatch_cli_done($manifestPath, $manifest) : dispatch_cli_halt($manifestPath, $manifest, $leg, $problem);
     }
     $reason = trim((string) ($decision['reason'] ?? ''));
     $named = $decision['leg'] ?? null;
+    $recorded = ($manifest['cursor']['status'] ?? null) === 'halted';
 
     return dispatch_cli_halt(
         $manifestPath,
         $manifest,
-        in_array($named, pipeline_legs(), true) ? $named : $leg,
+        in_array($named, pipeline_legs(), true) && ! $recorded ? $named : $leg,
         $reason === '' ? "the workflow returned no decision: {$decisionJson}" : $reason,
     );
+}
+
+/** Why a `done` return does not hold: the last step must be `review-pr`'s resolve step, and its return must pass the check. */
+function dispatch_cli_finish_problem(string $manifestPath, array $manifest): ?string
+{
+    $before = manifest_read(dispatch_cli_files($manifestPath)['before']);
+    $snapshot = dispatch_cli_snapshot_step($before);
+    if ($snapshot !== 'review-pr:resolve') {
+        return $snapshot === null
+            ? 'the workflow returned done, but there is no snapshot at ' . dispatch_cli_files($manifestPath)['before']
+            : 'the workflow returned done, but the last snapshot is of the ' . str_replace(':', ' ', $snapshot) . ' step';
+    }
+
+    return dispatch_cli_return_problem($manifestPath, $before, $manifest, ['status' => 'continued'])['reason'] ?? null;
 }
 
 /** An `autoflow` design step's `size`: the committed spec's, as `launch` reads it. */
@@ -336,13 +423,50 @@ function dispatch_cli_kickoff(array $arguments): ?array
     return $parsed === null ? null : pipeline_kickoff($parsed['repoRoot'], $parsed['item'], $parsed);
 }
 
+/**
+ * `brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]]`;
+ * null is a usage error. The values are the script's copy of the previous step's return, compared as given.
+ *
+ * @return array{0: string, 1: string, 2: string, 3: array<string, string>}|null
+ */
+function dispatch_cli_brief_args(array $arguments): ?array
+{
+    $positional = [];
+    $reported = [];
+    while ($arguments !== []) {
+        $argument = (string) array_shift($arguments);
+        if (! str_starts_with($argument, '--')) {
+            $positional[] = $argument;
+
+            continue;
+        }
+        $name = substr($argument, 2);
+        $value = array_shift($arguments);
+        if (! in_array($name, ['after', 'status', 'ui', 'size'], true) || $value === null || isset($reported[$name])) {
+            return null;
+        }
+        $reported[$name] = (string) $value;
+    }
+    [$leg, $step] = explode(':', $reported['after'] ?? '', 2) + [1 => ''];
+    $after = isset($reported['after']) ? in_array($leg, pipeline_legs(), true) && in_array($step, pipeline_steps($leg), true) : $reported === [];
+
+    return count($positional) === 3 && $after ? [...$positional, $reported] : null;
+}
+
+function dispatch_cli_brief_command(array $arguments): array|string|null
+{
+    $parsed = dispatch_cli_brief_args($arguments);
+
+    return $parsed === null ? null : dispatch_cli_brief(...$parsed);
+}
+
 $flag = array_search('--from', $argv, true);
 $result = match ($argv[1] ?? '') {
     'kickoff' => dispatch_cli_kickoff(array_slice($argv, 2)),
     'next' => dispatch_cli_next((string) ($argv[2] ?? '')),
     'returned' => dispatch_cli_returned((string) ($argv[2] ?? ''), (string) ($argv[3] ?? '')),
     'launch' => dispatch_cli_launch((string) ($argv[2] ?? ''), (string) ($argv[3] ?? ''), $flag === false ? null : (string) ($argv[$flag + 1] ?? '')),
-    'brief' => dispatch_cli_brief((string) ($argv[2] ?? ''), (string) ($argv[3] ?? ''), (string) ($argv[4] ?? '')),
+    'brief' => dispatch_cli_brief_command(array_slice($argv, 2)),
     'finish' => dispatch_cli_finish((string) ($argv[2] ?? ''), (string) ($argv[3] ?? '')),
     'size' => dispatch_cli_size((string) ($argv[2] ?? '')),
     'ui' => dispatch_cli_ui((string) ($argv[2] ?? '')),
@@ -350,7 +474,7 @@ $result = match ($argv[1] ?? '') {
 };
 
 if ($result === null) {
-    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--mode autoflow|auto] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] | brief <manifest> <leg> <step> | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> (size needs a readable manifest, ui an existing diff file)\n");
+    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--mode autoflow|auto] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> (size needs a readable manifest, ui an existing diff file)\n");
     exit(1);
 }
 

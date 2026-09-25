@@ -35,8 +35,11 @@ function halt(leg, reason) {
   return { action: 'halt', leg, reason: reason || `the ${leg} step halted without a reason` }
 }
 
+// The previous step's return as brief checks it (`--after`); the first step of a run gets none. A retry
+// reuses its prompt, and so the flags of the step before it.
 function briefCommand(leg, step) {
-  return `php ${args.checks}/dispatch_cli.php brief ${args.manifest} ${leg} ${step}`
+  const flags = last ? [` --after ${last.leg}:${last.step} --status ${last.status}`, ...Object.keys(COPIED[last.leg] ?? {}).map(key => ` --${key} ${last[key]}`)] : []
+  return `php ${args.checks}/dispatch_cli.php brief ${args.manifest} ${leg} ${step}${flags.join('')}`
 }
 
 function schemaFor(leg, step) {
@@ -61,7 +64,7 @@ function stepPrompt(leg, step) {
     lines.push(`4. After the last commit, run \`php ${args.checks}/dispatch_cli.php size ${args.manifest}\` and return what it prints as \`size\`: copy it, do not judge it. Every return carries \`size\`; on a halt its value is ignored.`)
   }
   if (leg === 'implement') {
-    lines.push(`4. After the last commit, run \`git -C ${args.worktree} diff origin/<base>...HEAD > ${diff}\` with <base> the PR's base branch (\`gh pr view <pr> --json baseRefName --jq .baseRefName\`, <pr> being \`artifacts.pr\` in ${args.manifest}), then \`php ${args.checks}/dispatch_cli.php ui ${diff}\`, and return what it prints as \`ui\`: copy it, do not judge it. Every return carries \`ui\`; on a halt its value is ignored.`)
+    lines.push(`4. Before returning (after the last commit, when there is one), run \`git -C ${args.worktree} diff origin/<base>...HEAD > ${diff}\` with <base> the PR's base branch (\`gh pr view <pr> --json baseRefName --jq .baseRefName\`, <pr> being \`artifacts.pr\` in ${args.manifest}), then \`php ${args.checks}/dispatch_cli.php ui ${diff}\`, and return what it prints as \`ui\`: copy it, do not judge it. Every return carries \`ui\`; on a halt its value is ignored.`)
   }
   if (leg === 'review-pr' && step === 'resolve') {
     lines.push(`4. Run the proof page's \`open\` as \`PIPELINE_NO_OPEN=${args.noOpen ? 1 : 0} php ${args.checks}/proof_cli.php open …\`.`)
@@ -112,6 +115,7 @@ let size = args.size
 let exempted = false
 let leg = args.startLeg
 let from = args.startStep
+let last
 while (leg) {
   const all = steps[leg]
   const remaining = from ? all.slice(all.indexOf(from)) : all
@@ -119,6 +123,7 @@ while (leg) {
   let result
   for (const step of remaining) {
     result = await runStep(leg, step)
+    last = { ...result, leg, step }
     log(`${leg}:${step} ${result.status}${result.reason ? `: ${result.reason}` : ''}`)
     if (result.status !== 'continued') break
   }
