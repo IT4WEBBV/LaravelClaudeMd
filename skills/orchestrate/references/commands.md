@@ -37,8 +37,8 @@ The PR is found by prefix: `closingIssuesReferences` stays empty until the run's
 
 ## Owner of in-flight work
 
-- **A run this session dispatched:** the dispatch record (agent id for `auto`, the workflow's task
-  id for `autoflow` → issue) is the owner. Search nothing.
+- **A run this session dispatched:** the dispatch record (the workflow's task id → issue) is the
+  owner. Search nothing.
 - **Anything else:**
   ```bash
   claude agents --json --all | python3 ~/.claude/skills/orchestrate/owners.py <worktree>
@@ -72,27 +72,9 @@ gh api repos/<repo>/issues/M --jq '{number, state, state_reason, is_pr: (.pull_r
 gh pr view M -R <repo> --json state --jq .state
 ```
 
-## Brief
-
-The `auto` dispatch, one background agent per issue:
-
-```
-Run /pipeline auto <N> in <owner/repo>. This session sits in the primary checkout <path>.
-
-Unattended: do not open the proof page in a browser (PIPELINE_NO_OPEN=1, pipeline engine.md §The proof store).
-Kickoff: php ~/.claude/skills/pipeline/checks/dispatch_cli.php kickoff <path> <N> --mode auto, with one --decision per settled decision below; a halt ends the run. Never switch branches in <path>; other runs share it.
-
-Settled decisions (owner, <date>): <each decision verbatim | none>
-
-Pointers: issue #<N>; depends on <#M (PR #P, merged) | none>.
-
-Return: the PR number, draft or ready, the halt reason if it halted, and its open questions verbatim.
-```
-Add nothing else (`pipeline` `references/engine.md` §What a leg brief consists of).
-
 ## Launch
 
-`autoflow`, per issue N, from the primary checkout: pipeline `SKILL.md` §`autoflow` — how a run starts
+Per issue N, from the primary checkout: pipeline `SKILL.md` §`autoflow` — how a run starts
 and ends, steps 1–3.
 
 - Kickoff is `php ~/.claude/skills/pipeline/checks/dispatch_cli.php kickoff <primary checkout> N`,
@@ -105,9 +87,9 @@ and ends, steps 1–3.
   its task id → N to the dispatch record (the id `TaskStop` takes and the completion notice carries;
   the `wf_…` run id names the transcript dir). Do not wait on it; its completion notice arrives.
 
-The engine follows the manifest's `mode`, not the batch's argument: `launch` refuses a manifest that is
-not `autoflow`, `next` one that is. A dead session's `autoflow` run: `finish` it with a halt, then a new
-`launch` and workflow.
+`launch` refuses a manifest that is not `autoflow`; one that still says `auto` is refused naming
+`autoflow` (pipeline `engine.md` §The loop). A dead session's `autoflow` run: `finish` it with a halt,
+then a new `launch` and workflow.
 
 Commits wanted on a ready PR, after `gh pr ready --undo <P>`:
 
@@ -121,8 +103,7 @@ then a new `pipeline-autoflow` workflow with that JSON.
 
 ## Finish
 
-`autoflow`, on a run's completion notice (pipeline `engine.md` §`autoflow` — a program that calls
-agents):
+On a run's completion notice (pipeline `engine.md` §`autoflow` — a program that calls agents):
 
 ```bash
 php ~/.claude/skills/pipeline/checks/dispatch_cli.php finish <manifest> '<the workflow return, as JSON>'
