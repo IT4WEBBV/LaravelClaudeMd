@@ -34,7 +34,11 @@ The `run:` line adds the total workflow time.
 Verified on this machine against real `wf_*` directories (2026-09-25):
 
 - Every record of `agent-<id>.jsonl` (`user`, `assistant`, `attachment`) carries an ISO 8601 UTC
-  `timestamp` with milliseconds, e.g. `2026-09-25T12:25:54.056Z`. Records are appended in time order.
+  `timestamp` with milliseconds, e.g. `2026-09-25T12:25:54.056Z`. Records are appended roughly, not
+  strictly, in time order: 139 of 17,063 records carry a timestamp earlier than the line before them,
+  which the min/max for `start` and `end` absorbs. A `tool_result` never comes before its `tool_use` in
+  line order (0 of 3,507), so pairing a result with the call already met loses nothing; the pairing does
+  not depend on time order.
 - A tool call is a content block `{"type":"tool_use","id":…}` in an `assistant` record. Its answer is a
   content block `{"type":"tool_result","tool_use_id":…}` in a later `user` record. One assistant turn
   that calls several tools writes one record per `tool_use`, and their results follow; the calls run in
@@ -75,8 +79,8 @@ Helpers in the same file, one job each:
   tests pin it).
 - `pipeline_record_time(array $entry): ?float` parses a record's `timestamp` with `DateTimeImmutable`
   and reads it back as `(float) $time->format('U.u')`, which keeps the milliseconds. A `timestamp` that is
-  missing, not a string, or unparseable gives null: the record is skipped for timing and still counts for
-  cost as today.
+  missing, not a string, empty, or unparseable gives null: the record is skipped for timing and still
+  counts for cost as today. Empty needs its own check because `DateTimeImmutable` parses `''` as *now*.
 - `pipeline_union_seconds(list<array{float, float}> $intervals): float` sorts by start; each interval adds
   only the part past the furthest end so far, so overlap counts once and a reversed interval adds 0.
 - `pipeline_run_seconds(list<array> $steps): float` is the run's span (next section).

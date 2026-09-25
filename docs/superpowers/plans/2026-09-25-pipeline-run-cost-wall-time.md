@@ -106,6 +106,7 @@ it('times a transcript from its earliest to its latest record, counting overlapp
         cost_tool_result('t5', '10:03:30.000'),
         cost_call('m2', 1, 0, 0),
         '{"type":"user","timestamp":"not a time","message":{"role":"user","content":"hi"}}',
+        '{"type":"user","timestamp":"","message":{"role":"user","content":"hi"}}',
         'not json',
         '',
         cost_call('m0', 1, 0, 0, 50, null, '09:59:00.250'),
@@ -121,7 +122,7 @@ it('times a transcript from its earliest to its latest record, counting overlapp
 });
 ```
 
-The last record in line order is the earliest in time, so `start` must be a minimum, not the first line. It can fail on the defect three ways: the function is missing, a summed waiting gives 269.5, and a millisecond-dropping parser gives 510.0.
+The last record in line order is the earliest in time, so `start` must be a minimum, not the first line. It can fail on the defect four ways: the function is missing, a summed waiting gives 269.5, a millisecond-dropping parser gives 510.0, and a parser that lets the empty `timestamp` through stamps that record *now* (`DateTimeImmutable('')`), moving `end` to the present.
 
 - [ ] **Step 3: Run it to see it fail.**
 
@@ -171,11 +172,11 @@ with
 - [ ] **Step 5: The time functions.** Extend the file docblock's last sentence with: ` And how long it took (spec 2026-09-25): wall time per step, the part of it spent waiting on tools, the run's span.` (the docblock then reads "… cache reads. And how long it took …"). Add after `pipeline_run_journal()`:
 
 ```php
-/** A record's `timestamp` as Unix seconds with milliseconds; null when it has none that parses. */
+/** A record's `timestamp` as Unix seconds with milliseconds; null when it has none that parses (`''` would parse as now). */
 function pipeline_record_time(array $entry): ?float
 {
     $timestamp = $entry['timestamp'] ?? null;
-    if (! is_string($timestamp)) {
+    if (! is_string($timestamp) || $timestamp === '') {
         return null;
     }
     try {
@@ -399,9 +400,11 @@ step peak.
 
 - [ ] **Step 2: SKILL.md.** In the *Cost per run* bullet replace `(weighted cost per step, the largest step peak)` with `(weighted cost and wall time per step, the run's span, the largest step peak)`, re-wrapping the bullet.
 
-- [ ] **Step 3: Smoke on a real run.** Pick the newest `wf_*` directory with more than one `agent-*.jsonl`:
+- [ ] **Step 3: Smoke on a real run.** Use the real Asimo run the plan already measured (`wf_c355120f-4e4`), not a stub smoke run, whose steps of well under a minute prove little. Only when it is gone, pick the newest `wf_*` directory with more than one `agent-*.jsonl`, skipping stub runs:
 
 ```bash
+php skills/pipeline/checks/run_cost_cli.php ~/.claude/projects/-Users-jroelofs-GitProjects-Asimo-Asimo/25ec161f-1d54-4e86-b2cb-0784b1f4f6b6/subagents/workflows/wf_c355120f-4e4
+# fallback when that directory is gone:
 for d in $(ls -dt ~/.claude/projects/*/*/subagents/workflows/wf_* | head -40); do echo "$(ls "$d"/agent-*.jsonl 2>/dev/null | wc -l) $d"; done | sort -rn | head -1
 php skills/pipeline/checks/run_cost_cli.php <that dir>
 ```
