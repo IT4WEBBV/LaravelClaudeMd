@@ -7,7 +7,7 @@ function dispatch_fixture(array $manifest = []): array
     mkdir($dir . '/.claude/pipeline', 0777, true);
     $path = $dir . '/.claude/pipeline/feature-x.json';
     manifest_write($path, [
-        'branch' => 'feature/x', 'worktree' => $dir, 'mode' => 'auto',
+        'branch' => 'feature/x', 'worktree' => $dir, 'mode' => 'interactive',
         'cursor' => ['leg' => 'review-plan', 'status' => 'pending'],
         'artifacts' => ['spec' => null, 'plan' => null, 'pr' => null, 'issue' => null],
         'gate_ledger' => [],
@@ -102,7 +102,7 @@ it('halts when the diff file is missing', function () {
     expect(dispatch_cli(['returned', $fixture['manifest'], $fixture['dir'] . '/missing.diff'])['json']['action'])->toBe('halt');
 });
 
-it('runs design inline outside auto', function () {
+it('runs design inline in an interactive run', function () {
     $fixture = dispatch_fixture(['mode' => 'interactive', 'cursor' => ['leg' => 'design', 'status' => 'pending']]);
 
     expect(dispatch_cli(['next', $fixture['manifest']])['json'])->toMatchArray(['leg' => 'design', 'inline' => true]);
@@ -262,10 +262,10 @@ it('halts a launch without a manifest or a diff file', function () {
 });
 
 it('launches only autoflow runs, and next refuses one', function () {
-    $auto = dispatch_fixture();
-    expect(dispatch_cli(['launch', $auto['manifest'], $auto['diff']])['json'])
-        ->toBe(['action' => 'halt', 'reason' => "launch starts autoflow runs; this run's mode is auto (resume it with /pipeline, which uses next)"]);
-    expect(manifest_read($auto['manifest'])['cursor'])->toBe(['leg' => 'review-plan', 'status' => 'pending']);
+    $interactive = dispatch_fixture();
+    expect(dispatch_cli(['launch', $interactive['manifest'], $interactive['diff']])['json'])
+        ->toBe(['action' => 'halt', 'reason' => "launch starts autoflow runs; this run's mode is interactive (resume it with /pipeline, which uses next)"]);
+    expect(manifest_read($interactive['manifest'])['cursor'])->toBe(['leg' => 'review-plan', 'status' => 'pending']);
 
     $flow = dispatch_fixture(['mode' => 'autoflow']);
     expect(dispatch_cli(['next', $flow['manifest']])['json'])
@@ -513,8 +513,26 @@ it('serves brief and finish on autoflow runs only, and leaves the manifest alone
         ->toBe(['action' => 'halt', 'reason' => $reason]);
     expect(file_get_contents($fixture['manifest']))->toBe($before);
 })->with([
-    'brief' => [['brief', 'implement', 'run'], "brief serves autoflow steps; this run's mode is auto (resume it with /pipeline, which uses next)"],
-    'finish' => [['finish', '{"action":"done"}'], "finish records autoflow runs; this run's mode is auto (resume it with /pipeline, which uses next)"],
+    'brief' => [['brief', 'implement', 'run'], "brief serves autoflow steps; this run's mode is interactive (resume it with /pipeline, which uses next)"],
+    'finish' => [['finish', '{"action":"done"}'], "finish records autoflow runs; this run's mode is interactive (resume it with /pipeline, which uses next)"],
+]);
+
+it('refuses a manifest that still says auto in every command, naming autoflow, and leaves it alone', function (array $arguments) {
+    $fixture = dispatch_fixture(['mode' => 'auto']);
+    manifest_write($fixture['before'], manifest_read($fixture['manifest']));
+    $before = file_get_contents($fixture['manifest']);
+    $files = ['<manifest>' => $fixture['manifest'], '<diff>' => $fixture['diff']];
+
+    expect(dispatch_cli(array_map(fn (string $argument) => $files[$argument] ?? $argument, $arguments))['json'])
+        ->toBe(['action' => 'halt', 'reason' => pipeline_retired_mode('auto')]);
+    expect(file_get_contents($fixture['manifest']))->toBe($before);
+    expect(is_file($fixture['brief']))->toBeFalse();
+})->with([
+    'next' => [['next', '<manifest>']],
+    'returned' => [['returned', '<manifest>', '<diff>']],
+    'launch' => [['launch', '<manifest>', '<diff>']],
+    'brief' => [['brief', '<manifest>', 'review-plan', 'review']],
+    'finish' => [['finish', '<manifest>', '{"action":"done"}']],
 ]);
 
 it('prints the committed spec\'s design size, bare', function (string $spec, string $size) {
@@ -639,13 +657,21 @@ it('kicks off an issue: the declared create, no upstream, the manifest excluded 
 it('writes the mode, light and the decisions verbatim into the first manifest', function () {
     $fixture = kickoff_fixture();
 
-    $ready = kickoff($fixture, ['#69', '--light', '--mode', 'auto', '--decision', 'Fold in #53: add pipeline_ledger()', '--decision', 'Keep the guard'])['json'];
+    $ready = kickoff($fixture, ['#69', '--light', '--mode', 'autoflow', '--decision', 'Fold in #53: add pipeline_ledger()', '--decision', 'Keep the guard'])['json'];
 
     expect(manifest_read($ready['manifest']))->toMatchArray([
-        'mode' => 'auto',
+        'mode' => 'autoflow',
         'light' => true,
         'decisions' => ['Fold in #53: add pipeline_ledger()', 'Keep the guard'],
     ]);
+});
+
+it('halts a kickoff for the removed auto mode before anything is created, naming autoflow', function () {
+    $fixture = kickoff_fixture();
+
+    expect(kickoff($fixture, ['69', '--mode', 'auto']))->toMatchArray(['code' => 0, 'json' => ['action' => 'halt', 'reason' => pipeline_retired_mode('auto')]]);
+    kickoff_left_nothing($fixture);
+    expect(kickoff_calls($fixture))->toBe([]);
 });
 
 it('kicks off an idea on a feature branch without asking gh', function () {
