@@ -179,8 +179,30 @@ it('launches from the cursor with the ledger\'s loop-backs, the design size and 
         'worktree' => $fixture['dir'],
         'noOpen' => false,
         'checks' => realpath(__DIR__ . '/..'),
+        'tables' => pipeline_routing_tables(),
     ]);
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-plan', 'status' => 'pending']);
+});
+
+it('hands the autoflow script its routing tables, from the functions interactive mode routes by', function () {
+    $fixture = dispatch_fixture(['mode' => 'autoflow']);
+    $tables = dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json']['tables'];
+    $values = fn (array $statuses) => array_map(fn (LegStatus $status) => $status->value, $statuses);
+
+    expect($tables['legs'])->toBe(pipeline_legs());
+    expect($tables['bound'])->toBe(PIPELINE_LOOP_BOUND);
+    expect(array_keys($tables['steps']))->toBe(pipeline_legs());
+    expect(array_keys($tables['loopTarget']))->toBe(array_values(array_filter(pipeline_legs(), fn (string $leg) => pipeline_loop_target($leg) !== null)));
+    $pairs = [];
+    foreach (pipeline_legs() as $leg) {
+        expect($tables['steps'][$leg])->toBe(pipeline_steps($leg));
+        expect($tables['loopTarget'][$leg] ?? null)->toBe(pipeline_loop_target($leg));
+        foreach (pipeline_steps($leg) as $step) {
+            $pairs[] = "{$leg}:{$step}";
+            expect($tables['allowed']["{$leg}:{$step}"])->toBe($values(LegStatus::allowedFor($leg, $step)));
+        }
+    }
+    expect(array_keys($tables['allowed']))->toBe($pairs);
 });
 
 it('marks noOpen when the launch runs unattended', function () {

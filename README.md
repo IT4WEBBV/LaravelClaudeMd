@@ -62,6 +62,9 @@ the other machine on its own:
 - `edit` — the repo owning the file being written, once per repo per session.
 - `checkout` — drops cached verdicts after a branch switch.
 
+The pipeline skill's suite needs `node` on PATH: `AutoflowScriptTest` replays the autoflow Workflow
+script under it, and fails rather than skips without it, so a machine without `node` has a red suite.
+
 ## Linking the skills
 
 `~/.claude/skills/` is a **real directory** holding one symlink per skill (a single symlink could

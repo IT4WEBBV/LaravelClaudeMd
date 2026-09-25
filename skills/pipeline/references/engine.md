@@ -105,7 +105,7 @@ php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [-
 # → {"action":"ready","manifest":…,"worktree":…,"branch":…,"notes":[…]} | {"action":"halt","reason":…}
 git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
 PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>]
-# → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"noOpen":…,"checks":…}
+# → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"noOpen":…,"checks":…,"tables":{…}}
 #   | {"action":"done"} | {"action":"halt","reason":…}
 # start: the workflow pipeline-autoflow with that JSON as args, in the background; wait for its completion notice
 php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
@@ -125,15 +125,19 @@ launched the run, with its reason.
   `pipeline_legs()`: a PR that needs new commits gets a new run with `--from review-pr`, without
   editing a file. `checks` is the directory `launch` ran from, so every step's `brief` runs the same
   code.
+  `tables` is what the script routes by, `pipeline_routing_tables()`: the legs in order, each leg's
+  steps, the loop-back targets, the statuses per `<leg>:<step>` and the bound, built from the
+  functions `auto` and `interactive` route by, so the script keeps no copy of them.
 - **The script** gives each step a schema whose `status` allows only what that step may return
-  (`LegStatus::allowedFor()`), continues, loops back or returns on that status, counts each loop-back
-  against the bound of 2 per gate (`gates.md` §Loop-backs), and returns `{action: done}` or
+  (`tables.allowed`, from `LegStatus::allowedFor()`), continues, loops back or returns on that status,
+  counts each loop-back against `tables.bound`, 2 per gate (`gates.md` §Loop-backs), and returns `{action: done}` or
   `{action: halt, leg, reason}`. Nothing ends a run as `done` except `review-pr`'s resolve step
   continuing. The design size it goes by is the one `launch` read, then the one each `design` step
   copied from its spec. A Bounded escalation is not a loop-back, and escalation is one-way (§Design
   size), so the script exempts one per run; every other `plan-insufficient` counts toward
-  `review-plan`'s bound. A status it cannot route halts, and so do `args` that are not a `launch`
-  `start` answer. A review step runs on Fable, and once more on Opus when it returns nothing;
+  `review-plan`'s bound. A status it cannot route halts, and so do `args` that are not a `launch` `start` answer; `tables`
+  missing or incomplete halts with a reason that names them. `AutoflowScriptTest` replays the script
+  on `launch`'s answer. A review step runs on Fable, and once more on Opus when it returns nothing;
   `handoff` runs at low effort; a step that throws or returns nothing halts the run.
 - **A step** first runs `dispatch_cli.php brief <manifest> <leg> <step>`. It writes
   `cursor: {leg, status: pending}` — so after a `TaskStop` or a dead session the cursor still names the
@@ -538,7 +542,7 @@ of the plan approval**: the plan passed `review-plan` and turned out not to cove
 1. The step appends `{gate: 'plan-approval', leg: <its leg>, cycle, at, reason, outcome: 'looped-back'}`
    and returns `plan-insufficient`. A return without that entry halts.
 2. The run goes back to `design` through the same bound as a `review-plan` loop-back
-   (`pipeline_loop_back()` in `auto` and `interactive`, the script's `BOUND` in `autoflow`): the entry
+   (`pipeline_loop_back()` in `auto` and `interactive`, `tables.bound` in `autoflow`): the entry
    counts toward the 2 cycles, and the third halts — before
    `handoff` with no push, after it with the PR left draft (§Failure policy).
 3. `design` extends the plan, and the spec where it must say more, to cover the entry's `reason`;

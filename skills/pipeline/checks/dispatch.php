@@ -51,6 +51,33 @@ function pipeline_loop_target(string $leg): ?string
     return ['review-plan' => 'design', 'verify-ui' => 'implement', 'review-pr' => 'implement'][$leg] ?? null;
 }
 
+/**
+ * What the `autoflow` script routes by, as `launch` hands it over (`tables` in its `start` answer), so the
+ * script keeps no copy: the legs in order, each leg's steps, the loop-back targets, the statuses each
+ * `<leg>:<step>` may return, and the bound.
+ *
+ * @return array{legs: list<string>, steps: array<string, list<string>>, loopTarget: array<string, string>, allowed: array<string, list<string>>, bound: int}
+ */
+function pipeline_routing_tables(): array
+{
+    $legs = pipeline_legs();
+    $steps = array_combine($legs, array_map(pipeline_steps(...), $legs));
+    $allowed = [];
+    foreach ($steps as $leg => $legSteps) {
+        foreach ($legSteps as $step) {
+            $allowed["{$leg}:{$step}"] = array_map(fn (LegStatus $status) => $status->value, LegStatus::allowedFor($leg, $step));
+        }
+    }
+
+    return [
+        'legs' => $legs,
+        'steps' => $steps,
+        'loopTarget' => array_filter(array_combine($legs, array_map(pipeline_loop_target(...), $legs))),
+        'allowed' => $allowed,
+        'bound' => PIPELINE_LOOP_BOUND,
+    ];
+}
+
 /** A review written and not yet acted on: it has a `review` and no `outcome`. */
 function pipeline_is_open(mixed $entry): bool
 {
