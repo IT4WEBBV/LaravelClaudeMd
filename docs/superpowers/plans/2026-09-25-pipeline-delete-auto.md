@@ -131,6 +131,7 @@ git commit -m "feat(pipeline): pipeline_retired_mode() names autoflow for the re
 
 **Files:**
 - Modify: `skills/pipeline/checks/dispatch_cli.php` (`dispatch_cli_next()`, `dispatch_cli_mode_problem()`, `dispatch_cli_returned()`, `dispatch_cli_kickoff()`, the file docblock, `dispatch_cli_kickoff_args()`'s docblock, the usage line)
+- Modify: `skills/pipeline/checks/kickoff.php` (the file docblock)
 - Test: `skills/pipeline/checks/tests/DispatchCliTest.php`
 
 **Interfaces:**
@@ -206,9 +207,13 @@ Expected: 6 FAIL. `next` prints the dispatch line and writes a brief, `returned`
 /** `launch`, `brief` and `finish` serve `autoflow` runs only; a valid manifest of any other mode but the removed `auto` resumes with `next`. */
 function dispatch_cli_mode_problem(string $refusal, array $manifest): ?string
 {
-    return pipeline_retired_mode($manifest['mode']) ?? ($manifest['mode'] === 'autoflow' ? null : "{$refusal}; this run's mode is {$manifest['mode']} (resume it with /pipeline, which uses next)");
+    $mode = (string) ($manifest['mode'] ?? '');
+
+    return pipeline_retired_mode($mode) ?? ($mode === 'autoflow' ? null : "{$refusal}; this run's mode is {$mode} (resume it with /pipeline, which uses next)");
 }
 ```
+
+The cast is load-bearing: `manifest_validate()` checks `mode` with `array_key_exists`, so `"mode": null` validates, and passing it raw to `pipeline_retired_mode(string $mode)` would be a `TypeError` (exit 255) instead of a halt. It matches the `(string) (… ?? '')` of the `next` and `returned` insertions.
 
 `dispatch_cli_returned()`, right after the missing-file halt:
 
@@ -247,6 +252,8 @@ The docs in the same file:
 
 - the usage line (`fwrite(STDERR, "usage: …`): `kickoff <repo-root> <number|idea> [--light] [--mode autoflow|auto] [--decision <text>]...` becomes `kickoff <repo-root> <number|idea> [--light] [--decision <text>]...`.
 
+And in `kickoff.php`'s file docblock, `call for the unattended modes.` becomes `call for the unattended mode, \`autoflow\`.` (rewrap the docblock to its current width). The Task 7 sweep does not match this plural.
+
 - [ ] **Step 5: Run the pipeline suite**
 
 Expected: 308 passed.
@@ -254,7 +261,7 @@ Expected: 308 passed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add skills/pipeline/checks/dispatch_cli.php skills/pipeline/checks/tests/DispatchCliTest.php
+git add skills/pipeline/checks/dispatch_cli.php skills/pipeline/checks/kickoff.php skills/pipeline/checks/tests/DispatchCliTest.php
 git commit -m "feat(pipeline): kickoff --mode auto and every command on an auto manifest halt, naming autoflow (#87)"
 ```
 
@@ -782,4 +789,6 @@ git worktree list | grep -c issue-87                           # 1: only this ru
 
 - [ ] **Step 4: The PR body**
 
-The finish step's PR body states, for the owner: #51's *"`auto` keeps its agent-type route"* bullet no longer applies (no `.claude/agents/` exists to remove), and #52's scope is unchanged, since its verbs would feed `interactive`'s `returned` and `autoflow`'s `brief --after` / `finish` alike (spec §Follow-ups). No issue is edited.
+The draft PR's body states, for the owner: #51's *"`auto` keeps its agent-type route"* bullet no longer applies (no `.claude/agents/` exists to remove), and #52's scope is unchanged, since its verbs would feed `interactive`'s `returned` and `autoflow`'s `brief --after` / `finish` alike (spec §Follow-ups). No issue is edited. Both sentences are known before any code changes, so `handoff` writes them into the body it opens the draft PR with; `review-pr`'s resolve step keeps them when it rewrites the body. If the body lacks them here, add them with `gh pr edit <pr> --body-file …`.
+
+Check: `gh pr view <pr> --json body --jq .body | grep -oE '#5[12]\b' | sort -u | wc -l` prints `2`.
