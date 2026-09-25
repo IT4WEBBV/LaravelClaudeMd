@@ -102,7 +102,7 @@ function pipeline_step(array $manifest, string $leg): string
         return 'run';
     }
 
-    return pipeline_open_entry($manifest['gate_ledger'] ?? [], pipeline_gate_of($leg)) === null ? 'review' : 'resolve';
+    return pipeline_open_entry(pipeline_ledger($manifest), pipeline_gate_of($leg)) === null ? 'review' : 'resolve';
 }
 
 /** Anything that is neither `auto` nor `autoflow` behaves as interactive (`gates.md` §Modes): the human designs and resolves. */
@@ -186,7 +186,7 @@ function pipeline_return_problem(array $before, array $after, string $leg, strin
         return 'the leg halted without a reason';
     }
 
-    return pipeline_ledger_problem($before['gate_ledger'] ?? [], $after['gate_ledger'] ?? [], $status, $leg, $step, $size);
+    return pipeline_ledger_problem(pipeline_ledger($before), pipeline_ledger($after), $status, $leg, $step, $size);
 }
 
 /** @return list<string> top-level keys, and `cursor.*` one level down, whose values differ */
@@ -264,8 +264,8 @@ function pipeline_route(array $after, string $leg, string $step, array $triggers
         LegStatus::Halted => pipeline_halt((string) $after['cursor']['reason']),
         LegStatus::PlanInsufficient => $size === DesignSize::Bounded
             ? pipeline_dispatch('design')
-            : pipeline_loop_back($after['gate_ledger'] ?? [], 'review-plan'),
-        LegStatus::LoopedBack => pipeline_loop_back($after['gate_ledger'] ?? [], $leg),
+            : pipeline_loop_back(pipeline_ledger($after), 'review-plan'),
+        LegStatus::LoopedBack => pipeline_loop_back(pipeline_ledger($after), $leg),
         LegStatus::Continued => pipeline_continue($leg, $step, $triggers),
     };
 }
@@ -333,7 +333,7 @@ function pipeline_step_problem(array $manifest, string $leg, string $step): ?str
         return "{$leg} has no {$step} step";
     }
     $gate = pipeline_gate_of($leg);
-    $open = pipeline_open_entry($manifest['gate_ledger'] ?? [], $gate);
+    $open = pipeline_open_entry(pipeline_ledger($manifest), $gate);
 
     return match (true) {
         $step === 'resolve' && $open === null => "no open {$gate} review to resolve",

@@ -93,6 +93,6 @@ if ($manifest === null || $diff === null || $journal === null) {
     exit(0);
 }
 
-$ledger = $manifest['gate_ledger'] ?? [];
+$ledger = pipeline_ledger($manifest);
 echo implode("\n", [run_audit_ui(pipeline_triggers($diff), $ledger), ...run_audit_gates(pipeline_run_journal($journal), $ledger)]), "\n";
 exit(0);

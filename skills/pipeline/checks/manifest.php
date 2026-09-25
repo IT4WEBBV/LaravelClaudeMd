@@ -51,3 +51,9 @@ function manifest_infer_cursor(array $p): string
 
     return 'done';
 }
+
+/** A manifest without a ledger has an empty one. */
+function pipeline_ledger(array $manifest): array
+{
+    return $manifest['gate_ledger'] ?? [];
+}

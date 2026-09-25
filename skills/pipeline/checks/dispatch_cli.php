@@ -156,7 +156,7 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
         if (! in_array($from, pipeline_legs(), true)) {
             return pipeline_halt("cannot re-arm the run at '{$from}': not a leg");
         }
-        if (! pipeline_can_navigate($manifest['cursor']['leg'], $from, pipeline_done_legs($manifest['gate_ledger'] ?? []), $triggers)) {
+        if (! pipeline_can_navigate($manifest['cursor']['leg'], $from, pipeline_done_legs(pipeline_ledger($manifest)), $triggers)) {
             return pipeline_halt("cannot re-arm the run at {$from}: a gate before it has not run");
         }
         $manifest = [...$manifest, 'cursor' => ['leg' => $from, 'status' => 'pending']];
@@ -175,7 +175,7 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
         'action' => 'start',
         'startLeg' => $leg,
         'startStep' => pipeline_step($manifest, $leg),
-        'loops' => pipeline_loop_counts($manifest['gate_ledger'] ?? []),
+        'loops' => pipeline_loop_counts(pipeline_ledger($manifest)),
         'ui' => $triggers['ui'],
         'size' => dispatch_cli_design_size($manifest)->value,
         'manifest' => $manifestPath,

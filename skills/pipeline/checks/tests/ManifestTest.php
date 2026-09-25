@@ -24,3 +24,10 @@ it('infers the resume cursor from durable-state probes', function () {
     expect(manifest_infer_cursor([...$base, 'spec' => true, 'plan' => true, 'planApproved' => true, 'pr' => 42, 'implemented' => true, 'uiNeeded' => false]))->toBe('review-pr');
     expect(manifest_infer_cursor([...$base, 'spec' => true, 'plan' => true, 'planApproved' => true, 'pr' => 42, 'implemented' => true, 'uiNeeded' => true, 'verifyUi' => true, 'prReviewed' => true]))->toBe('done');
 });
+
+it('reads a manifest without a ledger as an empty one', function () {
+    $entry = ['gate' => 'plan-approval', 'review' => 'r'];
+
+    expect(pipeline_ledger(['cursor' => []]))->toBe([]);
+    expect(pipeline_ledger(['gate_ledger' => [$entry]]))->toBe([$entry]);
+});

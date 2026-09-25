@@ -97,7 +97,7 @@ function pipeline_brief_role(array $manifest, string $leg, string $step): string
 
 function pipeline_brief_pointers(array $manifest, string $manifestPath, string $leg, string $step): string
 {
-    $ledger = $manifest['gate_ledger'] ?? [];
+    $ledger = pipeline_ledger($manifest);
     $lines = ["- manifest: `{$manifestPath}`"];
 
     foreach ($manifest['artifacts'] ?? [] as $name => $value) {
@@ -163,7 +163,7 @@ function pipeline_brief_state(array $manifest, string $leg): string
 function pipeline_brief_overrides(array $manifest, string $leg, string $step): string
 {
     $lines = pipeline_leg_overrides((string) $manifest['mode'])["{$leg}:{$step}"];
-    $ledger = $manifest['gate_ledger'] ?? [];
+    $ledger = pipeline_ledger($manifest);
 
     if ($leg === 'design' && pipeline_design_grows($ledger)) {
         $lines[] = 'Grow form: the design escalated from Bounded (engine.md §Design size). Grow the spec and the plan; do not re-design them.';
