@@ -312,8 +312,10 @@ function dispatch_cli_return_problem(string $manifestPath, array $before, array 
 
 /**
  * Records the workflow's return; anything that is not `done` is a halt, and a halt with no reason says
- * so. `done` counts only on `review-pr`: nothing else may lead to `gh pr ready`. A halt that names no
- * leg of the pipeline keeps the cursor's, so a later `launch` can still read the run.
+ * so. `done` counts only on `review-pr`, and only when its resolve step's return holds: nothing else
+ * may lead to `gh pr ready`. A halt keeps the cursor's leg when the cursor already records a halt
+ * (`brief` or the step wrote it there) or when the return names no leg of the pipeline, so a later
+ * `launch` resumes at the step that failed.
  */
 function dispatch_cli_finish(string $manifestPath, string $decisionJson): array
 {
@@ -329,19 +331,34 @@ function dispatch_cli_finish(string $manifestPath, string $decisionJson): array
     $decision = json_decode($decisionJson, true);
     $decision = is_array($decision) ? $decision : [];
     if (($decision['action'] ?? null) === 'done') {
-        return $leg === 'review-pr'
-            ? dispatch_cli_done($manifestPath, $manifest)
-            : dispatch_cli_halt($manifestPath, $manifest, $leg, "the workflow returned done at {$leg}");
+        $problem = $leg === 'review-pr' ? dispatch_cli_finish_problem($manifestPath, $manifest) : "the workflow returned done at {$leg}";
+
+        return $problem === null ? dispatch_cli_done($manifestPath, $manifest) : dispatch_cli_halt($manifestPath, $manifest, $leg, $problem);
     }
     $reason = trim((string) ($decision['reason'] ?? ''));
     $named = $decision['leg'] ?? null;
+    $recorded = ($manifest['cursor']['status'] ?? null) === 'halted';
 
     return dispatch_cli_halt(
         $manifestPath,
         $manifest,
-        in_array($named, pipeline_legs(), true) ? $named : $leg,
+        in_array($named, pipeline_legs(), true) && ! $recorded ? $named : $leg,
         $reason === '' ? "the workflow returned no decision: {$decisionJson}" : $reason,
     );
+}
+
+/** Why a `done` return does not hold: the last step must be `review-pr`'s resolve step, and its return must pass the check. */
+function dispatch_cli_finish_problem(string $manifestPath, array $manifest): ?string
+{
+    $before = manifest_read(dispatch_cli_files($manifestPath)['before']);
+    $snapshot = dispatch_cli_snapshot_step($before);
+    if ($snapshot !== 'review-pr:resolve') {
+        return $snapshot === null
+            ? 'the workflow returned done, but there is no snapshot at ' . dispatch_cli_files($manifestPath)['before']
+            : 'the workflow returned done, but the last snapshot is of the ' . str_replace(':', ' ', $snapshot) . ' step';
+    }
+
+    return dispatch_cli_return_problem($manifestPath, $before, $manifest, ['status' => 'continued'])['reason'] ?? null;
 }
 
 /** An `autoflow` design step's `size`: the committed spec's, as `launch` reads it. */

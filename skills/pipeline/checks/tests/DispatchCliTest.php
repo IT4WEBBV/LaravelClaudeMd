@@ -301,7 +301,6 @@ it('records the workflow\'s return with finish', function (string $leg, string $
     expect(dispatch_cli(['finish', $fixture['manifest'], $decision])['code'])->toBe(0);
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe($cursor);
 })->with([
-    'done' => ['review-pr', '{"action":"done"}', ['leg' => 'review-pr', 'status' => 'done']],
     'done before review-pr' => ['implement', '{"action":"done"}', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'the workflow returned done at implement']],
     'a halt naming its leg' => ['implement', '{"action":"halt","leg":"verify-ui","reason":"stub halt"}', ['leg' => 'verify-ui', 'status' => 'halted', 'reason' => 'stub halt']],
     'a halt naming no leg of the pipeline' => ['implement', '{"action":"halt","leg":"launch","reason":"args are not a launch start answer"}', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'args are not a launch start answer']],
@@ -445,6 +444,39 @@ it('refuses a brief it cannot parse', function (array $arguments) {
     'a status without --after' => [['handoff', 'run', '--status', 'continued']],
     'a flag given twice' => [['handoff', 'run', '--after', 'design:run', '--status', 'continued', '--status', 'halted']],
 ]);
+
+it('finishes only after a review-pr resolve step whose return holds', function () {
+    $open = boundary_open('pr-review');
+    $fixture = boundary_fixture('review-pr', 'resolve', ['cursor' => ['leg' => 'review-pr', 'status' => 'pending'], 'gate_ledger' => [$open]]);
+    $finish = fn () => dispatch_cli(['finish', $fixture['manifest'], '{"action":"done"}'])['json'];
+
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued']]);
+    expect($finish())->toBe(['action' => 'halt', 'reason' => "the resolve step must set the open pr-review entry's outcome to continued"]);
+    expect(manifest_read($fixture['manifest'])['cursor'])->toMatchArray(['leg' => 'review-pr', 'status' => 'halted']);
+
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => ['leg' => 'review-pr', 'status' => 'continued'], 'gate_ledger' => [[...$open, 'actions' => [], 'outcome' => 'continued']]]);
+    expect($finish())->toBe(['action' => 'done']);
+    expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-pr', 'status' => 'done']);
+});
+
+it('refuses done when the last snapshot is not review-pr\'s resolve step, or there is none', function () {
+    $review = boundary_fixture('review-pr', 'review', ['cursor' => ['leg' => 'review-pr', 'status' => 'pending']]);
+    dispatch_leg_writes($review['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued'], 'gate_ledger' => [boundary_open('pr-review')]]);
+    expect(dispatch_cli(['finish', $review['manifest'], '{"action":"done"}'])['json'])
+        ->toBe(['action' => 'halt', 'reason' => 'the workflow returned done, but the last snapshot is of the review-pr review step']);
+
+    $bare = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'review-pr', 'status' => 'pending']]);
+    expect(dispatch_cli(['finish', $bare['manifest'], '{"action":"done"}'])['json'])
+        ->toBe(['action' => 'halt', 'reason' => "the workflow returned done, but there is no snapshot at {$bare['before']}"]);
+});
+
+it('keeps the leg of a halt the manifest already records', function () {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'review-plan', 'status' => 'halted', 'reason' => 'from brief']]);
+
+    dispatch_cli(['finish', $fixture['manifest'], '{"action":"halt","leg":"handoff","reason":"from brief"}']);
+
+    expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-plan', 'status' => 'halted', 'reason' => 'from brief']);
+});
 
 it('halts a launch on a manifest without a mode, printing only the JSON line', function () {
     $fixture = dispatch_fixture();
