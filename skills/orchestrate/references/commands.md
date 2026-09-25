@@ -49,9 +49,11 @@ The PR is found by prefix: `closingIssuesReferences` stays empty until the run's
   and ask the owner, quoting the error. An unreadable session rooted anywhere else is skipped.
   Only a `working` or `blocked` session owns a worktree; `done`, `failed` and `stopped` rows never do.
   An open PR with no worktree has no owner to find: treat it as orphaned.
-  A worktree whose manifest has `mode: autoflow` and a `pending` cursor may be another live session's
-  workflow, which `owners.py` cannot see yet: ask *adopt* / *leave it out*, never *resume* on "no
-  owner" alone.
+  An `autoflow` run's steps work from the launch directory, so for those `owners.py` also reads the
+  workflow step transcripts and matches what names the run's worktree: its `dispatch_cli.php` calls,
+  kickoff's and launch's answers, and the `Workflow` call. Fail-closed does not cover that evidence:
+  an `autoflow` run that stops being found after a Claude Code update is a transcript format change
+  first and an orphan second.
 
 ## Dependencies
 
