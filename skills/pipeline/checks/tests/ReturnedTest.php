@@ -200,3 +200,44 @@ it('refuses a review step that returns plan-insufficient and leaves an open revi
     expect(pipeline_returned($before, returned_after($before, 'plan-insufficient', [$escalated], [], 'migration'), $noUi, DesignSize::Bounded))
         ->toBe(['action' => 'dispatch', 'leg' => 'design']);
 });
+
+it('passes a return that agrees with what the step reported to the script', function (string $leg, array $changes, array $reported, ?bool $diffUi) {
+    $before = returned_before($leg);
+
+    expect(pipeline_reported_problem($before, returned_after($before, 'continued', null, $changes), $reported, DesignSize::Architectural, $diffUi))->toBeNull();
+})->with([
+    'handoff' => ['handoff', ['artifacts' => ['spec' => 'docs/spec.md', 'plan' => 'docs/plan.md', 'pr' => 7, 'issue' => null]], ['status' => 'continued'], null],
+    'implement on a UI diff' => ['implement', ['last_sha' => 'bbb2222'], ['status' => 'continued', 'ui' => 'true'], true],
+    'design' => ['design', ['last_sha' => 'bbb2222'], ['status' => 'continued', 'size' => 'Architectural'], null],
+]);
+
+it('names what a step reported that its manifest does not say', function (string $leg, bool $writes, array $reported, ?bool $diffUi, string $problem) {
+    $before = returned_before($leg);
+    $after = $writes ? returned_after($before, 'continued', null, ['last_sha' => 'bbb2222']) : $before;
+
+    expect(pipeline_reported_problem($before, $after, $reported, DesignSize::Architectural, $diffUi))->toBe($problem);
+})->with([
+    'nothing written' => ['handoff', false, ['status' => 'continued'], null, 'the handoff run step returned without writing the manifest'],
+    'another status' => ['handoff', true, ['status' => 'halted'], null, 'the handoff run step returned halted to the script but wrote continued into the manifest'],
+    'no status' => ['handoff', true, [], null, 'the handoff run step returned nothing to the script but wrote continued into the manifest'],
+    'ui false on a UI diff' => ['implement', true, ['status' => 'continued', 'ui' => 'false'], true, 'the implement step returned ui: false, but its diff says true'],
+    'another size' => ['design', true, ['status' => 'continued', 'size' => 'Bounded'], null, 'the design step returned size Bounded, but the spec says Architectural'],
+]);
+
+it('reports a manifest problem before anything the step reported', function () {
+    $before = returned_before('handoff');
+
+    expect(pipeline_reported_problem($before, returned_after($before, 'continued', null, ['mode' => 'auto', 'branch' => 'other']), ['status' => 'halted'], DesignSize::Architectural))
+        ->toBe('the leg changed branch, which only the dispatcher writes');
+});
+
+it('passes the returns that route elsewhere than on, when the ledger bears them out', function (string $leg, array $ledger, string $status, array $newLedger, array $reported, DesignSize $size) {
+    $before = returned_before($leg, $ledger);
+
+    expect(pipeline_reported_problem($before, returned_after($before, $status, $newLedger, [], $status === 'plan-insufficient' ? 'gap' : null), $reported, $size, false))->toBeNull();
+})->with([
+    'an Architectural plan gap from implement' => ['implement', [], 'plan-insufficient', [['gate' => 'plan-approval', 'leg' => 'implement', 'cycle' => 2, 'at' => '2026-09-25T11:00:00Z', 'reason' => 'gap', 'outcome' => 'looped-back']], ['status' => 'plan-insufficient', 'ui' => 'false'], DesignSize::Architectural],
+    'a Bounded escalation from a review step' => ['review-plan', [], 'plan-insufficient', [['gate' => 'design-size', 'leg' => 'review-plan', 'at' => '2026-09-25T11:00:00Z', 'reason' => 'gap', 'outcome' => 'escalated']], ['status' => 'plan-insufficient'], DesignSize::Bounded],
+    'a review-pr loop-back' => ['review-pr', [['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-25T10:00:00Z', 'review' => 'r']], 'looped-back', [['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-25T10:00:00Z', 'review' => 'r', 'actions' => ['rework'], 'outcome' => 'looped-back']], ['status' => 'looped-back'], DesignSize::Architectural],
+    'a verify-ui loop-back' => ['verify-ui', [], 'looped-back', [['gate' => 'verify-ui', 'leg' => 'verify-ui', 'at' => '2026-09-25T10:00:00Z', 'outcome' => 'looped-back']], ['status' => 'looped-back'], DesignSize::Architectural],
+]);

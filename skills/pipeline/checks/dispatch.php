@@ -189,6 +189,32 @@ function pipeline_return_problem(array $before, array $after, string $leg, strin
     return pipeline_ledger_problem(pipeline_ledger($before), pipeline_ledger($after), $status, $leg, $step, $size);
 }
 
+/**
+ * `autoflow`'s check at the next step boundary (`brief` and `finish`): the step the snapshot was taken
+ * for, against the manifest it left and what it returned to the script. `$reported` holds the flags
+ * `brief` was given (`status`, and `ui` or `size`, as strings); `$diffUi` is `pipeline_triggers()['ui']`
+ * over the step's diff, read only after `implement`.
+ */
+function pipeline_reported_problem(array $before, array $after, array $reported, DesignSize $size, ?bool $diffUi = null): ?string
+{
+    [$before, $after] = [pipeline_normalized($before), pipeline_normalized($after)];
+    $leg = $before['cursor']['leg'];
+    $step = pipeline_step($before, $leg);
+    if ($after === $before) {
+        return "the {$leg} {$step} step returned without writing the manifest";
+    }
+
+    $told = fn (string $key) => (string) ($reported[$key] ?? 'nothing');
+    $status = (string) ($after['cursor']['status'] ?? '');
+
+    return pipeline_return_problem($before, $after, $leg, $step, $size) ?? match (true) {
+        $told('status') !== $status => "the {$leg} {$step} step returned {$told('status')} to the script but wrote {$status} into the manifest",
+        $leg === 'implement' && $told('ui') !== json_encode($diffUi) => "the implement step returned ui: {$told('ui')}, but its diff says " . json_encode($diffUi),
+        $leg === 'design' && $told('size') !== $size->value => "the design step returned size {$told('size')}, but the spec says {$size->value}",
+        default => null,
+    };
+}
+
 /** @return list<string> top-level keys, and `cursor.*` one level down, whose values differ */
 function pipeline_changed_keys(array $before, array $after): array
 {
