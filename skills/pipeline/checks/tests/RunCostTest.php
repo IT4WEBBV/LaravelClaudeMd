@@ -114,17 +114,40 @@ it('reads a run\'s steps from its journal, in the order they started', function 
     ]);
 });
 
-it('prints the cost per step and the largest step peak, always exiting 0', function () {
+it('prints the cost and minutes per step, the run\'s span and the largest step peak, always exiting 0', function () {
     $dir = cost_run([
-        'a1' => ['review-plan:review', implode("\n", [cost_call('m1', 3, 20000, 0), cost_call('m2', 1, 1000, 140000, 50, ['ephemeral_5m_input_tokens' => 0, 'ephemeral_1h_input_tokens' => 1000])]), ['status' => 'continued']],
-        'a2' => ['implement:run', cost_call('m3', 0, 0, 300000, 2000), ['status' => 'continued', 'ui' => false]],
+        'a1' => ['review-plan:review', implode("\n", [
+            cost_call('m1', 3, 20000, 0, 50, null, '10:00:00.000'),
+            cost_tool_use('t1', '10:00:30.000'),
+            cost_tool_result('t1', '10:02:00.000'),
+            cost_call('m2', 1, 1000, 140000, 50, ['ephemeral_5m_input_tokens' => 0, 'ephemeral_1h_input_tokens' => 1000], '10:06:00.000'),
+        ]), ['status' => 'continued']],
+        'a2' => ['implement:run', implode("\n", [
+            cost_call('m3', 0, 0, 300000, 2000, null, '10:07:00.000'),
+            cost_tool_use('t2', '10:08:00.000'),
+            cost_tool_result('t2', '10:20:00.000'),
+        ]), ['status' => 'continued', 'ui' => false]],
     ]);
 
+    // the run spans 10:00 to 10:20, a minute longer than its steps' 6.0 + 13.0: the gap between them counts
     expect(checks_cli('run_cost_cli.php', [$dir]))->toBe(['code' => 0, 'stdout' => implode("\n", [
-        'review-plan:review: 0.04M over 2 calls, peak 141k',
-        'implement:run: 0.04M over 1 calls, peak 300k',
-        'run: 0.08M weighted over 2 steps; largest step peak 300k (implement:run)',
+        'review-plan:review: 0.04M over 2 calls, peak 141k, 6.0 min (1.5 waiting on tools)',
+        'implement:run: 0.04M over 1 calls, peak 300k, 13.0 min (12.0 waiting on tools)',
+        'run: 0.08M weighted over 2 steps in 20.0 min; largest step peak 300k (implement:run)',
     ])]);
     expect(checks_cli('run_cost_cli.php', ['/nonexistent']))->toBe(['code' => 0, 'stdout' => 'run: not measured (no step transcripts)']);
     expect(checks_cli('run_cost_cli.php', [])['code'])->toBe(0);
+});
+
+it('prints a step without timestamps as 0.0 min and spans the run over the timed steps only', function () {
+    $dir = cost_run([
+        'a1' => ['design:run', implode("\n", [cost_call('m1', 3, 20000, 0, 50, null, '10:00:00.000'), cost_call('m2', 3, 20000, 0, 50, null, '10:06:30.000')]), ['status' => 'continued']],
+        'a2' => ['handoff:run', cost_call('m3', 0, 0, 300000, 2000), ['status' => 'continued']],
+    ]);
+
+    expect(checks_cli('run_cost_cli.php', [$dir])['stdout'])->toBe(implode("\n", [
+        'design:run: 0.05M over 2 calls, peak 20k, 6.5 min (0.0 waiting on tools)',
+        'handoff:run: 0.04M over 1 calls, peak 300k, 0.0 min (0.0 waiting on tools)',
+        'run: 0.09M weighted over 2 steps in 6.5 min; largest step peak 300k (handoff:run)',
+    ]));
 });

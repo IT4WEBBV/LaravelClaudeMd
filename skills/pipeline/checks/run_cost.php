@@ -153,7 +153,15 @@ function pipeline_transcript_time(string $jsonl): array
         : ['start' => min($times), 'end' => max($times), 'wall' => max($times) - min($times), 'waiting' => pipeline_union_seconds($intervals)];
 }
 
-/** @param list<array{label: string, calls: int, cost: float, peak: int}> $steps */
+/** The run's span, earliest step start to latest step end, over the steps that have one. */
+function pipeline_run_seconds(array $steps): float
+{
+    $timed = array_filter($steps, fn (array $step) => $step['start'] !== null);
+
+    return $timed === [] ? 0.0 : max(array_column($timed, 'end')) - min(array_column($timed, 'start'));
+}
+
+/** @param list<array{label: string, calls: int, cost: float, peak: int, start: ?float, end: ?float, wall: float, waiting: float}> $steps */
 function pipeline_run_cost_lines(array $steps): array
 {
     if ($steps === []) {
@@ -162,7 +170,7 @@ function pipeline_run_cost_lines(array $steps): array
     $largest = array_reduce($steps, fn (?array $carry, array $step) => $carry === null || $step['peak'] > $carry['peak'] ? $step : $carry);
 
     return [
-        ...array_map(fn (array $step) => sprintf('%s: %.2fM over %d calls, peak %dk', $step['label'], $step['cost'] / 1e6, $step['calls'], intdiv($step['peak'], 1000)), $steps),
-        sprintf('run: %.2fM weighted over %d steps; largest step peak %dk (%s)', array_sum(array_column($steps, 'cost')) / 1e6, count($steps), intdiv($largest['peak'], 1000), $largest['label']),
+        ...array_map(fn (array $step) => sprintf('%s: %.2fM over %d calls, peak %dk, %.1f min (%.1f waiting on tools)', $step['label'], $step['cost'] / 1e6, $step['calls'], intdiv($step['peak'], 1000), $step['wall'] / 60, $step['waiting'] / 60), $steps),
+        sprintf('run: %.2fM weighted over %d steps in %.1f min; largest step peak %dk (%s)', array_sum(array_column($steps, 'cost')) / 1e6, count($steps), pipeline_run_seconds($steps) / 60, intdiv($largest['peak'], 1000), $largest['label']),
     ];
 }
