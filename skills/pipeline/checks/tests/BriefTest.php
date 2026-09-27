@@ -193,6 +193,27 @@ it('tells every autoflow step where to work, that the run is authorised, and to 
     }
 });
 
+it('tells every step that writes onto the PR to write in the issue\'s language', function (string $leg, string $step) {
+    $issue = brief_manifest($leg, ['artifacts' => ['issue' => 185, 'spec' => 'docs/spec.md', 'pr' => 42]]);
+
+    foreach (['autoflow', 'interactive'] as $mode) {
+        expect(pipeline_brief([...$issue, 'mode' => $mode], $leg, '/tmp/m.json', $step))
+            ->toContain('PR text — the title, the body and PR comments — is in the language of issue #185; the spec, the plan, code and commit messages keep the repo\'s language (engine.md §PR language).');
+    }
+})->with([['handoff', 'run'], ['implement', 'run'], ['verify-ui', 'run'], ['review-pr', 'resolve']]);
+
+it('keeps the PR-language line off the steps that write nothing onto the PR', function (string $leg, string $step) {
+    $issue = brief_manifest($leg, ['artifacts' => ['issue' => 185, 'spec' => 'docs/spec.md', 'pr' => 42]]);
+
+    expect(pipeline_brief($issue, $leg, '/tmp/m.json', $step))->not->toContain('§PR language');
+})->with([['design', 'run'], ['review-plan', 'review'], ['review-plan', 'resolve'], ['review-pr', 'review']]);
+
+it('gives a run without an issue no PR-language line: there is no issue to follow', function () {
+    $idea = brief_manifest('review-pr', ['artifacts' => ['idea' => '/tmp/idea.md', 'spec' => 'docs/spec.md', 'pr' => 42, 'issue' => null]]);
+
+    expect(pipeline_brief($idea, 'review-pr', '/tmp/m.json', 'resolve'))->not->toContain('§PR language');
+});
+
 it('tells a resolve step to loop back on a plan gap, and a review step to leave no review behind', function () {
     $open = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
 

@@ -174,12 +174,22 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step): s
     if ($leg !== 'design') {
         $lines = [...$lines, ...pipeline_plan_gap_lines($step)];
     }
+    $issue = $manifest['artifacts']['issue'] ?? null;
+    if (is_numeric($issue) && pipeline_writes_pr_text($leg, $step)) {
+        $lines[] = "PR text — the title, the body and PR comments — is in the language of issue #{$issue}; the spec, the plan, code and commit messages keep the repo's language (engine.md §PR language).";
+    }
     if ($manifest['mode'] === 'autoflow') {
         $lines[] = "Run every command from `cd {$manifest['worktree']}` or with `git -C {$manifest['worktree']}`: the session that started this run may sit in another checkout.";
         $lines[] = 'The owner authorised this run, including pushing the branch and opening the draft PR; the pipeline never merges.';
     }
 
     return "## Overrides\n\n" . implode("\n", array_map(fn (string $line) => "- {$line}", $lines));
+}
+
+/** The steps that write onto the PR: its title and body, closing links, the record comment (engine.md §PR language). */
+function pipeline_writes_pr_text(string $leg, string $step): bool
+{
+    return in_array("{$leg}:{$step}", ['handoff:run', 'implement:run', 'verify-ui:run', 'review-pr:resolve'], true);
 }
 
 /** How a step after `design` reports a plan that falls short (engine.md §Design size). A resolve step completes its open entry, so it loops back instead. */
