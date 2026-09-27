@@ -2,7 +2,7 @@
 
 function dispatch_manifest(string $leg, array $ledger = []): array
 {
-    return ['branch' => 'feature/x', 'worktree' => '/tmp/wt', 'mode' => 'auto', 'cursor' => ['leg' => $leg, 'status' => 'pending'], 'gate_ledger' => $ledger];
+    return ['branch' => 'feature/x', 'worktree' => '/tmp/wt', 'mode' => 'interactive', 'cursor' => ['leg' => $leg, 'status' => 'pending'], 'gate_ledger' => $ledger];
 }
 
 it('names the gate each gate leg writes, and back', function () {
@@ -31,14 +31,12 @@ it('derives review or resolve from the open ledger entry', function () {
     expect(pipeline_step(dispatch_manifest('implement', [$open]), 'implement'))->toBe('run');
 });
 
-it('runs design and the resolve step inline outside auto and autoflow', function () {
+it('runs design and the resolve step inline outside autoflow', function () {
     expect(pipeline_runs_inline('interactive', 'design', 'run'))->toBeTrue();
     expect(pipeline_runs_inline('interactive', 'review-pr', 'resolve'))->toBeTrue();
     expect(pipeline_runs_inline('interactive', 'review-pr', 'review'))->toBeFalse();
     expect(pipeline_runs_inline('interactive', 'implement', 'run'))->toBeFalse();
     expect(pipeline_runs_inline('mangled', 'design', 'run'))->toBeTrue();
-    expect(pipeline_runs_inline('auto', 'design', 'run'))->toBeFalse();
-    expect(pipeline_runs_inline('auto', 'review-plan', 'resolve'))->toBeFalse();
     expect(pipeline_runs_inline('autoflow', 'design', 'run'))->toBeFalse();
     expect(pipeline_runs_inline('autoflow', 'review-pr', 'resolve'))->toBeFalse();
     expect(pipeline_runs_inline('mangled', 'review-plan', 'resolve'))->toBeTrue();
@@ -95,4 +93,11 @@ it('expects the run\'s PR to be an open draft', function () {
     expect(pipeline_pr_problem(7, ['state' => 'OPEN', 'isDraft' => false]))->toBe('PR #7 is not a draft; a run only works on a draft PR (`gh pr ready --undo 7` first)');
     expect(pipeline_pr_problem(7, ['state' => 'MERGED', 'isDraft' => false]))->toBe('PR #7 is merged');
     expect(pipeline_pr_problem(7, null))->toBe('PR #7 cannot be read');
+});
+
+it('refuses the removed auto mode by naming autoflow, and nothing else', function () {
+    expect(pipeline_retired_mode('auto'))->toBe('mode auto was removed; autoflow is the unattended mode: kick off without --mode, and resume an auto manifest by setting its mode to autoflow and running launch');
+    expect(pipeline_retired_mode('autoflow'))->toBeNull();
+    expect(pipeline_retired_mode('interactive'))->toBeNull();
+    expect(pipeline_retired_mode('mangled'))->toBeNull();
 });

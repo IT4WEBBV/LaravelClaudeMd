@@ -172,5 +172,5 @@ rm -rf ~/Library/Caches/ms-playwright/mcp-chrome-*
 | "The page requires auth I can't get" | Check seeders, create an account, ask the user. Don't skip. |
 | "Too many states to screenshot" | Pick the most critical, max 5. Don't skip entirely. |
 | "All friction with zero signal" | The signal IS the screenshot. That's the proof the user needs. |
-| "I'll paste the screenshot inline instead" | Write the page to the proof store. Terminal screenshots are not a substitute — they scroll away and an `auto` run's subagent output is never read. |
+| "I'll paste the screenshot inline instead" | Write the page to the proof store. Terminal screenshots are not a substitute — they scroll away and an unattended run's step output is never read. |
 | "The store is just filing, the real proof is the screenshot" | The store IS the required delivery mechanism. Screenshot + durable page = proof. A screenshot that outlives nothing is incomplete. |

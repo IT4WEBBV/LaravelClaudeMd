@@ -15,8 +15,8 @@ Read/written by the Phase A helpers in `../checks/manifest.php`:
 |---|---|---|
 | `branch` | **required** | run identity (also the manifest filename) |
 | `worktree` | **required** | absolute path of the run's worktree — where every leg operates |
-| `mode` | **required** | `interactive`, `auto` or `autoflow` |
-| `cursor` | **required** | `{leg, status, reason?, retried?}` — the current leg; `status` is `pending` (written by `next`, by `launch --from`, or by `brief` as an `autoflow` step starts), the status the leg returned, `halted` (with `reason`), or `done` (written by `returned` or `finish` on a finished run; `next` and `launch` then answer `done` and dispatch nothing); `reason` only with `halted`; `retried` only after a review step's single retry in `auto` or `interactive` |
+| `mode` | **required** | `interactive` or `autoflow`; every command refuses `auto`, the engine #87 removed, naming `autoflow` |
+| `cursor` | **required** | `{leg, status, reason?, retried?}` — the current leg; `status` is `pending` (written by `next`, by `launch --from`, or by `brief` as an `autoflow` step starts), the status the leg returned, `halted` (with `reason`), or `done` (written by `returned` or `finish` on a finished run; `next` and `launch` then answer `done` and dispatch nothing); `reason` only with `halted`; `retried` only after a review step's single retry in `interactive` |
 | `pipeline_id` | optional | stable id alongside `branch` |
 | `artifacts` | optional | pointers: idea, spec path, plan path, PR number, issue number (`engine.md` §The work item), `proof` — the proof page `verify-ui` wrote |
 | `last_sha` | optional | HEAD at the last completed leg |
@@ -47,7 +47,7 @@ in lock-step: the four required rows above are exactly the four keys the functio
 
 ## `gate_ledger` — the audit trail that keeps a gate from being decoration
 
-Under `auto` the resolve step overrules reviewers routinely (`engine.md` §`auto`). That is fine; doing it
+Under `autoflow` the resolve step overrules reviewers routinely (`engine.md` §Resolving a review). That is fine; doing it
 *invisibly* is not. So each pass through a gate appends one entry, and the entry is projected onto
 the PR.
 
@@ -117,7 +117,7 @@ An `interactive` entry is the same shape with the human in the resolve step's pl
 
 A leg writes only its results: `artifacts`, `last_sha`, `suite`, its `gate_ledger` entry, and
 `cursor.status` — plus `cursor.reason` when it halts. It never moves `cursor.leg` and never writes a
-brief. In `auto` and `interactive`, after every return `returned` compares the manifest with its
+brief. In `interactive`, after every return `returned` compares the manifest with its
 snapshot (`pipeline_returned()`, `../checks/dispatch.php`) and **halts** when any other key changed,
 when an existing ledger entry was rewritten (the resolve step may only complete the open entry), or
 when the status does not agree with the ledger. In `autoflow` the next `brief` (or, after the last
@@ -143,7 +143,7 @@ Before running a leg, confirm the file still matches reality:
 - the recorded artifact (spec/plan) exists at the recorded ref (`last_sha`),
 - the PR is in the expected state (draft/ready, exists).
 
-In `auto` and `interactive` every leg opens with one. In `autoflow`, `dispatch_cli.php launch` runs
+In `interactive` every leg opens with one. In `autoflow`, `dispatch_cli.php launch` runs
 it once per launch, not per leg — the PR, once there is one, must be an open draft — and halts with
 the mismatch in `cursor.reason`.
 
@@ -159,7 +159,7 @@ Rebuild the cursor by probing **durable state**, then feed the probes to
 |---|---|
 | `spec` | spec file present on the branch (`docs/superpowers/specs/…`) |
 | `plan` | plan file present on the branch (`docs/superpowers/plans/…`) |
-| `planApproved` | the `gate_ledger` holds a `plan-approval` entry with `outcome: continued` newer than the latest `design-size` escalation or plan gap — a human approval, or the resolve step's own continue under `auto` — else re-run `review-plan` (a re-review is cheap and stateless) |
+| `planApproved` | the `gate_ledger` holds a `plan-approval` entry with `outcome: continued` newer than the latest `design-size` escalation or plan gap — a human approval, or the resolve step's own continue under `autoflow` — else re-run `review-plan` (a re-review is cheap and stateless) |
 | `pr` | `gh pr list --head <branch>` → PR number, else null |
 | `implemented` | PR marked ready / implementation commits present |
 | `uiNeeded` | `pipeline_triggers(<diff>)['ui']` over `git diff origin/<base>...HEAD` |
