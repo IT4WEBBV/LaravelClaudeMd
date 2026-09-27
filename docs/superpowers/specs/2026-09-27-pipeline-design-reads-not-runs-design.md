@@ -87,7 +87,8 @@ its *A plan gap on an Architectural design* subsection) and before §The proof s
   signatures, APIs and paths the plan relies on by reading them, `php -l` or grep. The plan's
   `Expected:` lines are predictions; `implement` proves them, test-first (§Stations).
 - Why: the measurements in *Problem*, in two sentences.
-- The probe exception (line 4 above), attributed to the owner on #92.
+- The probe exception (line 4 above), attributed to the owner on #92, and that it is brainstorming's
+  Spike steps inside a design, never a Spike classification (Assumption 9).
 - A plan carries no *Verified before writing* header; the plans that have one are records, left as
   they are, and not exemplars for it.
 
@@ -147,3 +148,10 @@ Questions the brainstorm would have asked the owner, with the answer assumed.
 7. **Pin the full lines or fragments in `BriefTest`?** The full lines: the issue asks that `BriefTest`
    pins the `design:run` line, and a reworded line should be a deliberate test change.
 8. **Changelog?** This repo has no `.changelog/` directory and no `CHANGELOG.md`, so none is written.
+9. **Is the probe brainstorming's Spike path?** `superpowers:brainstorming` 6.3.0 classifies work as
+   Spike, Bounded or Architectural, and a Spike's terminal state is a reported recommendation with no
+   spec and no plan, which the pipeline cannot accept (`artifacts.spec` and `artifacts.plan` must be
+   set). Assumed: the probe is the Spike's steps used as one step inside an Architectural design, its
+   terminal state a sentence in the spec beside the approach it decided, and the pipeline never
+   classifies a work item as Spike; §What design proves says so. The Spike's nod is covered by the
+   assumed-answer rule (line 2).

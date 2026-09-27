@@ -60,14 +60,17 @@ or grep. The plan's `Expected:` lines are predictions: `implement` proves them, 
 and a plan that falls short comes back as a plan gap (§Design size).
 
 Why (#92): before this rule every `autoflow` design in this repo built the plan's code in a scratch copy
-and ran the suite there, 5–10 suite calls per design, with design peaks of 119k–269k against 131–156k
-for designs that did not; `implement` then re-typed the same code. The plan became a diff in prose, so
-`review-plan` reviewed code instead of design.
+and ran the suite there, 5–10 suite calls per design, with design peaks here of 119k–269k against
+131–156k for viewiemedia designs that did not; `implement` then re-typed the same code. The plan became
+a diff in prose, so `review-plan` reviewed code instead of design.
 
 **The one exception is a probe.** When the choice between approaches hinges on whether one of them
 works at all, `design` answers that one question with throwaway code: a few lines run on their own,
 never the plan's code, never the suite. The question and what the probe showed go into the spec, beside
-the approach they decided (owner, #92).
+the approach they decided (owner, #92). The probe is brainstorming's *Spike* steps used as one step
+inside an Architectural design, not a third design size: a Spike ends in a reported recommendation with
+no spec and no plan, which a run cannot finish on, so the pipeline never classifies a work item as Spike
+(§Design size). The probe's terminal state is its sentence in the spec.
 
 **A plan carries no *Verified before writing* header.** The plans that have one are records and stay as
 they are; they are not exemplars for it (§What a leg brief consists of).
@@ -92,6 +95,9 @@ an exemplar for a *Verified before writing* header either (§What design proves)
 
 Run: `grep -n '^## What design proves — reading, not running$' skills/pipeline/references/engine.md`
 Expected: one line, numbered between the `### A plan gap on an Architectural design` line and the `## The proof store` line.
+
+Run: `grep -n 'header either (§What design proves)' skills/pipeline/references/engine.md`
+Expected: one line, in §What a leg brief consists of.
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter=LockStep`
 Expected: PASS (nothing names the section yet; the existing sections are untouched).
