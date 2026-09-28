@@ -397,7 +397,7 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 | **design** *(compound)* | `superpowers:brainstorming`, then `superpowers:writing-plans` for an **Architectural** design (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it); for a **Bounded** design, brainstorming's Bounded path with no `writing-plans` (§Design size) | human drives the brainstorm dialogue; if brainstorming classifies Bounded without `light`, the pipeline asks (§Design size); re-invoke `/pipeline` to continue | a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions. The brief says which path is permitted: Bounded only with `light`, otherwise Architectural | writes spec + plan pointers; the size is the spec's `**Design size:**` header, never stored |
 | **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | two steps (`pipeline_step`): a **review** agent invokes `/critique plan` (in `autoflow` it applies `/critique plan`'s procedure itself: it cannot start a reviewer) and appends the review verbatim as an open `plan-approval` entry; a fresh **resolve** agent acts on it (§Resolving a review) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth. References the issue **without a closing keyword** (§Closing links) — this PR carries no implementation yet | writes the PR# pointer |
-| **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links (§Closing links — `review-pr` reconciles them before the PR goes ready). **Leaves the PR draft** (below); in `autoflow` it does not wait on CI (§The CI gate). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
+| **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's `static-analysis` after each step and its `format` once before the push** (§Mechanical checks), set closing-issue links (§Closing links — `review-pr` reconciles them before the PR goes ready). **Leaves the PR draft** (below); in `autoflow` it does not wait on CI (§The CI gate). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, writes the run's page to the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — the payload carries `nameWithOwner`, `pr` and `issue` so the page can link back to both — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
 | **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | a **review** agent invokes `/critique pr` (in `autoflow` it applies `/critique pr`'s procedure itself) and appends an open `pr-review` entry; the **finish** step (its resolve step) acts on it, runs the suite unless reused, reconciles closing links (§Closing links), rewrites the proof page, runs `gh pr ready`, and opens the page last (§The proof store). In `autoflow` the finish step leaves the PR draft, and the invoking session runs the CI gate and `gh pr ready` after `finish` (§The CI gate, §Who takes the PR out of draft) | feeds the PR-review gate; writes `issue_links` onto the entry; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
 
@@ -859,12 +859,22 @@ taken from the slot already resolved for the worktree at kickoff. A hardcoded co
 the *primary* stack and analyses the *primary* checkout, reporting no findings and passing green on
 code the run never touched.
 
-**What runs, and when.** After each step: the test suite (skipped when §Suite reuse finds this tree
-already green), then `static-analysis` over the whole
-declared scope, then `format` over the whole tree. **No file lists and no diff-scoping** — measured
+**What runs, and when.** After each plan step: the test suite (skipped when §Suite reuse finds this
+tree already green), then `static-analysis` over the whole declared scope.
+`format` runs **once per `implement` step**, over the whole tree, when the step's code is complete:
+before its last suite run, so the recorded `suite` covers the formatted tree (a Pint change after the
+suite changes the tree key and costs a second full suite at `review-pr`), and before the push, with
+what it changed committed. A change after it (the fix for a red suite or a finding) runs it once more.
+**No file lists and no diff-scoping** for `static-analysis` — measured
 on Deploy, scoping to two files costs 4.7s against 11.1s for all of `app/` because the analyser's
 bootstrap is a fixed ~4.5s floor, and paying that 6.4s removes host→container path mapping,
 touched-file tracking, and any need for a pre-ready backstop.
+
+**Pint's cache makes every call after the first cheap.** Measured on viewiemedia (#79: 1299 files,
+Pint 1.32), a whole-tree run takes ~39 s with an empty cache and ~1.3 s with a warm one. Pint keeps
+its cache in the container's temp dir without being told to, and viewiemedia mounts `/tmp` on a named
+volume, so only the first call in a fresh stack pays. A changed-files list would save that one call
+and nothing after it, so there is none.
 
 The formatter runs over the whole tree because `--dirty` needs a git repository inside the analysed
 tree, which the container does not have. That only behaves well once the repo has taken its one-off

@@ -28,9 +28,9 @@ git + gh. See the references before driving a run — the enforcement lives ther
   (`references/engine.md` §The work item, §Closing links). The board half is opt-in per repo via
   the `## Board` block those repos already have; a board-less repo skips it **silently** and runs
   exactly as before, the same way an unadopted `## Checks` block is never mentioned.
-- **Mechanical checks** — `implement` also runs a repo's PHPStan/Pint checks after each step when
-  the repo declares them in a committed `## Checks` block (`references/engine.md`
-  §Mechanical checks). Opt-in: repos that have not declared them are unaffected.
+- **Mechanical checks** — `implement` also runs a repo's PHPStan check after each step and its Pint
+  check once before the push, when the repo declares them in a committed `## Checks` block
+  (`references/engine.md` §Mechanical checks). Opt-in: repos that have not declared them are unaffected.
 - **Visual proof** — when `pipeline_triggers(...)['ui']` fires, `verify-ui` writes a durable page to
   `~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/index.html` and the PR gets a text-only record comment
   (`references/engine.md` §The proof store). The finished page **opens in the browser once**, as the
