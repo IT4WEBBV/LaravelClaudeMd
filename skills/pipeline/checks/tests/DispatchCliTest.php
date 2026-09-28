@@ -521,6 +521,13 @@ it('appends each --decision verbatim as it re-arms the run, and nothing when --f
     expect(file_get_contents($refused['manifest']))->toBe($before);
 });
 
+it('appends a --decision without --from and leaves the cursor where it is', function () {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'decisions' => ['Keep the guard']]);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff'], '--decision', 'Fold in #53'])['json'])->toBe(['action' => 'done']);
+    expect(manifest_read($fixture['manifest']))->toMatchArray(['cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'decisions' => ['Keep the guard', 'Fold in #53']]);
+});
+
 it('refuses a launch it cannot parse', function (array $arguments) {
     expect(dispatch_cli(['launch', ...$arguments])['code'])->toBe(1);
 })->with([
@@ -659,6 +666,13 @@ it('waits on no checks while the worktree has workflows, and answers ready at on
 it('waits while gh cannot read the PR, and halts at the last read', function () {
     expect(ci_gate(ci_fixture(null))['json'])->toBe(['action' => 'wait', 'verdict' => 'unreadable']);
     expect(ci_gate(ci_fixture(null), ['--poll', '120'])['json'])->toMatchArray(['action' => 'halt', 'leg' => 'review-pr']);
+});
+
+it('gates an interactive run as well, since its finish step runs the same loop', function () {
+    $fixture = ci_fixture(ci_head('SUCCESS'));
+    manifest_write($fixture['manifest'], [...manifest_read($fixture['manifest']), 'mode' => 'interactive']);
+
+    expect(ci_gate($fixture)['json'])->toBe(['action' => 'ready', 'verdict' => 'green', 'sha' => 'abc123']);
 });
 
 it('halts the gate on a run without a PR or a readable manifest, and leaves the manifest alone', function () {

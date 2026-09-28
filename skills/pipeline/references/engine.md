@@ -710,7 +710,7 @@ runs (#77), while `review-pr:review` reads the diff, not CI.
 | Verdict on the head commit | Answer |
 |---|---|
 | `green`: every check finished `SUCCESS`, `NEUTRAL` or `SKIPPED` | `ready` |
-| `none`: no check at all | `ready`; with `.github/workflows/*.yml` in the worktree only from the third read, since GitHub registers a push's checks seconds after it |
+| `none`: no check at all | `ready`; with `.github/workflows/*.yml` or `*.yaml` in the worktree only from the third read, since GitHub registers a push's checks seconds after it |
 | `pending` | `wait`; `halt` at the 120th read (an hour at 30 s) |
 | `red`: any other conclusion, or a status in `FAILURE` or `ERROR` | `fix` the first time in a run; `halt` once that round is spent |
 | `unreadable`: `gh` failed | `wait`; `halt` at the 120th read |

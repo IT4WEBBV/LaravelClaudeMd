@@ -78,7 +78,7 @@ spent 6.8 and 7.6 of its ~21 minutes watching CI, while `review-pr:review` reads
   | `pending` | `wait`; `halt` at read 120 (`PIPELINE_CI_POLLS`, an hour at 30 s): *CI on `<sha>` has not finished after an hour: `<names>`* |
   | `red`, no CI decision yet | `fix`, with `decision`: `CI red on the PR's head commit <sha>: <name> failed (<link>)`, several joined by `; ` |
   | `red`, a CI decision already there | `halt`: *CI red again after the fix round, on `<sha>`: `<failures>`* |
-  | gh could not read the PR (`unreadable`) | `wait`; `halt` at read 120: *the checks of PR #`<pr>` could not be read for an hour* |
+  | gh could not read the PR (`unreadable`) | `wait`; `halt` at read 120: *CI on PR #`<pr>` had not settled after an hour, and gh could not read its checks at the last read* |
 
   Every answer carries `action` and `verdict`; a read answer carries `sha`; `fix` and a red `halt` carry
   `failing`. A `halt` carries `leg: review-pr` and `reason`, so it is `finish`'s input as it stands.

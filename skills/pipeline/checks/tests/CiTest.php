@@ -65,7 +65,7 @@ it('waits on pending checks and on a PR gh cannot read, and halts at the hour', 
     expect(pipeline_ci_answer(ci_manifest(), $pending, true, 119))->toBe(['action' => 'wait', 'verdict' => 'pending', 'sha' => 'abc123']);
     expect(pipeline_ci_answer(ci_manifest(), $pending, true, 120))->toBe(['action' => 'halt', 'leg' => 'review-pr', 'reason' => 'CI on abc123 has not finished after an hour: CI / ci', 'verdict' => 'pending', 'sha' => 'abc123']);
     expect(pipeline_ci_answer(ci_manifest(), null, true, 119))->toBe(['action' => 'wait', 'verdict' => 'unreadable']);
-    expect(pipeline_ci_answer(ci_manifest(), null, true, 120))->toBe(['action' => 'halt', 'leg' => 'review-pr', 'reason' => 'the checks of PR #7 could not be read for an hour', 'verdict' => 'unreadable']);
+    expect(pipeline_ci_answer(ci_manifest(), null, true, 120))->toBe(['action' => 'halt', 'leg' => 'review-pr', 'reason' => 'CI on PR #7 had not settled after an hour, and gh could not read its checks at the last read', 'verdict' => 'unreadable']);
 });
 
 it('answers one fix round on red, with the failures verbatim as its decision, and halts on red after it', function () {

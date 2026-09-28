@@ -81,7 +81,7 @@ function pipeline_ci_answer(array $manifest, ?array $view, bool $workflows, int 
     $last = $poll >= PIPELINE_CI_POLLS;
     if ($view === null) {
         return $last
-            ? pipeline_ci_halt("the checks of PR #{$manifest['artifacts']['pr']} could not be read for an hour", ['verdict' => 'unreadable'])
+            ? pipeline_ci_halt("CI on PR #{$manifest['artifacts']['pr']} had not settled after an hour, and gh could not read its checks at the last read", ['verdict' => 'unreadable'])
             : ['action' => 'wait', 'verdict' => 'unreadable'];
     }
     $ci = pipeline_ci_verdict($view['statusCheckRollup']);
