@@ -151,6 +151,10 @@ function pipeline_brief_state(array $manifest, string $leg): string
 {
     $decisions = $manifest['decisions'] ?? [];
     $lines = $decisions === [] ? ['- settled decisions: none'] : array_map(fn (string $decision) => "- settled: {$decision}", $decisions);
+    $base = $manifest['base'] ?? null;
+    if ($base !== null) {
+        $lines[] = "- base: `{$base}`: this branch was cut from `origin/{$base}` and its PR goes into it, not into the default branch; diff with `git diff origin/{$base}...HEAD`, and a merge into it closes no issue (engine.md §Kickoff)";
+    }
     $sha = $manifest['last_sha'] ?? 'unknown';
     $lines[] = "- last_sha: `{$sha}`";
 

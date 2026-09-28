@@ -5,7 +5,7 @@
  *
  *   interactive:  php dispatch_cli.php next <manifest>
  *                 php dispatch_cli.php returned <manifest> <diff-file>
- *   autoflow:     php dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--decision <text>]...
+ *   autoflow:     php dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--base <branch>] [--decision <text>]...
  *                 php dispatch_cli.php launch <manifest> <diff-file> [--from <leg>] [--decision <text>]...
  *                 php dispatch_cli.php brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]]
  *                 php dispatch_cli.php finish <manifest> <decision-json>
@@ -435,15 +435,15 @@ function dispatch_cli_ci_command(array $arguments): ?array
 }
 
 /**
- * `kickoff <repo-root> <number|idea> [--light] [--decision <text>]...`; null is a usage error. `--mode
- * autoflow` is accepted and changes nothing; `--mode auto` parses, so that `dispatch_cli_kickoff()` can
- * halt it by name. `interactive` keeps its session-driven kickoff.
+ * `kickoff <repo-root> <number|idea> [--light] [--base <branch>] [--decision <text>]...`; null is a usage
+ * error. `--mode autoflow` is accepted and changes nothing; `--mode auto` parses, so that
+ * `dispatch_cli_kickoff()` can halt it by name. `interactive` keeps its session-driven kickoff.
  *
- * @return array{repoRoot: string, item: string, mode: string, light: bool, decisions: list<string>}|null
+ * @return array{repoRoot: string, item: string, mode: string, light: bool, base: ?string, decisions: list<string>}|null
  */
 function dispatch_cli_kickoff_args(array $arguments): ?array
 {
-    $options = ['mode' => 'autoflow', 'light' => false, 'decisions' => []];
+    $options = ['mode' => 'autoflow', 'light' => false, 'base' => null, 'decisions' => []];
     $positional = [];
     while ($arguments !== []) {
         $argument = (string) array_shift($arguments);
@@ -452,15 +452,15 @@ function dispatch_cli_kickoff_args(array $arguments): ?array
 
             continue;
         }
-        if ($argument === '--mode' || $argument === '--decision') {
+        if (in_array($argument, ['--mode', '--base', '--decision'], true)) {
             $value = array_shift($arguments);
             if ($value === null) {
                 return null;
             }
-            if ($argument === '--mode') {
-                $options['mode'] = (string) $value;
-            } else {
+            if ($argument === '--decision') {
                 $options['decisions'][] = (string) $value;
+            } else {
+                $options[substr($argument, 2)] = (string) $value;
             }
 
             continue;
@@ -577,7 +577,7 @@ $result = match ($argv[1] ?? '') {
 };
 
 if ($result === null) {
-    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] [--decision <text>]... | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> | ci <manifest> [--poll <n>] (size needs a readable manifest, ui an existing diff file)\n");
+    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--base <branch>] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] [--decision <text>]... | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> | ci <manifest> [--poll <n>] (size needs a readable manifest, ui an existing diff file)\n");
     exit(1);
 }
 

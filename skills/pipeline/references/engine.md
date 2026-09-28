@@ -38,6 +38,8 @@ php "$CHECKS/dispatch_cli.php" returned <manifest> "<manifest stem>.diff"   # af
 `<manifest stem>` is the manifest path without `.json`: the diff, the brief (`.brief.md`) and the
 dispatch snapshot (`.before.json`) sit next to the manifest, one set per run, so concurrent runs
 never share a diff file, and `.claude/pipeline/` keeps them out of git and out of §Suite reuse's key.
+`<base>` is the manifest's `base` on a run kicked off with one (§Kickoff, *A run on a base*), and the
+repo's default branch otherwise: every `origin/<base>` in this skill and in `orchestrate` means that.
 
 Each prints one JSON line. On `dispatch` or `retry`, pass its `prompt` — one line naming the brief
 file `pipeline_brief()` wrote — to a background agent; when `inline` is true, run the step in this
@@ -77,7 +79,7 @@ step agent         dispatch_cli.php brief <manifest> <leg> <step> [--after …] 
 
 ```bash
 CHECKS="$HOME/.claude/skills/pipeline/checks"
-php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--decision "<verbatim>"]…
+php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--base <branch>] [--decision "<verbatim>"]…
 # → {"action":"ready","manifest":…,"worktree":…,"branch":…,"notes":[…]} | {"action":"halt","reason":…}
 git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
 PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>] [--decision "<verbatim>"]…
@@ -280,11 +282,11 @@ latent drift bug. The issue number is a pointer, which is what the manifest is f
 call and leaves the session nothing to judge:
 
 ```bash
-php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--decision "<verbatim>"]…
+php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--base <branch>] [--decision "<verbatim>"]…
 ```
 
 It runs the declared `worktree.create` as declared, from the primary checkout, with only `<branch>`
-substituted: slot choice belongs to the repo's script, and a declared command that still needs a
+substituted (and `--base` appended on a run with a base, below): slot choice belongs to the repo's script, and a declared command that still needs a
 value computed (`<next-free-N>`) is a halt naming the config line. A create that fails — a sandbox
 refusal, a script that asks a question, a stale path — halts with the command's output, and nothing
 is retried in another form. A classifier only ever sees the kickoff call itself: a denial of it
@@ -294,6 +296,33 @@ item halts too (for an issue, any branch under `branch.issue` cut at `<slug>`): 
 the first manifest (below) and claims the board last. The create runs through `sh -c` behind the one
 kickoff call, so an allow rule for `dispatch_cli.php kickoff` is an allow rule for whatever
 `worktree.create` declares. `interactive` follows the rest of this section by hand.
+
+**A run on a base.** `--base <branch>` cuts the run from a long-lived integration branch instead of
+the default branch, diffs against it and opens its PR into it: for work that must reach the default
+branch in one go, such as a set of issues whose deploy operations may not run in production in
+between. Where a repo mid-rewrite declares a `--base` in its `worktree.create` for every run (below),
+this one is per run.
+
+- **Before anything exists** kickoff fetches `refs/heads/<base>` from origin into `origin/<base>`; a
+  base that is not a branch there, or holds characters a shell would read, halts.
+- **The create gets `--base origin/<base>` appended** to the declared command; the repo's script
+  resolves it (`scripts/worktree.sh create --base <ref>`). Why appended, not a `<base>` placeholder
+  in the declared command: that command is shared with `work-on` and `orchestrate`, which substitute
+  only `<branch>`, so a placeholder would reach the script literally from every one of them; and a
+  base belongs to a run, not to the repo. A script that takes no `--base` fails, and its output is the
+  halt. A create declared with a repo-level `--base` gets a second one, and `worktree.sh` takes the last.
+- **After the create** kickoff checks that the worktree's `HEAD` equals `origin/<base>`: a script that
+  ignored the flag halts there, naming the worktree it left, rather than handing every leg a branch
+  cut from the wrong code. Then it sets `git config branch.<branch>.gh-merge-base <base>`, so
+  `handoff`'s `gh pr create`, which passes no `--base`, opens the PR into the base (gh reads that
+  config when `--base` is absent), and writes `base` into the first manifest.
+- **Every leg after it** reads the base from its brief (`pipeline_brief_state()`), and every
+  `origin/<base>` diff, `run_audit.php`'s diff and the CI gate's fix round use it. `launch` needs no
+  flag for it: the manifest carries it, and a leg that changes `base` is a return that does not hold.
+- **A merge into the base closes no issue**: GitHub closes issues only on merges into the default
+  branch. The finish step still settles the closing links (§Closing links); the issue closes when the
+  base reaches the default branch, or earlier by hand (`orchestrate` does that for its batch).
+- **The pipeline never opens the base's own PR** into the default branch: that PR is the owner's.
 
 The whole run lives in **one worktree**; the pipeline ensures one exists, creating it if the
 current checkout isn't already it. Derive the starting point from the invocation:
@@ -308,7 +337,8 @@ current checkout isn't already it. Derive the starting point from the invocation
     `worktree.create` is where a repo records the flags its own slots need, and a repo
     mid-rewrite declares a `--base <ref>` there because its current work lives on a long-lived
     integration branch while `origin/HEAD` still names the pre-cutover default. Dropping the
-    flag cuts the run's branch from the wrong code, and every leg after it looks healthy. This
+    flag cuts the run's branch from the wrong code, and every leg after it looks healthy (for
+    one run's own base, see *A run on a base* above). This
     is `work-on`'s own rule too (use the configured command, "never `git worktree add` by
     hand"), and the pipeline invokes stations rather than reimplementing them.
   - **otherwise** (e.g. this config repo): a plain feature branch in place — `git switch -c
@@ -345,8 +375,8 @@ ignored.
 
 **The first `manifest_write` carries everything no step will look up.** Kickoff — the
 session that holds the invocation, `/pipeline` itself or `orchestrate` for its runs — writes
-`branch`, `worktree`, `mode`, `cursor: {leg: design, status: pending}`, `light: true` when the
-invocation said `light`, the pointers `artifacts.idea` / `artifacts.issue` when the invocation named
+`branch`, `worktree`, `mode`, `base` when the invocation named one, `cursor: {leg: design, status:
+pending}`, `light: true` when the invocation said `light`, the pointers `artifacts.idea` / `artifacts.issue` when the invocation named
 an idea file or an issue, and `decisions` (verbatim) when settled decisions were stated inline.
 Nothing that runs the loop, in any mode, reads an artifact to recover any of these, so a field
 kickoff leaves out is simply absent from every brief: a `light` run would get an Architectural design
@@ -791,6 +821,10 @@ judgment it is best placed to make — so this never interrupts a run in either 
 never do is leave the outcome implicit: an issue that closes by accident and an issue that closes
 by decision are indistinguishable after the merge, which is the whole reason this step is written
 down.
+
+**A run on a base** (§Kickoff) reconciles the same way, but its PR goes into the base, and a merge
+there closes nothing: record each issue's outcome as it would be on the default branch, and say in
+the PR body that the issue closes once the base reaches the default branch.
 
 **A run that never had an issue skips this section silently** (§The work item) — there is nothing
 to reconcile. That is not the same as a run *with* an issue whose PR carries no closing link: the

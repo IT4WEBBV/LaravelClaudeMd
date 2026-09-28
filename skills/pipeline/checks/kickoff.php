@@ -66,7 +66,7 @@ final class PipelineKickoffHalt extends RuntimeException
  * The spec's steps in order (`docs/superpowers/specs/2026-09-24-pipeline-kickoff-design.md`). Up to the
  * create nothing exists, so a halt there leaves nothing behind.
  *
- * @param  array{mode: string, light: bool, decisions: list<string>}  $options
+ * @param  array{mode: string, light: bool, base: ?string, decisions: list<string>}  $options
  */
 function pipeline_kickoff(string $repoRoot, string $item, array $options): array
 {
@@ -75,7 +75,8 @@ function pipeline_kickoff(string $repoRoot, string $item, array $options): array
         $board = pipeline_kickoff_board($config);
         $issue = pipeline_kickoff_issue($repoRoot, $config, $item);
         $branch = pipeline_kickoff_branch($config, $item, $issue);
-        $command = pipeline_kickoff_create_command($config, $branch);
+        $base = pipeline_kickoff_base($repoRoot, $options['base']);
+        $command = pipeline_kickoff_create_command($config, $branch, $base);
         pipeline_kickoff_unclaimed($repoRoot, $config, $branch, $issue);
         $worktree = pipeline_kickoff_create($repoRoot, $command, $branch);
     } catch (RuntimeException $halt) {
@@ -83,7 +84,7 @@ function pipeline_kickoff(string $repoRoot, string $item, array $options): array
     }
 
     try {
-        $manifest = pipeline_kickoff_prepare($worktree, $branch, pipeline_kickoff_manifest($branch, $worktree, $item, $issue, $options));
+        $manifest = pipeline_kickoff_prepare($worktree, $branch, $base, pipeline_kickoff_manifest($branch, $worktree, $item, $issue, $options));
     } catch (RuntimeException $failure) {
         return pipeline_halt("kickoff created {$worktree} but could not finish it, and wrote no manifest: {$failure->getMessage()}; remove the worktree and its branch before kicking off again");
     }
@@ -192,8 +193,32 @@ function pipeline_kickoff_slug(string $text): string
     return $slug;
 }
 
-/** The declared `worktree.create` with `<branch>` filled in, its only substitution. */
-function pipeline_kickoff_create_command(string $config, string $branch): string
+/**
+ * A per-run base (engine.md §Kickoff, *A run on a base*) is a branch on origin. Fetching it both proves
+ * that and leaves `origin/<base>` current for the create and the check after it.
+ */
+function pipeline_kickoff_base(string $repoRoot, ?string $base): ?string
+{
+    if ($base === null) {
+        return null;
+    }
+    if (! preg_match('#^[A-Za-z0-9._/-]+$#', $base)) {
+        throw new PipelineKickoffHalt("the base '{$base}' holds characters kickoff will not pass to a shell");
+    }
+    [$code, , $err] = pipeline_git_run($repoRoot, ['fetch', '-q', 'origin', "refs/heads/{$base}:refs/remotes/origin/{$base}"]);
+    if ($code !== 0) {
+        throw new PipelineKickoffHalt("the base {$base} is not a branch on origin: {$err}");
+    }
+
+    return $base;
+}
+
+/**
+ * The declared `worktree.create` with `<branch>` filled in, its only substitution, and `--base
+ * origin/<base>` after it on a run with a base: the declared command is shared with `work-on`, which
+ * would pass a `<base>` placeholder on literally.
+ */
+function pipeline_kickoff_create_command(string $config, string $branch, ?string $base): string
 {
     $declared = pipeline_kickoff_required($config, 'Worktree', 'create');
     $command = str_replace('<branch>', $branch, $declared);
@@ -202,7 +227,7 @@ function pipeline_kickoff_create_command(string $config, string $branch): string
         throw new PipelineKickoffHalt("the declared worktree.create needs {$placeholder}, which kickoff does not compute: `- create: {$declared}`");
     }
 
-    return $command;
+    return $base === null ? $command : "{$command} --base origin/{$base}";
 }
 
 /**
@@ -249,9 +274,12 @@ function pipeline_worktree_of(string $repoRoot, string $branch): ?string
     return null;
 }
 
-/** No upstream on the new branch, the manifest out of git, then the first write. @return string the manifest path */
-function pipeline_kickoff_prepare(string $worktree, string $branch, array $manifest): string
+/** On its base, no upstream on the new branch, the manifest out of git, then the first write. @return string the manifest path */
+function pipeline_kickoff_prepare(string $worktree, string $branch, ?string $base, array $manifest): string
 {
+    if ($base !== null) {
+        pipeline_kickoff_on_base($worktree, $branch, $base);
+    }
     if (pipeline_git_run($worktree, ['rev-parse', '--abbrev-ref', "{$branch}@{upstream}"])[0] === 0) {
         pipeline_git($worktree, ['branch', '--unset-upstream', $branch]);
     }
@@ -262,6 +290,17 @@ function pipeline_kickoff_prepare(string $worktree, string $branch, array $manif
     return $path;
 }
 
+/** The create honoured the base, and `gh pr create` without `--base` opens the run's PR into it. */
+function pipeline_kickoff_on_base(string $worktree, string $branch, string $base): void
+{
+    $head = pipeline_git($worktree, ['rev-parse', 'HEAD']);
+    $tip = pipeline_git($worktree, ['rev-parse', "origin/{$base}"]);
+    if ($head !== $tip) {
+        throw new PipelineKickoffHalt("the worktree's HEAD ({$head}) is not origin/{$base} ({$tip}): the declared worktree.create did not honour --base");
+    }
+    pipeline_git($worktree, ['config', "branch.{$branch}.gh-merge-base", $base]);
+}
+
 /** Everything no step will look up (engine.md §Kickoff); a key with nothing to say is absent. */
 function pipeline_kickoff_manifest(string $branch, string $worktree, string $item, ?array $issue, array $options): array
 {
@@ -269,6 +308,7 @@ function pipeline_kickoff_manifest(string $branch, string $worktree, string $ite
         'branch' => $branch,
         'worktree' => $worktree,
         'mode' => $options['mode'],
+        ...($options['base'] === null ? [] : ['base' => $options['base']]),
         'cursor' => ['leg' => 'design', 'status' => 'pending'],
         'artifacts' => $issue === null ? ['idea' => $item] : ['issue' => $issue['number']],
         ...($options['light'] ? ['light' => true] : []),

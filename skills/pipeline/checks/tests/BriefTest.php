@@ -264,3 +264,13 @@ it('runs format once per implement step, before the last suite run and the push,
             ->not->toContain('after each step the suite and the mechanical checks');
     }
 });
+
+it('tells every leg of a run on a base where its branch came from and where its PR goes', function (string $leg) {
+    $brief = pipeline_brief(brief_manifest($leg, ['base' => 'feature/issue-2042-kleurenpaletten']), $leg, '/tmp/m.json');
+
+    expect($brief)->toContain('- base: `feature/issue-2042-kleurenpaletten`: this branch was cut from `origin/feature/issue-2042-kleurenpaletten` and its PR goes into it, not into the default branch; diff with `git diff origin/feature/issue-2042-kleurenpaletten...HEAD`, and a merge into it closes no issue (engine.md §Kickoff)');
+})->with(['design', 'handoff', 'implement', 'review-pr']);
+
+it('says nothing about a base on a run without one', function () {
+    expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))->not->toContain('- base:');
+});

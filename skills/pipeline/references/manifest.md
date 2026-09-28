@@ -25,6 +25,7 @@ Read/written by the Phase A helpers in `../checks/manifest.php`:
 | `suite` | optional | the last full suite: `{tree, outcome: green\|red, passed, failed, at}` — see *Two rules* for why a recomputable field is stored |
 | `decisions` | optional | the settled decisions from the invocation, verbatim, as a list, and what `launch --decision` adds: an owner's request on a ready PR, or the CI gate's failure record (`engine.md` §The CI gate). Every brief carries them (`engine.md` §What a leg brief consists of) |
 | `light` | optional | the invocation's `light`; read only while `design` has not run |
+| `base` | optional | the branch kickoff's `--base` cut the run from and its PR goes into (`engine.md` §Kickoff, *A run on a base*); absent means the default branch. Written once by kickoff; a leg that changes it halts the run |
 
 `manifest_validate($data)` returns the list of **missing required keys** — `branch`,
 `worktree`, `mode`, `cursor`. An empty list means valid. Keep this table and that function
