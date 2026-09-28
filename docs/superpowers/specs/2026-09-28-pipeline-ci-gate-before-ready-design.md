@@ -103,7 +103,7 @@ spent 6.8 and 7.6 of its ~21 minutes watching CI, while `review-pr:review` reads
 
 - **`implement:run`, `autoflow`:** ``Add the `ci` label (`gh pr edit <pr> --add-label ci`) before your
   first push, in a repo that has one, and do not wait on CI after it: this overrides `work-on`'s CI watch;
-  the CI gate reads the PR's head commit before `gh pr ready` (engine.md §The CI gate).``
+  the CI gate reads the PR's head commit before the PR goes ready (engine.md §The CI gate).``
   `interactive` keeps today's line (*before the push whose CI you watch*).
 - **`review-pr:resolve`, `autoflow`**, the finish line becomes: ``Push your commits and leave the PR
   draft; the session that launched the run marks it ready after the CI gate (engine.md §The CI gate).``

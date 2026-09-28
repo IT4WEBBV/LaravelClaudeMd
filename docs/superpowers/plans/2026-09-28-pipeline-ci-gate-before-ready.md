@@ -679,7 +679,9 @@ poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll
   `finish` records the halt there. The PR stays draft, and §Failure policy's duties after `handoff`
   follow. A red after the round halts: a decision that starts `CI red on the PR's head commit` is the
   round spent, once per run, so a resumed run halts on its next red too. An empty answer (a usage error)
-  is a halt as well.
+  is a halt as well. After a halt on the hour nothing needs re-reviewing: run the loop again by hand on
+  the halted manifest (`ci` is read-only and refuses only a retired mode or a missing PR) rather than
+  `launch`, which would re-run `review-pr:review`.
 - **In `interactive`** the finish step runs the same loop, `gh pr ready` on `ready`, and shows any other
   answer to the human; there is no automatic round.
 - **The merge watch stays on `state`** (§After the merge): once the PR is ready, CI on its head has
@@ -756,6 +758,7 @@ git commit -m "docs(pipeline): engine.md §The CI gate: CI on the PR's head comm
 **Interfaces:**
 - Consumes: Task 1's `pipeline_ci_rounds()`; Task 4's `§The CI gate`; existing `pipeline_leg_overrides(string $mode): array`, `pipeline_brief_overrides(array $manifest, string $leg, string $step): string`, and the test helper `brief_manifest(string $leg, array $extra = []): array` (default mode `interactive`).
 - Produces: `pipeline_ci_round_line(string $step): string`.
+- Runtime: `pipeline_ci_rounds()` reaches `dispatch_cli.php brief` only through Task 2's `require_once __DIR__ . '/ci.php';` in `dispatch_cli.php` (`Pest.php` loads it for the tests alone), so this task runs after Task 2; before it, the first `review-pr` brief with a CI decision is a fatal.
 
 - [ ] **Step 1: Write the failing tests.** In `BriefTest.php`:
 
@@ -764,7 +767,7 @@ git commit -m "docs(pipeline): engine.md §The CI gate: CI on the PR's head comm
 ```php
 it('tells an autoflow implement not to wait on CI, and an interactive one to label before the push whose CI it watches', function () {
     expect(pipeline_brief(brief_manifest('implement', ['mode' => 'autoflow']), 'implement', '/tmp/m.json'))
-        ->toContain('Add the `ci` label (`gh pr edit <pr> --add-label ci`) before your first push, in a repo that has one, and do not wait on CI after it: this overrides `work-on`\'s CI watch; the CI gate reads the PR\'s head commit before `gh pr ready` (engine.md §The CI gate).')
+        ->toContain('Add the `ci` label (`gh pr edit <pr> --add-label ci`) before your first push, in a repo that has one, and do not wait on CI after it: this overrides `work-on`\'s CI watch; the CI gate reads the PR\'s head commit before the PR goes ready (engine.md §The CI gate).')
         ->not->toContain('the push whose CI you watch');
     expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))
         ->toContain('Add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch.');
@@ -807,7 +810,7 @@ Expected: FAIL: the four new or changed tests (the autoflow `implement` line, th
 
 ```php
             $autoflow
-                ? 'Add the `ci` label (`gh pr edit <pr> --add-label ci`) before your first push, in a repo that has one, and do not wait on CI after it: this overrides `work-on`\'s CI watch; the CI gate reads the PR\'s head commit before `gh pr ready` (engine.md §The CI gate).'
+                ? 'Add the `ci` label (`gh pr edit <pr> --add-label ci`) before your first push, in a repo that has one, and do not wait on CI after it: this overrides `work-on`\'s CI watch; the CI gate reads the PR\'s head commit before the PR goes ready (engine.md §The CI gate).'
                 : 'Add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch.',
 ```
 
