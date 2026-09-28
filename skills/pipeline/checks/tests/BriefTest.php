@@ -235,3 +235,11 @@ it('tells a resolve step to loop back on a plan gap, and a review step to leave 
         ->toContain('run the escalation check first')
         ->not->toContain('append no review entry');
 });
+
+it('runs format once per implement step, before the last suite run and the push, in both modes', function () {
+    foreach (['autoflow', 'interactive'] as $mode) {
+        expect(pipeline_brief(brief_manifest('implement', ['mode' => $mode]), 'implement', '/tmp/m.json'))
+            ->toContain('Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, its changes committed, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). Record `suite` after every full run.')
+            ->not->toContain('after each step the suite and the mechanical checks');
+    }
+});
