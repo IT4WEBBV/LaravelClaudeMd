@@ -23,7 +23,7 @@ Read/written by the Phase A helpers in `../checks/manifest.php`:
 | `gate_ledger` | optional | the audit trail — each gate's review, what the resolve step or the human did about it, and the content-trigger annotations (shape below) |
 | `lease` | optional | session id + timestamp (single-driver guard) |
 | `suite` | optional | the last full suite: `{tree, outcome: green\|red, passed, failed, at}` — see *Two rules* for why a recomputable field is stored |
-| `decisions` | optional | the settled decisions from the invocation, verbatim, as a list. Every brief carries them (`engine.md` §What a leg brief consists of) |
+| `decisions` | optional | the settled decisions from the invocation, verbatim, as a list, and what `launch --decision` adds: an owner's request on a ready PR, or the CI gate's failure record (`engine.md` §The CI gate). Every brief carries them (`engine.md` §What a leg brief consists of) |
 | `light` | optional | the invocation's `light`; read only while `design` has not run |
 
 `manifest_validate($data)` returns the list of **missing required keys** — `branch`,

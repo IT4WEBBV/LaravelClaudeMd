@@ -94,9 +94,8 @@ then a new `launch` and workflow.
 Commits wanted on a ready PR, after `gh pr ready --undo <P>`:
 
 ```bash
-php -r '$m = json_decode(file_get_contents($argv[1]), true); $m["decisions"][] = $argv[2]; file_put_contents($argv[1], json_encode($m, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");' <manifest> "<the owner's request, verbatim>"
 git -C <worktree> diff origin/<base>...HEAD > <manifest stem>.diff
-PIPELINE_NO_OPEN=1 php ~/.claude/skills/pipeline/checks/dispatch_cli.php launch <manifest> <manifest stem>.diff --from review-pr
+PIPELINE_NO_OPEN=1 php ~/.claude/skills/pipeline/checks/dispatch_cli.php launch <manifest> <manifest stem>.diff --from review-pr --decision "<the owner's request, verbatim>"
 ```
 
 then a new `pipeline-autoflow` workflow with that JSON.
@@ -107,7 +106,8 @@ On a run's completion notice (pipeline `engine.md` §`autoflow` — a program th
 
 ```bash
 php ~/.claude/skills/pipeline/checks/dispatch_cli.php finish <manifest> '<the workflow return, as JSON>'
-gh pr ready <P> -R <repo>                                                      # only when finish printed done
+poll=1; while answer=$(php ~/.claude/skills/pipeline/checks/dispatch_cli.php ci <manifest> --poll $poll); echo "$answer" | grep -q '"action":"wait"'; do sleep 30; poll=$((poll + 1)); done; echo "$answer"   # only when finish printed done; run_in_background
+gh pr ready <P> -R <repo>                                                      # only when the gate answered ready
 php ~/.claude/skills/pipeline/checks/run_cost_cli.php <the run's transcript dir>
 git -C <worktree> diff origin/<base>...HEAD > <manifest stem>.diff
 php ~/.claude/skills/pipeline/checks/run_audit.php <manifest> <manifest stem>.diff <the run's transcript dir>
@@ -122,6 +122,12 @@ workflow that errored: `finish <manifest> '{"action":"halt","reason":"<the error
 after `handoff`: the reason into the PR body, as pipeline `engine.md` §Failure policy — what still
 stops (*Bound exhaustion*) says. No proof page opens on a halt in an unattended batch, unlike pipeline
 `SKILL.md`'s attended "opened once": it opens only on a ready PR (§Proof page).
+
+The CI gate (pipeline `engine.md` §The CI gate) runs in one background Bash and wakes you with its
+answer; a run in its gate still counts as working. `fix`: the fix round, as §Launch's *commits wanted*
+block with `--decision "<its decision>"` in place of the owner's request and no `gh pr ready --undo`
+(the PR is still draft), then a new `pipeline-autoflow` workflow in the dispatch record. `halt`:
+`finish <manifest> '<the answer>'`, and the run is halted like any other.
 
 A stalled run: `TaskStop` its task id first. Only once it reports the task stopped,
 `finish <manifest> '{"action":"halt","reason":"stalled: no notice, commit or PR change for 90 minutes"}'`.
