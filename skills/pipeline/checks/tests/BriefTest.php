@@ -67,6 +67,16 @@ it('permits the design size the invocation allowed', function () {
     expect(pipeline_brief(brief_manifest('design', ['light' => true]), 'design', '/tmp/wt/.claude/pipeline/feature-x.json'))->toContain('the Bounded path is permitted');
 });
 
+it('tells design to confirm by reading, probe only to choose, and leave the Expected lines to implement', function () {
+    foreach (['autoflow', 'interactive'] as $mode) {
+        expect(pipeline_brief(brief_manifest('design', ['mode' => $mode]), 'design', '/tmp/m.json'))
+            ->toContain('Do not build or run the plan\'s code, in a scratch copy or anywhere else: confirm the signatures and APIs it relies on by reading, `php -l` or grep; `implement` proves the plan\'s Expected lines (engine.md §What design proves).')
+            ->toContain('The one exception: when the choice between approaches hinges on whether one of them works at all, answer that question with a throwaway probe (a few lines run on their own, never the plan\'s code, never the suite) and write the question and what the probe showed into the spec.')
+            ->toContain('Plans and specs committed before 2026-09-14 are not exemplars for test or proof policy, and no plan\'s `Verified before writing` header is part of the format.')
+            ->not->toContain('for test or proof policy.');
+    }
+});
+
 it('asks for grow form only after an escalation no plan approval has answered', function () {
     $escalated = ['gate' => 'design-size', 'leg' => 'implement', 'at' => '2026-09-22T12:00:00Z', 'reason' => 'migration', 'outcome' => 'escalated'];
     $approved = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'at' => '2026-09-22T13:00:00Z', 'review' => 'ok', 'outcome' => 'continued'];
