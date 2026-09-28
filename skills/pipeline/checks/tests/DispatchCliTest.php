@@ -533,6 +533,7 @@ it('refuses a manifest that still says auto in every command, naming autoflow, a
     'launch' => [['launch', '<manifest>', '<diff>']],
     'brief' => [['brief', '<manifest>', 'review-plan', 'review']],
     'finish' => [['finish', '<manifest>', '{"action":"done"}']],
+    'ci' => [['ci', '<manifest>']],
 ]);
 
 it('prints the committed spec\'s design size, bare', function (string $spec, string $size) {
@@ -560,6 +561,99 @@ it('refuses size without a readable manifest and ui without a diff file', functi
     expect(dispatch_cli(['size', '/nonexistent/m.json']))->toMatchArray(['code' => 1, 'stdout' => '']);
     expect(dispatch_cli(['ui', '/nonexistent/x.diff']))->toMatchArray(['code' => 1, 'stdout' => '']);
 });
+
+/** A finished autoflow run on PR 7, and a fake gh first on PATH that answers `pr view` from pr.json (none: gh fails). */
+function ci_fixture(?array $view, bool $workflows = true, array $decisions = []): array
+{
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'artifacts' => ['spec' => null, 'plan' => null, 'pr' => 7, 'issue' => null], 'decisions' => $decisions]);
+    mkdir($fixture['dir'] . '/bin');
+    file_put_contents($fixture['dir'] . '/bin/gh', <<<'SH'
+#!/bin/sh
+echo "$*" >> "$GH_FAKE/calls"
+[ -f "$GH_FAKE/pr.json" ] || { echo 'HTTP 502: Bad Gateway' >&2; exit 1; }
+cat "$GH_FAKE/pr.json"
+SH);
+    chmod($fixture['dir'] . '/bin/gh', 0755);
+    if ($view !== null) {
+        file_put_contents($fixture['dir'] . '/pr.json', json_encode($view));
+    }
+    if ($workflows) {
+        mkdir($fixture['dir'] . '/.github/workflows', 0777, true);
+        file_put_contents($fixture['dir'] . '/.github/workflows/ci.yml', "on: pull_request\n");
+    }
+
+    return [...$fixture, 'env' => ['PATH' => $fixture['dir'] . '/bin:' . getenv('PATH'), 'GH_FAKE' => $fixture['dir']]];
+}
+
+function ci_gate(array $fixture, array $arguments = []): array
+{
+    return dispatch_cli(['ci', $fixture['manifest'], ...$arguments], $fixture['env']);
+}
+
+function ci_head(string $conclusion): array
+{
+    return ['headRefOid' => 'abc123', 'statusCheckRollup' => [['__typename' => 'CheckRun', 'name' => 'ci', 'workflowName' => 'CI', 'status' => 'COMPLETED', 'conclusion' => $conclusion, 'detailsUrl' => 'https://github.com/acme/app/actions/runs/11/job/12']]];
+}
+
+it('gates the PR\'s head commit with one gh read, and never writes the manifest', function () {
+    $fixture = ci_fixture(ci_head('SUCCESS'));
+    $before = file_get_contents($fixture['manifest']);
+
+    $result = ci_gate($fixture);
+
+    expect($result['code'])->toBe(0);
+    expect($result['json'])->toBe(['action' => 'ready', 'verdict' => 'green', 'sha' => 'abc123']);
+    expect(file($fixture['dir'] . '/calls', FILE_IGNORE_NEW_LINES))->toBe(['pr view 7 --json headRefOid,statusCheckRollup']);
+    expect(file_get_contents($fixture['manifest']))->toBe($before);
+});
+
+it('answers a red head with a fix round the first time, and with a halt finish records once the round is spent', function () {
+    $decision = "CI red on the PR's head commit abc123: CI / ci failed (https://github.com/acme/app/actions/runs/11/job/12)";
+    $first = ci_fixture(ci_head('FAILURE'));
+    $before = file_get_contents($first['manifest']);
+
+    expect(ci_gate($first)['json'])->toMatchArray(['action' => 'fix', 'verdict' => 'red', 'decision' => $decision]);
+    expect(file_get_contents($first['manifest']))->toBe($before);
+
+    $spent = ci_fixture(ci_head('FAILURE'), true, [$decision]);
+    $halt = ci_gate($spent)['stdout'];
+    $reason = 'CI red again after the fix round, on abc123: CI / ci failed (https://github.com/acme/app/actions/runs/11/job/12)';
+    expect(json_decode($halt, true))->toMatchArray(['action' => 'halt', 'leg' => 'review-pr', 'reason' => $reason]);
+
+    dispatch_cli(['finish', $spent['manifest'], trim($halt)]);
+    expect(manifest_read($spent['manifest'])['cursor'])->toBe(['leg' => 'review-pr', 'status' => 'halted', 'reason' => $reason]);
+});
+
+it('waits on no checks while the worktree has workflows, and answers ready at once without them', function () {
+    $none = ['headRefOid' => 'abc123', 'statusCheckRollup' => []];
+
+    expect(ci_gate(ci_fixture($none))['json'])->toBe(['action' => 'wait', 'verdict' => 'none', 'sha' => 'abc123']);
+    expect(ci_gate(ci_fixture($none), ['--poll', '3'])['json'])->toBe(['action' => 'ready', 'verdict' => 'none', 'sha' => 'abc123']);
+    expect(ci_gate(ci_fixture($none, false))['json'])->toBe(['action' => 'ready', 'verdict' => 'none', 'sha' => 'abc123']);
+});
+
+it('waits while gh cannot read the PR, and halts at the last read', function () {
+    expect(ci_gate(ci_fixture(null))['json'])->toBe(['action' => 'wait', 'verdict' => 'unreadable']);
+    expect(ci_gate(ci_fixture(null), ['--poll', '120'])['json'])->toMatchArray(['action' => 'halt', 'leg' => 'review-pr']);
+});
+
+it('halts the gate on a run without a PR or a readable manifest, and leaves the manifest alone', function () {
+    $fixture = dispatch_fixture(['mode' => 'autoflow']);
+    $before = file_get_contents($fixture['manifest']);
+
+    expect(dispatch_cli(['ci', $fixture['manifest']])['json'])->toBe(['action' => 'halt', 'reason' => 'the CI gate needs a PR: artifacts.pr is not set']);
+    expect(file_get_contents($fixture['manifest']))->toBe($before);
+    expect(dispatch_cli(['ci', '/nonexistent/m.json'])['json'])->toBe(['action' => 'halt', 'reason' => 'no readable manifest at /nonexistent/m.json']);
+});
+
+it('refuses a ci it cannot parse', function (array $arguments) {
+    expect(ci_gate(ci_fixture(ci_head('SUCCESS')), $arguments)['code'])->toBe(1);
+})->with([
+    'a poll without its value' => [['--poll']],
+    'a poll of zero' => [['--poll', '0']],
+    'a poll that is no number' => [['--poll', 'soon']],
+    'an unknown flag' => [['--wait', '3']],
+]);
 
 function kickoff_issue(array $overrides = []): array
 {

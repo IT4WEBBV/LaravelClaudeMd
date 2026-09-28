@@ -11,11 +11,13 @@
  *                 php dispatch_cli.php finish <manifest> <decision-json>
  *                 php dispatch_cli.php size <manifest>
  *                 php dispatch_cli.php ui <diff-file>
+ *                 php dispatch_cli.php ci <manifest> [--poll <n>]
  *
  * `brief` prints the brief as Markdown; `size` and `ui` print a bare value for a step to copy
  * (`Bounded` / `Architectural`, `true` / `false`); every other answer, and a `brief` that halts, is
- * one JSON line. Exits 0 on every decision, a halt included. Exits 1 on a usage error (a `kickoff`
- * or a `brief` it cannot parse included), and when `size` has no readable manifest or `ui` no diff file.
+ * one JSON line. Exits 0 on every decision, a halt included. Exits 1 on a usage error (a `kickoff`,
+ * a `launch`, a `brief` or a `ci` it cannot parse included), and when `size` has no readable manifest
+ * or `ui` no diff file.
  */
 
 require_once __DIR__ . '/triggers.php';
@@ -26,6 +28,7 @@ require_once __DIR__ . '/dispatch.php';
 require_once __DIR__ . '/brief.php';
 require_once __DIR__ . '/suite.php';
 require_once __DIR__ . '/kickoff.php';
+require_once __DIR__ . '/ci.php';
 
 /** @return array{brief: string, before: string, diff: string} */
 function dispatch_cli_files(string $manifestPath): array
@@ -220,9 +223,9 @@ function dispatch_cli_invariant_problem(array $manifest): ?string
 }
 
 /** `gh pr view` from the worktree, or null when gh cannot read the PR. */
-function dispatch_cli_pr_view(string $worktree, int|string $pr): ?array
+function dispatch_cli_pr_view(string $worktree, int|string $pr, string $fields = 'state,isDraft'): ?array
 {
-    $process = proc_open(['gh', 'pr', 'view', (string) $pr, '--json', 'state,isDraft'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $worktree);
+    $process = proc_open(['gh', 'pr', 'view', (string) $pr, '--json', $fields], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $worktree);
     if (! is_resource($process)) {
         return null;
     }
@@ -384,6 +387,46 @@ function dispatch_cli_ui(string $diffPath): ?string
 }
 
 /**
+ * The CI gate's read (`../references/engine.md` §The CI gate): the PR's head commit and its checks in one
+ * gh call, and what the session does next. It never writes the manifest, so polling it changes nothing.
+ */
+function dispatch_cli_ci(string $manifestPath, int $poll): array
+{
+    $manifest = manifest_read($manifestPath);
+    if ($manifest === null) {
+        return pipeline_halt("no readable manifest at {$manifestPath}");
+    }
+    $problem = dispatch_cli_invalid($manifest) ?? pipeline_retired_mode((string) $manifest['mode']);
+    if ($problem !== null) {
+        return pipeline_halt($problem);
+    }
+    $pr = $manifest['artifacts']['pr'] ?? null;
+    if ($pr === null) {
+        return pipeline_halt('the CI gate needs a PR: artifacts.pr is not set');
+    }
+    $worktree = rtrim($manifest['worktree'], '/');
+
+    return pipeline_ci_answer(
+        $manifest,
+        dispatch_cli_pr_view($worktree, $pr, 'headRefOid,statusCheckRollup'),
+        glob("{$worktree}/.github/workflows/*.y*ml") !== [],
+        $poll,
+    );
+}
+
+/** `ci <manifest> [--poll <n>]`, n counted from 1; null is a usage error. */
+function dispatch_cli_ci_command(array $arguments): ?array
+{
+    $poll = match (count($arguments)) {
+        1 => '1',
+        3 => $arguments[1] === '--poll' ? (string) $arguments[2] : '',
+        default => '',
+    };
+
+    return ctype_digit($poll) && (int) $poll > 0 ? dispatch_cli_ci((string) $arguments[0], (int) $poll) : null;
+}
+
+/**
  * `kickoff <repo-root> <number|idea> [--light] [--decision <text>]...`; null is a usage error. `--mode
  * autoflow` is accepted and changes nothing; `--mode auto` parses, so that `dispatch_cli_kickoff()` can
  * halt it by name. `interactive` keeps its session-driven kickoff.
@@ -483,11 +526,12 @@ $result = match ($argv[1] ?? '') {
     'finish' => dispatch_cli_finish((string) ($argv[2] ?? ''), (string) ($argv[3] ?? '')),
     'size' => dispatch_cli_size((string) ($argv[2] ?? '')),
     'ui' => dispatch_cli_ui((string) ($argv[2] ?? '')),
+    'ci' => dispatch_cli_ci_command(array_slice($argv, 2)),
     default => null,
 };
 
 if ($result === null) {
-    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> (size needs a readable manifest, ui an existing diff file)\n");
+    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> | ci <manifest> [--poll <n>] (size needs a readable manifest, ui an existing diff file)\n");
     exit(1);
 }
 
