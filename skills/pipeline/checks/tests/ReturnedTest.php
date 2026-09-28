@@ -231,6 +231,13 @@ it('reports a manifest problem before anything the step reported', function () {
         ->toBe('the leg changed branch, which only the dispatcher writes');
 });
 
+it('does not let a leg change the run\'s base', function () {
+    $before = [...returned_before('implement'), 'base' => 'feature/integration'];
+
+    expect(pipeline_reported_problem($before, returned_after($before, 'continued', null, ['base' => 'main']), ['status' => 'continued'], DesignSize::Architectural))
+        ->toBe('the leg changed base, which only the dispatcher writes');
+});
+
 it('passes the returns that route elsewhere than on, when the ledger bears them out', function (string $leg, array $ledger, string $status, array $newLedger, array $reported, DesignSize $size) {
     $before = returned_before($leg, $ledger);
 

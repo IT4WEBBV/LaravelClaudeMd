@@ -151,6 +151,10 @@ function pipeline_brief_state(array $manifest, string $leg): string
 {
     $decisions = $manifest['decisions'] ?? [];
     $lines = $decisions === [] ? ['- settled decisions: none'] : array_map(fn (string $decision) => "- settled: {$decision}", $decisions);
+    $base = $manifest['base'] ?? null;
+    if ($base !== null) {
+        $lines[] = "- base: `{$base}`: this branch was cut from `origin/{$base}` and its PR goes into it, not into the default branch; diff with `git diff origin/{$base}...HEAD`, and a merge into it closes no issue (engine.md §Kickoff)";
+    }
     $sha = $manifest['last_sha'] ?? 'unknown';
     $lines[] = "- last_sha: `{$sha}`";
 
@@ -180,6 +184,10 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step): s
     }
     if ($leg === 'review-pr' && pipeline_ci_rounds($manifest) > 0) {
         $lines[] = pipeline_ci_round_line($step);
+    }
+    $base = $manifest['base'] ?? null;
+    if ($leg === 'handoff' && $base !== null) {
+        $lines[] = "The PR must open into `{$base}`: after `handoff pr`, `gh pr view <pr> --json baseRefName --jq .baseRefName` prints `{$base}`; otherwise `gh pr edit <pr> --base {$base}` before setting `artifacts.pr` (engine.md §Kickoff).";
     }
     if ($leg !== 'design') {
         $lines = [...$lines, ...pipeline_plan_gap_lines($step)];

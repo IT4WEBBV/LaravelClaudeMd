@@ -264,3 +264,19 @@ it('runs format once per implement step, before the last suite run and the push,
             ->not->toContain('after each step the suite and the mechanical checks');
     }
 });
+
+it('tells every leg of a run on a base where its branch came from and where its PR goes', function (string $leg) {
+    $brief = pipeline_brief(brief_manifest($leg, ['base' => 'feature/issue-2042-kleurenpaletten']), $leg, '/tmp/m.json');
+
+    expect($brief)->toContain('- base: `feature/issue-2042-kleurenpaletten`: this branch was cut from `origin/feature/issue-2042-kleurenpaletten` and its PR goes into it, not into the default branch; diff with `git diff origin/feature/issue-2042-kleurenpaletten...HEAD`, and a merge into it closes no issue (engine.md §Kickoff)');
+})->with(['design', 'handoff', 'implement', 'review-pr']);
+
+it('says nothing about a base on a run without one', function () {
+    expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))->not->toContain('- base:');
+});
+
+it('makes handoff on a run on a base check that the PR opened into it', function () {
+    expect(pipeline_brief(brief_manifest('handoff', ['base' => 'feature/integration']), 'handoff', '/tmp/m.json'))
+        ->toContain('- The PR must open into `feature/integration`: after `handoff pr`, `gh pr view <pr> --json baseRefName --jq .baseRefName` prints `feature/integration`; otherwise `gh pr edit <pr> --base feature/integration` before setting `artifacts.pr` (engine.md §Kickoff).');
+    expect(pipeline_brief(brief_manifest('handoff'), 'handoff', '/tmp/m.json'))->not->toContain('The PR must open into');
+});
