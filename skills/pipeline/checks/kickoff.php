@@ -66,7 +66,7 @@ final class PipelineKickoffHalt extends RuntimeException
  * The spec's steps in order (`docs/superpowers/specs/2026-09-24-pipeline-kickoff-design.md`). Up to the
  * create nothing exists, so a halt there leaves nothing behind.
  *
- * @param  array{mode: string, light: bool, decisions: list<string>}  $options
+ * @param  array{mode: string, light: bool, base: ?string, decisions: list<string>}  $options
  */
 function pipeline_kickoff(string $repoRoot, string $item, array $options): array
 {
@@ -75,6 +75,7 @@ function pipeline_kickoff(string $repoRoot, string $item, array $options): array
         $board = pipeline_kickoff_board($config);
         $issue = pipeline_kickoff_issue($repoRoot, $config, $item);
         $branch = pipeline_kickoff_branch($config, $item, $issue);
+        $base = pipeline_kickoff_base($repoRoot, $options['base']);
         $command = pipeline_kickoff_create_command($config, $branch);
         pipeline_kickoff_unclaimed($repoRoot, $config, $branch, $issue);
         $worktree = pipeline_kickoff_create($repoRoot, $command, $branch);
@@ -190,6 +191,40 @@ function pipeline_kickoff_slug(string $text): string
     }
 
     return $slug;
+}
+
+/**
+ * A per-run base (engine.md §Kickoff, *A run on a base*) is a branch on origin other than its default.
+ * The fetch proves it is one and leaves `origin/<base>` current for the create and the check after it.
+ */
+function pipeline_kickoff_base(string $repoRoot, ?string $base): ?string
+{
+    if ($base === null) {
+        return null;
+    }
+    if (! preg_match('#^[A-Za-z0-9._/-]+$#', $base)) {
+        throw new PipelineKickoffHalt("the base '{$base}' holds characters kickoff will not pass to a shell");
+    }
+    [$code, , $err] = pipeline_git_run($repoRoot, ['fetch', '-q', 'origin', "+refs/heads/{$base}:refs/remotes/origin/{$base}"]);
+    if ($code !== 0) {
+        throw new PipelineKickoffHalt("the base {$base} is not a branch on origin: {$err}");
+    }
+    if ($base === pipeline_kickoff_default_branch($repoRoot)) {
+        throw new PipelineKickoffHalt("the base {$base} is origin's default branch: leave --base out");
+    }
+
+    return $base;
+}
+
+/** origin's `HEAD` as origin itself names it; the local `origin/HEAD` is often stale. */
+function pipeline_kickoff_default_branch(string $repoRoot): string
+{
+    [$code, $out, $err] = pipeline_git_run($repoRoot, ['ls-remote', '--symref', 'origin', 'HEAD']);
+    if ($code !== 0 || ! preg_match('#^ref: refs/heads/(\S+)\tHEAD$#m', $out, $match)) {
+        throw new PipelineKickoffHalt("origin's default branch could not be read: " . ($err === '' ? "git exited {$code}" : $err));
+    }
+
+    return $match[1];
 }
 
 /** The declared `worktree.create` with `<branch>` filled in, its only substitution. */

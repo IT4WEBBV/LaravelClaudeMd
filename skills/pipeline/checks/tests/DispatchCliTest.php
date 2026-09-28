@@ -918,7 +918,49 @@ it('refuses a kickoff it cannot parse', function (array $arguments) {
     'interactive' => [['69', '--mode', 'interactive']],
     'an unknown flag' => [['69', '--sideways']],
     'a flag without its value' => [['69', '--decision']],
+    'a base without its value' => [['69', '--base']],
     'two items' => [['69', '70']],
+]);
+
+/**
+ * An integration branch on origin, one commit ahead of main, that the primary has no ref for (so only
+ * kickoff's fetch can bring it back), and a `create-wt` on PATH that honours `--base`. @return string its sha
+ */
+function kickoff_integration_branch(array $fixture, string $base = 'feature/integration'): string
+{
+    $git = fn (array $args) => pipeline_git($fixture['primary'], ['-c', 'user.email=t@example.com', '-c', 'user.name=T', '-c', 'commit.gpgsign=false', ...$args]);
+    $git(['switch', '-q', '-c', $base]);
+    $git(['commit', '-q', '--allow-empty', '-m', 'integration work']);
+    $sha = $git(['rev-parse', 'HEAD']);
+    $git(['push', '-q', 'origin', $base]);
+    $git(['switch', '-q', 'main']);
+    $git(['branch', '-q', '-D', $base]);
+    $git(['update-ref', '-d', "refs/remotes/origin/{$base}"]);
+    file_put_contents($fixture['dir'] . '/bin/create-wt', <<<'SH'
+#!/bin/sh
+branch=$1; shift; base=origin/main
+while [ $# -gt 0 ]; do case $1 in --base) base=$2; shift 2 ;; *) shift ;; esac; done
+git worktree add -q ".claude/worktrees/$branch" -b "$branch" "$base"
+SH);
+    chmod($fixture['dir'] . '/bin/create-wt', 0755);
+
+    return $sha;
+}
+
+it('halts before anything is created on a base that is unsafe, not a branch on origin, or the default branch', function (string $base, string $reason) {
+    $fixture = kickoff_fixture('touch created; create-wt <branch>');
+    kickoff_integration_branch($fixture);
+
+    $halt = kickoff($fixture, ['69', '--base', $base])['json'];
+
+    expect($halt['action'])->toBe('halt');
+    expect($halt['reason'])->toContain($reason);
+    expect(is_file($fixture['primary'] . '/created'))->toBeFalse();
+    kickoff_left_nothing($fixture);
+})->with([
+    'missing on origin' => ['feature/nope', 'the base feature/nope is not a branch on origin'],
+    'unsafe for sh' => ['main; rm -rf /', "the base 'main; rm -rf /' holds characters kickoff will not pass to a shell"],
+    'the default branch' => ['main', "the base main is origin's default branch: leave --base out"],
 ]);
 
 function kickoff_board(): string
