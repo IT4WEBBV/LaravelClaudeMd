@@ -505,6 +505,30 @@ it('re-arms nothing on a manifest that is not an autoflow run\'s', function () {
     expect(file_get_contents($fixture['manifest']))->toBe($before);
 });
 
+it('appends each --decision verbatim as it re-arms the run, and nothing when --from is refused', function () {
+    $reviewed = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-22T11:00:00Z', 'review' => 'r', 'outcome' => 'continued'];
+    $passed = [...$reviewed, 'gate' => 'plan-approval', 'leg' => 'review-plan', 'at' => '2026-09-22T10:00:00Z'];
+    $decision = "CI red on the PR's head commit abc123: CI / ci failed (https://github.com/acme/app/actions/runs/11/job/12)";
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'decisions' => ['Keep the guard'], 'gate_ledger' => [$passed, $reviewed]]);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff'], '--from', 'review-pr', '--decision', $decision])['json'])
+        ->toMatchArray(['action' => 'start', 'startLeg' => 'review-pr', 'startStep' => 'review']);
+    expect(manifest_read($fixture['manifest']))->toMatchArray(['cursor' => ['leg' => 'review-pr', 'status' => 'pending'], 'decisions' => ['Keep the guard', $decision]]);
+
+    $refused = dispatch_fixture(['mode' => 'autoflow', 'decisions' => ['Keep the guard']]);
+    $before = file_get_contents($refused['manifest']);
+    expect(dispatch_cli(['launch', $refused['manifest'], $refused['diff'], '--from', 'reveiw-pr', '--decision', $decision])['json']['action'])->toBe('halt');
+    expect(file_get_contents($refused['manifest']))->toBe($before);
+});
+
+it('refuses a launch it cannot parse', function (array $arguments) {
+    expect(dispatch_cli(['launch', ...$arguments])['code'])->toBe(1);
+})->with([
+    'no diff file' => [['/tmp/m.json']],
+    'a decision without its text' => [['/tmp/m.json', '/tmp/d.diff', '--decision']],
+    'a from without its leg' => [['/tmp/m.json', '/tmp/d.diff', '--from']],
+]);
+
 it('serves brief and finish on autoflow runs only, and leaves the manifest alone', function (array $arguments, string $reason) {
     $fixture = dispatch_fixture(['cursor' => ['leg' => 'implement', 'status' => 'pending']]);
     $before = file_get_contents($fixture['manifest']);

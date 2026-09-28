@@ -6,7 +6,7 @@
  *   interactive:  php dispatch_cli.php next <manifest>
  *                 php dispatch_cli.php returned <manifest> <diff-file>
  *   autoflow:     php dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--decision <text>]...
- *                 php dispatch_cli.php launch <manifest> <diff-file> [--from <leg>]
+ *                 php dispatch_cli.php launch <manifest> <diff-file> [--from <leg>] [--decision <text>]...
  *                 php dispatch_cli.php brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]]
  *                 php dispatch_cli.php finish <manifest> <decision-json>
  *                 php dispatch_cli.php size <manifest>
@@ -150,8 +150,11 @@ function dispatch_cli_design_size(array $manifest): DesignSize
     return DesignSize::fromSpec($path !== '' && is_file($path) ? (string) file_get_contents($path) : '');
 }
 
-/** What the run needs once, at its start (`../references/engine.md` §`autoflow` — a program that calls agents): the workflow script's `args`. */
-function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $from): array
+/**
+ * What the run needs once, at its start (`../references/engine.md` §`autoflow` — a program that calls agents): the workflow script's `args`.
+ * `$decisions` are appended to `decisions` verbatim, in the same write as `--from`'s re-arm and after its checks.
+ */
+function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $from, array $decisions = []): array
 {
     $manifest = manifest_read($manifestPath);
     if ($manifest === null || ! is_file($diffPath)) {
@@ -171,6 +174,11 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
             return pipeline_halt("cannot re-arm the run at {$from}: a gate before it has not run");
         }
         $manifest = [...$manifest, 'cursor' => ['leg' => $from, 'status' => 'pending']];
+    }
+    if ($decisions !== []) {
+        $manifest = [...$manifest, 'decisions' => [...($manifest['decisions'] ?? []), ...$decisions]];
+    }
+    if ($from !== null || $decisions !== []) {
         manifest_write($manifestPath, $manifest);
     }
     if (dispatch_cli_finished($manifest)) {
@@ -516,12 +524,50 @@ function dispatch_cli_brief_command(array $arguments): array|string|null
     return $parsed === null ? null : dispatch_cli_brief(...$parsed);
 }
 
-$flag = array_search('--from', $argv, true);
+/**
+ * `launch <manifest> <diff-file> [--from <leg>] [--decision <text>]...`; null is a usage error. `--from`
+ * is passed as given (an empty or unknown leg is `launch`'s halt, not a usage error).
+ *
+ * @return array{0: string, 1: string, 2: ?string, 3: list<string>}|null
+ */
+function dispatch_cli_launch_args(array $arguments): ?array
+{
+    $positional = [];
+    $from = null;
+    $decisions = [];
+    while ($arguments !== []) {
+        $argument = (string) array_shift($arguments);
+        if (! in_array($argument, ['--from', '--decision'], true)) {
+            $positional[] = $argument;
+
+            continue;
+        }
+        $value = array_shift($arguments);
+        if ($value === null) {
+            return null;
+        }
+        if ($argument === '--from') {
+            $from = (string) $value;
+        } else {
+            $decisions[] = (string) $value;
+        }
+    }
+
+    return count($positional) === 2 ? [...$positional, $from, $decisions] : null;
+}
+
+function dispatch_cli_launch_command(array $arguments): ?array
+{
+    $parsed = dispatch_cli_launch_args($arguments);
+
+    return $parsed === null ? null : dispatch_cli_launch(...$parsed);
+}
+
 $result = match ($argv[1] ?? '') {
     'kickoff' => dispatch_cli_kickoff(array_slice($argv, 2)),
     'next' => dispatch_cli_next((string) ($argv[2] ?? '')),
     'returned' => dispatch_cli_returned((string) ($argv[2] ?? ''), (string) ($argv[3] ?? '')),
-    'launch' => dispatch_cli_launch((string) ($argv[2] ?? ''), (string) ($argv[3] ?? ''), $flag === false ? null : (string) ($argv[$flag + 1] ?? '')),
+    'launch' => dispatch_cli_launch_command(array_slice($argv, 2)),
     'brief' => dispatch_cli_brief_command(array_slice($argv, 2)),
     'finish' => dispatch_cli_finish((string) ($argv[2] ?? ''), (string) ($argv[3] ?? '')),
     'size' => dispatch_cli_size((string) ($argv[2] ?? '')),
@@ -531,7 +577,7 @@ $result = match ($argv[1] ?? '') {
 };
 
 if ($result === null) {
-    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> | ci <manifest> [--poll <n>] (size needs a readable manifest, ui an existing diff file)\n");
+    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] [--decision <text>]... | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> | ci <manifest> [--poll <n>] (size needs a readable manifest, ui an existing diff file)\n");
     exit(1);
 }
 
