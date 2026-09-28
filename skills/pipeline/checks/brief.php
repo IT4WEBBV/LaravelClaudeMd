@@ -25,7 +25,9 @@ function pipeline_leg_overrides(string $mode): array
         'design:run' => [
             'Invoke `superpowers:brainstorming`; on the Architectural path it hands over to `superpowers:writing-plans` (engine.md §Design size).',
             'Where brainstorming would ask the human, write each question and the answer you assumed into the spec\'s `## Assumptions` section, so `/critique plan` audits exactly those.',
-            'Plans and specs committed before 2026-09-14 are not exemplars for test or proof policy.',
+            'Do not build or run the plan\'s code, in a scratch copy or anywhere else: confirm the signatures and APIs it relies on by reading, `php -l` or grep; `implement` proves the plan\'s Expected lines (engine.md §What design proves).',
+            'The one exception: when the choice between approaches hinges on whether one of them works at all, answer that question with a throwaway probe (a few lines run on their own, never the plan\'s code, never the suite) and write the question and what the probe showed into the spec.',
+            'Plans and specs committed before 2026-09-14 are not exemplars for test or proof policy, and no plan\'s `Verified before writing` header is part of the format.',
             'Commit the spec, then the plan: two commits. Set `artifacts.spec` and `artifacts.plan`.',
         ],
         'review-plan:review' => [
