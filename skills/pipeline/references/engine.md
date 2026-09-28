@@ -554,6 +554,29 @@ escalation returns `looped-back`: its open entry is completed and no bound is ch
 cannot leave a stale open review behind. In `autoflow` a resolve step's schema has no
 `plan-insufficient`; in `interactive` `pipeline_returned()` halts on either.
 
+## What design proves — reading, not running
+
+`design` writes a spec and a plan; **it does not build or run the plan's code**, in a scratch copy or
+anywhere else. It confirms the signatures, APIs and paths the plan relies on by reading them, `php -l`
+or grep. The plan's `Expected:` lines are predictions: `implement` proves them, test-first (§Stations),
+and a plan that falls short comes back as a plan gap (§Design size).
+
+Why (#92): before this rule every `autoflow` design in this repo built the plan's code in a scratch copy
+and ran the suite there, 5–10 suite calls per design, with design peaks here of 119k–269k against
+131–156k for viewiemedia designs that did not; `implement` then re-typed the same code. The plan became
+a diff in prose, so `review-plan` reviewed code instead of design.
+
+**The one exception is a probe.** When the choice between approaches hinges on whether one of them
+works at all, `design` answers that one question with throwaway code: a few lines run on their own,
+never the plan's code, never the suite. The question and what the probe showed go into the spec, beside
+the approach they decided (owner, #92). The probe is brainstorming's *Spike* steps used as one step
+inside an Architectural design, not a third design size: a Spike ends in a reported recommendation with
+no spec and no plan, which a run cannot finish on, so the pipeline never classifies a work item as Spike
+(§Design size). The probe's terminal state is its sentence in the spec.
+
+**A plan carries no *Verified before writing* header.** The plans that have one are records and stay as
+they are; they are not exemplars for it (§What a leg brief consists of).
+
 ## The proof store — where the visual record actually lives
 
 **GitHub has no public API for putting an image into a PR comment.** `gh` exposes none; comment
@@ -747,7 +770,8 @@ and `## Return` asks for a structured `{status, reason}` instead of a line.
 decisions and overrides — never an earlier review, an earlier action, or another step's output.
 
 **Plans and specs committed before 2026-09-14 are not exemplars** for test or proof policy. Many carry
-the rules below, and a design subagent that reads them as examples copies the rules forward.
+the rules below, and a design subagent that reads them as examples copies the rules forward. No plan is
+an exemplar for a *Verified before writing* header either (§What design proves).
 
 Three rules briefs invented, measured over 70 runs and retired:
 
