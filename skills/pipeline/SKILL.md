@@ -47,7 +47,7 @@ The deterministic guardrails are tested PHP in `checks/` (run
 ## Invocation and navigation
 
 ```
-/pipeline [interactive|autoflow] [light] [base <branch>] <idea | number | spec-path>   # start a run (mode defaults to interactive; base <branch> becomes kickoff's --base)
+/pipeline [interactive|autoflow] [light] [base <branch>] <idea | number | spec-path>   # start a run (mode defaults to interactive; base <branch> becomes autoflow kickoff's --base, interactive does engine.md *A run on a base* by hand)
 /pipeline                                                                              # resume the current branch's run
 ```
 
