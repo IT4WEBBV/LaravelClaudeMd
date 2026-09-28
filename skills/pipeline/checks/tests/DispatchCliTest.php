@@ -963,6 +963,41 @@ it('halts before anything is created on a base that is unsafe, not a branch on o
     'the default branch' => ['main', "the base main is origin's default branch: leave --base out"],
 ]);
 
+it('kicks off on a per-run base: cut from it, gh-merge-base set, recorded in the manifest', function () {
+    $fixture = kickoff_fixture('create-wt <branch> --no-start');
+    $sha = kickoff_integration_branch($fixture);
+    $branch = 'feature/issue-69-pipeline-kickoff-as-one-command';
+
+    $ready = kickoff($fixture, ['69', '--base', 'feature/integration'])['json'];
+
+    expect($ready)->toMatchArray(['action' => 'ready', 'branch' => $branch]);
+    expect(pipeline_git($ready['worktree'], ['rev-parse', 'HEAD']))->toBe($sha);
+    expect(pipeline_git($ready['worktree'], ['config', "branch.{$branch}.gh-merge-base"]))->toBe('feature/integration');
+    expect(manifest_read($ready['manifest']))->toMatchArray(['base' => 'feature/integration', 'artifacts' => ['issue' => 69]]);
+});
+
+it('sets no gh-merge-base without a base', function () {
+    $fixture = kickoff_fixture();
+
+    $ready = kickoff($fixture, ['69'])['json'];
+
+    expect(pipeline_git_run($ready['worktree'], ['config', "branch.{$ready['branch']}.gh-merge-base"])[0])->not->toBe(0);
+});
+
+it('halts when the declared create does not honour the base, naming the worktree it left', function () {
+    $fixture = kickoff_fixture("sh -c 'git worktree add -q .claude/worktrees/\$0 -b \$0 origin/main' <branch>");
+    $sha = kickoff_integration_branch($fixture);
+    $main = pipeline_git($fixture['primary'], ['rev-parse', 'origin/main']);
+
+    $halt = kickoff($fixture, ['69', '--base', 'feature/integration'])['json'];
+
+    expect($halt['action'])->toBe('halt');
+    expect($halt['reason'])
+        ->toContain('kickoff created')
+        ->toContain("the worktree's HEAD ({$main}) is not origin/feature/integration ({$sha}): the declared worktree.create did not honour --base")
+        ->toContain('remove the worktree and its branch before kicking off again');
+});
+
 function kickoff_board(): string
 {
     return implode("\n", ['## Board', '- org: acme', '- number: 7', '- project-id: PVT_1', '- status-field-id: F_1', '- in-progress-option-id: O_1', '']);
