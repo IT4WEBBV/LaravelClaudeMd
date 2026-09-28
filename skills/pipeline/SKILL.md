@@ -47,8 +47,8 @@ The deterministic guardrails are tested PHP in `checks/` (run
 ## Invocation and navigation
 
 ```
-/pipeline [interactive|autoflow] [light] <idea | number | spec-path>   # start a run (mode defaults to interactive)
-/pipeline                                                              # resume the current branch's run
+/pipeline [interactive|autoflow] [light] [base <branch>] <idea | number | spec-path>   # start a run (mode defaults to interactive; base <branch> becomes kickoff's --base)
+/pipeline                                                                              # resume the current branch's run
 ```
 
 - **One entry point.** `/pipeline` starts a run, or — when a manifest (or reconstructable
@@ -81,12 +81,16 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
 (`references/engine.md` §`autoflow`):
 
 1. **Kickoff.** With `CHECKS="$HOME/.claude/skills/pipeline/checks"`:
-   `php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--decision "<verbatim>"]…`
-   does §The work item and §Kickoff in one call (`references/engine.md` §Kickoff). `ready`: its
+   `php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--base <branch>] [--decision "<verbatim>"]…`
+   does §The work item and §Kickoff in one call (`references/engine.md` §Kickoff). `--base` cuts the
+   run from that branch on origin instead of the default branch, records it as the manifest's `base`,
+   and routes the PR into it (§Kickoff, *A run on a base*); the base's own PR into the default branch
+   is never the run's. `ready`: its
    `manifest` is the run's, and its `notes` go into the report. A halt: report it and stop; never
    create the worktree another way. A denied kickoff call is reported like a halt: nothing is
    retried in another form. A resume skips this step.
-2. **Launch.** `git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"`, then
+2. **Launch.** `git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"` (`<base>`: the
+   manifest's `base`, else the default branch), then
    `PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff"`.
    `done` or a halt: report it and stop. A resume starts here: `launch` starts from the cursor.
 3. **Start the saved workflow `pipeline-autoflow`** by name, with `launch`'s JSON as `args`, and wait

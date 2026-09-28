@@ -2,6 +2,7 @@
 
 The commands behind `../SKILL.md`, in step order. `jq` is not installed on the owner's machines:
 `gh --jq` and `python3` filter instead. `<repo>` is `repo:` from `.claude/work-on.config.md`.
+`<base>` is the run manifest's `base` in a batch on a base, and the default branch otherwise.
 
 ## Where am I
 
@@ -78,9 +79,10 @@ Per issue N, from the primary checkout: pipeline `SKILL.md` §`autoflow` — how
 and ends, steps 1–3.
 
 - Kickoff is `php ~/.claude/skills/pipeline/checks/dispatch_cli.php kickoff <primary checkout> N`,
-  with one `--decision "<verbatim>"` per settled decision of the owner's for N. `ready` names the
-  manifest (`mode: autoflow`, `artifacts.issue` N); a halt: report it and start nothing. Never
-  create the worktree another way or switch branches in the primary checkout; other runs share it.
+  with `--base <branch>` in a batch on a base, and one `--decision "<verbatim>"` per settled
+  decision of the owner's for N. `ready` names the manifest (`mode: autoflow`, `artifacts.issue`
+  N); a halt: report it and start nothing. Never create the worktree another way or switch
+  branches in the primary checkout; other runs share it.
 - `launch` runs with `PIPELINE_NO_OPEN=1`: the run is unattended. `done` or a halt: report it and
   start no workflow.
 - Start the workflow `pipeline-autoflow` with `launch`'s JSON as `args`, in the background, and add
@@ -173,4 +175,9 @@ Then, from the primary checkout:
 ```bash
 <the declared worktree.remove>                                    # any other repo
 git branch -D <branch>
+```
+
+In a batch on a base, the merge closed nothing: close the issue, so the runs it blocks can kick off.
+```bash
+gh issue close N -R <repo> --reason completed --comment "Merged into <base> in #<P>; reaches the default branch with <base>."
 ```
