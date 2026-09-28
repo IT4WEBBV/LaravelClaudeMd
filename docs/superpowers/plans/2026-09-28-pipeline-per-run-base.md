@@ -7,7 +7,7 @@
 **Architecture:**
 - `skills/pipeline/checks/dispatch_cli.php`: `--base <branch>` in `dispatch_cli_kickoff_args()`.
 - `skills/pipeline/checks/kickoff.php`: `pipeline_kickoff_base()` and `pipeline_kickoff_default_branch()` check the base before anything exists; `pipeline_kickoff_create_command()` appends `--base origin/<base>`; `pipeline_kickoff_on_base()` checks `HEAD` and sets `gh-merge-base` in `pipeline_kickoff_prepare()`; `pipeline_kickoff_manifest()` writes `base`.
-- `skills/pipeline/checks/brief.php`: a base line in `pipeline_brief_state()`.
+- `skills/pipeline/checks/brief.php`: a base line in `pipeline_brief_state()`; a `baseRefName` check line in `pipeline_brief_overrides()` on the `handoff` leg of a run on a base.
 - Docs: engine.md (§The loop, §`autoflow`, §Kickoff, §Closing links), manifest.md, pipeline `SKILL.md`, orchestrate `SKILL.md` and `references/commands.md`.
 
 **Tech Stack:** PHP 8.4 on the host, Pest 4, git, `gh` (faked in tests), Markdown skill references.
@@ -22,6 +22,7 @@
 - The base's shell-safety regex is the branch's: `#^[A-Za-z0-9._/-]+$#`.
 - Halt texts, verbatim: `the base '<b>' holds characters kickoff will not pass to a shell`; `the base <b> is not a branch on origin: <stderr>`; `the base <b> is origin's default branch: leave --base out`; `origin's default branch could not be read: <stderr>`; `the worktree's HEAD (<sha>) is not origin/<b> (<sha>): the declared worktree.create did not honour --base`.
 - The brief line, verbatim: ``- base: `<b>`: this branch was cut from `origin/<b>` and its PR goes into it, not into the default branch; diff with `git diff origin/<b>...HEAD`, and a merge into it closes no issue (engine.md §Kickoff)``.
+- The handoff check line, verbatim: ``The PR must open into `<b>`: after `handoff pr`, `gh pr view <pr> --json baseRefName --jq .baseRefName` prints `<b>`; otherwise `gh pr edit <pr> --base <b>` before setting `artifacts.pr` (engine.md §Kickoff).`` (rendered as an override bullet).
 - `base` is **not** added to `pipeline_leg_writable_keys()`. `launch`, `finish`, `ci`, `dispatch.php`, `run_audit.php` and `pipeline-autoflow.js` do not change.
 - This repo has no `.changelog/` and no `CHANGELOG.md`: no changelog entry.
 
@@ -32,6 +33,7 @@
 3. **A create that exits 0 but ignores `--base`**: a halt naming the worktree it left, never a run on the wrong code. Pinned in Task 2.
 4. **A leg that rewrites `base`**: a return that does not hold. Existing behaviour through `pipeline_leg_writable_keys()`; pinned in Task 3 by a `ReturnedTest` case (written after the code, so seen red by a temporary mutation).
 5. **A run without a base is unchanged**: no `gh-merge-base`, no `base` key (the existing exact-manifest test), no `- base:` brief line. Pinned in Tasks 2 and 3.
+6. **A PR that opens into the default branch anyway** (a gh that ignores `gh-merge-base`, or handoff taking over an existing PR): `handoff`'s brief tells it to check `baseRefName` and retarget with `gh pr edit --base`. Pinned in Task 3.
 
 ---
 
@@ -220,7 +222,7 @@ function pipeline_kickoff_default_branch(string $repoRoot): string
 - [ ] **Step 5: Run them to see them pass.**
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='cannot parse|unsafe, not a branch'`
-Expected: PASS, 9 tests (6 parse rows, 3 halt rows).
+Expected: PASS, 22 tests (Pest's `--filter` matches descriptions across files: the 18 "cannot parse" rows it selects today in the kickoff, brief, launch and ci datasets, plus the new parse row and the 3 halt rows).
 
 - [ ] **Step 6: Commit.**
 
@@ -372,7 +374,7 @@ git commit -m "feat(pipeline): kickoff --base cuts the worktree from origin/<bas
 
 **Interfaces:**
 - Consumes: the manifest key `base` (Task 2); test helpers `brief_manifest(string $leg, array $extra = [])`, `returned_before()`, `returned_after()`.
-- Produces: the brief line in Global Constraints.
+- Produces: the brief line and the handoff check line in Global Constraints.
 
 - [ ] **Step 1: Write the failing tests.** Append to `BriefTest.php`:
 
@@ -385,6 +387,12 @@ it('tells every leg of a run on a base where its branch came from and where its 
 
 it('says nothing about a base on a run without one', function () {
     expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))->not->toContain('- base:');
+});
+
+it('makes handoff on a run on a base check that the PR opened into it', function () {
+    expect(pipeline_brief(brief_manifest('handoff', ['base' => 'feature/integration']), 'handoff', '/tmp/m.json'))
+        ->toContain('- The PR must open into `feature/integration`: after `handoff pr`, `gh pr view <pr> --json baseRefName --jq .baseRefName` prints `feature/integration`; otherwise `gh pr edit <pr> --base feature/integration` before setting `artifacts.pr` (engine.md §Kickoff).');
+    expect(pipeline_brief(brief_manifest('handoff'), 'handoff', '/tmp/m.json'))->not->toContain('The PR must open into');
 });
 ```
 
@@ -402,9 +410,9 @@ it('does not let a leg change the run\'s base', function () {
 - [ ] **Step 2: Run them to see them fail.**
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='run on a base|without one|change the run'`
-Expected: the four base-line rows FAIL (no `- base:` line); `says nothing about a base` and `does not let a leg change the run's base` PASS (existing behaviour). See the `ReturnedTest` case red once: temporarily add `'base'` to `pipeline_leg_writable_keys()` in `dispatch.php`, run the filter, confirm it fails, and revert the line.
+Expected: the four base-line rows and `makes handoff on a run on a base check …` FAIL (no such lines); `says nothing about a base`, `does not let a leg change the run's base` and the existing `halts with the leg's own reason, and refuses a halt without one` (`ReturnedTest`, matched by `without one`) PASS. See the `ReturnedTest` case red once: temporarily add `'base'` to `pipeline_leg_writable_keys()` in `dispatch.php`, run the filter, confirm it fails, and revert the line.
 
-- [ ] **Step 3: Write the base line.** In `brief.php`, `pipeline_brief_state()`, after the `$lines = …` decisions line, add:
+- [ ] **Step 3: Write the base line and the handoff check.** In `brief.php`, `pipeline_brief_state()`, after the `$lines = …` decisions line, add:
 
 ```php
     $base = $manifest['base'] ?? null;
@@ -413,10 +421,19 @@ Expected: the four base-line rows FAIL (no `- base:` line); `says nothing about 
     }
 ```
 
+In `pipeline_brief_overrides()`, after the `review-pr` CI-round `if`, add:
+
+```php
+    $base = $manifest['base'] ?? null;
+    if ($leg === 'handoff' && $base !== null) {
+        $lines[] = "The PR must open into `{$base}`: after `handoff pr`, `gh pr view <pr> --json baseRefName --jq .baseRefName` prints `{$base}`; otherwise `gh pr edit <pr> --base {$base}` before setting `artifacts.pr` (engine.md §Kickoff).";
+    }
+```
+
 - [ ] **Step 4: Run them to see them pass.**
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='run on a base|without one|change the run'`
-Expected: PASS, 6 tests.
+Expected: PASS, 8 tests (4 base-line rows, `says nothing`, the handoff check, the new `ReturnedTest` case, and the existing `refuses a halt without one`).
 
 - [ ] **Step 5: Commit.**
 
@@ -465,14 +482,18 @@ this one is per run.
   ignored the flag halts there, naming the worktree it left, rather than handing every leg a branch cut
   from the wrong code. Then it sets `git config branch.<branch>.gh-merge-base <base>`, so `handoff`'s
   `gh pr create`, which passes no `--base`, opens the PR into the base (gh reads that config when
-  `--base` is absent), and writes `base` into the first manifest.
+  `--base` is absent), and writes `base` into the first manifest. `handoff`'s brief then has it check the
+  PR's `baseRefName` and retarget with `gh pr edit --base` when it differs: a gh that ignores the config,
+  or a PR that already existed, would otherwise open into the default branch and look healthy on every
+  leg after it.
 - **Every leg after it** reads the base from its brief (`pipeline_brief_state()`), and every
   `origin/<base>` diff, `run_audit.php`'s diff and the CI gate's fix round use it (§The loop). `launch`
   needs no flag for it: the manifest carries it, and a leg that changes `base` is a return that does not
   hold (it is not in `pipeline_leg_writable_keys()`).
 - **A merge into the base closes no issue**: GitHub closes issues only on merges into the default
-  branch. The finish step still settles the closing links (§Closing links); the issue closes when the
-  base reaches the default branch, or earlier by hand (`orchestrate` does that for its batch).
+  branch. The finish step still settles the closing links (§Closing links); the issue closes when
+  someone closes it (`orchestrate` does that for its batch), or through the base's own PR into the
+  default branch.
 - **The pipeline never opens the base's own PR** into the default branch: that PR is the owner's.
 ```
 
@@ -485,17 +506,17 @@ In *The first `manifest_write` carries everything no step will look up.*, `` `br
 ```markdown
 **A run on a base** (§Kickoff) reconciles the same way, but its PR goes into the base, and a merge
 there closes nothing: record each issue's outcome as it would be on the default branch, and say in
-the PR body that the merge into `<base>` closes nothing and the issue closes once the base reaches the
-default branch (`orchestrate` closes it after the merge).
+the PR body that the merge into `<base>` closes nothing and the issue closes when someone closes it, or
+through the base's own PR (`orchestrate` closes it after the merge).
 ```
 
 - [ ] **Step 5: manifest.md.** In §Fields, after the `light` row, add:
 
 ```markdown
-| `base` | optional | the branch kickoff's `--base` cut the run from and its PR goes into (`engine.md` §Kickoff, *A run on a base*); absent means the default branch. Written once by kickoff; a leg that changes it halts the run. A reconstructed manifest recovers it from `git config branch.<branch>.gh-merge-base` |
+| `base` | optional | the branch kickoff's `--base` cut the run from and its PR goes into (`engine.md` §Kickoff, *A run on a base*); absent means the default branch. Written once by kickoff; a leg that changes it halts the run. A reconstructed manifest recovers it from the PR's `baseRefName` once a PR exists, else from `git config branch.<branch>.gh-merge-base` (which disappears with the branch) |
 ```
 
-- [ ] **Step 6: pipeline `SKILL.md` §`autoflow`.** Step 1's command gains `[--base <branch>]` after `[--light]`, and after *"does §The work item and §Kickoff in one call (`references/engine.md` §Kickoff)."* add: *"`--base` cuts the run from that branch on origin instead of the default branch, records it as the manifest's `base`, and routes the PR into it (§Kickoff, *A run on a base*); the base's own PR into the default branch is never the run's."* Step 2's `git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"` gains `(`<base>`: the manifest's `base`, else the default branch)` after it.
+- [ ] **Step 6: pipeline `SKILL.md`.** In §Invocation and navigation, the first grammar line becomes `/pipeline [interactive|autoflow] [light] [base <branch>] <idea | number | spec-path>` (realign the second line's `#` comment with it), and its comment becomes `# start a run (mode defaults to interactive; base <branch> becomes kickoff's --base)`. In §`autoflow`, step 1's command gains `[--base <branch>]` after `[--light]`, and after *"does §The work item and §Kickoff in one call (`references/engine.md` §Kickoff)."* add: *"`--base` cuts the run from that branch on origin instead of the default branch, records it as the manifest's `base`, and routes the PR into it (§Kickoff, *A run on a base*); the base's own PR into the default branch is never the run's."* Step 2's `git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"` gains `(`<base>`: the manifest's `base`, else the default branch)` after it.
 
 - [ ] **Step 7: orchestrate `SKILL.md`.** After the paragraph starting *"`/orchestrate <issue> …` runs each issue"*, insert:
 
@@ -520,7 +541,7 @@ Run: `grep -n "\-\-base" skills/pipeline/references/engine.md skills/pipeline/SK
 Expected: every kickoff command line shows `[--base <branch>]` (engine.md twice, `SKILL.md` once, the `dispatch_cli.php` header and usage string), and no `<base>` placeholder inside a declared `worktree.create`.
 
 Run the whole suite: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`
-Expected: PASS, 354 + the new tests (1 parse row, 3 halt rows, 3 kickoff tests, 4 + 1 brief tests, 1 returned test = 367), 0 failed. `LockStepTest` still finds §Kickoff.
+Expected: PASS, 354 + the new tests (1 parse row, 3 halt rows, 3 kickoff tests, 4 + 1 + 1 brief tests, 1 returned test = 368), 0 failed. `LockStepTest` still finds §Kickoff.
 
 - [ ] **Step 10: Commit.**
 

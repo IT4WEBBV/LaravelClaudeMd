@@ -126,6 +126,20 @@ has no `base` key, so today's exact-manifest test stays as it is. `base` is not 
 The state block is on every leg and step, so every brief carries it. A manifest without `base` gets no
 such line.
 
+### The PR is checked to open into the base (`brief.php`)
+
+`gh-merge-base` routes the PR only where gh honours it, and handoff's path that takes over an existing PR
+never reads it; a PR opened into the default branch would then look healthy on every leg after it, because
+`pipeline-autoflow.js` takes `<base>` from the PR's `baseRefName`. So `pipeline_brief_overrides()` adds, on
+the `handoff` leg of a manifest with `base`, in the pattern of its other conditional lines:
+
+```
+- The PR must open into `<b>`: after `handoff pr`, `gh pr view <pr> --json baseRefName --jq .baseRefName` prints `<b>`; otherwise `gh pr edit <pr> --base <b>` before setting `artifacts.pr` (engine.md §Kickoff).
+```
+
+A manifest without `base` gets no such line. `launch` does not check `baseRefName` (below): the PR is opened
+once, by `handoff`, and this line checks it there.
+
 ### `<base>` defined once (docs)
 
 engine.md §The loop, under the `<manifest stem>` paragraph: *`<base>` is the manifest's `base` on a run
@@ -142,25 +156,29 @@ engine.md, gates.md, manifest.md and `SKILL.md`, the CI gate's fix round, and th
   `--base` appended on a run with a base, below)"*; a new paragraph **A run on a base** with bullets —
   before anything exists (the three checks); the create gets `--base origin/<base>` appended, and why not a
   placeholder (settled decision 1, and a base belongs to a run); after the create (the `HEAD` check,
-  `gh-merge-base`, `base` in the manifest); every leg after it (the brief line, the diffs, `launch` needs no
-  flag, a leg that changes `base` does not hold); a merge into the base closes no issue; the pipeline never
-  opens the base's own PR. The repo-level `--base` bullet points at it. *The first `manifest_write`* lists
+  `gh-merge-base`, `base` in the manifest, and `handoff` checking the PR's `baseRefName`); every leg after
+  it (the brief line, the diffs, `launch` needs no flag, a leg that changes `base` does not hold); a merge
+  into the base closes no issue; the pipeline never opens the base's own PR. The repo-level `--base` bullet points at it. *The first `manifest_write`* lists
   `base`.
 - **§Closing links**: a paragraph — a run on a base reconciles the same way, records each issue's outcome
   as it would be on the default branch, and says in the PR body that the merge into `<base>` closes nothing
-  and the issue closes when the base reaches the default branch (`orchestrate` closes it after the merge).
+  and the issue closes when someone closes it, or through the base's own PR (`orchestrate` closes it after
+  the merge). No mechanism is promised: GitHub closes an issue on a merge into the default branch only for a
+  closing keyword in that PR's body or in a commit message that reaches it.
 
 ### manifest.md
 
 A `base` row: optional; the branch kickoff's `--base` cut the run from and its PR goes into; absent means
 the default branch; written once by kickoff; a leg that changes it halts; a reconstructed manifest recovers
-it from `git config branch.<branch>.gh-merge-base`.
+it from the PR's `baseRefName` once a PR exists (durable, as `closingIssuesReferences` is for the issue),
+else from `git config branch.<branch>.gh-merge-base`, which disappears with the branch.
 
 ### pipeline `SKILL.md`
 
-Step 1's kickoff gains `[--base <branch>]` and one sentence on what it does (cut from the base on origin,
-recorded as `base`, PR into it; the base's own PR is never the run's). Step 2's diff names `<base>`'s
-definition.
+The invocation grammar gains `[base <branch>]` (`/pipeline [interactive|autoflow] [light] [base <branch>]
+<idea | number | spec-path>`), with half a sentence that it becomes kickoff's `--base`. Step 1's kickoff
+gains `[--base <branch>]` and one sentence on what it does (cut from the base on origin, recorded as `base`,
+PR into it; the base's own PR is never the run's). Step 2's diff names `<base>`'s definition.
 
 ### `orchestrate`
 
@@ -202,7 +220,8 @@ ref (so only kickoff's fetch can bring it back), and puts a `create-wt` script o
 - a usage error on `--base` without a value (a row in the existing *cannot parse* dataset).
 
 `BriefTest.php`: the base line on `design`, `handoff`, `implement` and `review-pr` briefs of a manifest
-with `base`, and no `- base:` line without one.
+with `base`, and no `- base:` line without one; the `baseRefName` check line on the `handoff` brief of a
+manifest with `base`.
 
 The whole pipeline suite passes.
 
@@ -247,8 +266,10 @@ Questions the brainstorm would have asked the owner, with the answer assumed.
 6. **Where does the `HEAD` check sit relative to unsetting the upstream?** Before it: a worktree on the
    wrong commit halts before anything else is changed in it.
 7. **What does the finish step write on a run with a base?** Each issue's outcome as it would be on the
-   default branch, plus that the merge into `<base>` closes nothing and the issue closes when the base
-   reaches the default branch. No closing keyword is removed or added for the base's sake.
+   default branch, plus that the merge into `<base>` closes nothing and the issue closes when someone
+   closes it, or through the base's own PR. No closing keyword is removed or added for the base's sake.
+   `issue_links.outcome: closes` then describes a merge that closes nothing; the PR-body sentence keeps it
+   honest, and a fourth ledger outcome would widen the change.
 8. **Who closes the issue for a standalone `/pipeline` run on a base?** Nobody automatically; the PR body
    says so. Settled decision 2 covers `orchestrate` only.
 9. **Is the `orchestrate` close comment an impersonal record?** Yes: *"Merged into <base> in #<P>;
