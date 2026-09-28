@@ -16,7 +16,7 @@
 ## Global Constraints
 
 - Suite, from the worktree root on the host: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`. `vendor/` is missing in a fresh worktree: run `composer install --no-interaction --quiet` first.
-- The new brief line, verbatim: ``Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). Record `suite` after every full run.``
+- The new brief line, verbatim: ``Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, its changes committed, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). Record `suite` after every full run.``
 - The engine.md headings `## Mechanical checks — the deterministic layer inside \`implement\`` and `## Suite reuse — once per tree` do not change: `LockStepTest` resolves the brief's § names against them.
 - `checks.php`, `pipeline-autoflow.js`, `dispatch.php`, the `review-pr` brief lines and viewiemedia's config do not change.
 - This repo has no `.changelog/` and no `CHANGELOG.md`: no changelog entry.
@@ -53,7 +53,7 @@
 it('runs format once per implement step, before the last suite run and the push, in both modes', function () {
     foreach (['autoflow', 'interactive'] as $mode) {
         expect(pipeline_brief(brief_manifest('implement', ['mode' => $mode]), 'implement', '/tmp/m.json'))
-            ->toContain('Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). Record `suite` after every full run.')
+            ->toContain('Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, its changes committed, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). Record `suite` after every full run.')
             ->not->toContain('after each step the suite and the mechanical checks');
     }
 });
@@ -73,7 +73,7 @@ Expected: FAIL, the `toContain` on the new line (the brief still says *after eac
 with
 
 ```php
-            'Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). Record `suite` after every full run.',
+            'Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, its changes committed, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). Record `suite` after every full run.',
 ```
 
 - [ ] **Step 4: Run the test and the suite**
@@ -135,7 +135,7 @@ tree already green), then `static-analysis` over the whole declared scope.
 before its last suite run, so the recorded `suite` covers the formatted tree (a Pint change after the
 suite changes the tree key and costs a second full suite at `review-pr`), and before the push, with
 what it changed committed. A change after it (the fix for a red suite or a finding) runs it once more.
-**No file lists and no diff-scoping** — measured
+**No file lists and no diff-scoping** for `static-analysis` — measured
 on Deploy, scoping to two files costs 4.7s against 11.1s for all of `app/` because the analyser's
 bootstrap is a fixed ~4.5s floor, and paying that 6.4s removes host→container path mapping,
 touched-file tracking, and any need for a pre-ready backstop.

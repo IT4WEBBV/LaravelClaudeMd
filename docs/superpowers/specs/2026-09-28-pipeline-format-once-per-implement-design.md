@@ -106,7 +106,7 @@ whole tree, the two failure kinds, suppressions, nothing in the manifest.
 
 becomes
 
-``Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). Record `suite` after every full run.``
+``Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, its changes committed, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). Record `suite` after every full run.``
 
 ### Docs
 
