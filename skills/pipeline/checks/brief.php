@@ -48,7 +48,9 @@ function pipeline_leg_overrides(string $mode): array
             'Follow `work-on`\'s logic in this worktree; claim no second slot.',
             'Test-first; after each step the suite and the mechanical checks (engine.md §Mechanical checks, §Suite reuse). Record `suite` after every full run.',
             'Leave the PR draft; this overrides any mark-ready instruction in the plan, the PR comment, or `work-on`\'s own logic.',
-            'Add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch.',
+            $autoflow
+                ? 'Add the `ci` label (`gh pr edit <pr> --add-label ci`) before your first push, in a repo that has one, and do not wait on CI after it: this overrides `work-on`\'s CI watch; the CI gate reads the PR\'s head commit before the PR goes ready (engine.md §The CI gate).'
+                : 'Add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch.',
             'Files or behaviour the plan does not name: return `plan-insufficient` with the reason instead of improvising.',
             ...($autoflow ? ['Execute the plan inline, task by task; no subagents.'] : []),
         ],
@@ -70,7 +72,10 @@ function pipeline_leg_overrides(string $mode): array
             'Reconcile the closing links (engine.md §Closing links) and write `issue_links` on the entry.',
             'When `artifacts.proof` is set, rewrite the proof page with the final open questions and ledger.',
             $completeEntry,
-            ($autoflow ? 'Leave the PR draft; the session that launched the run marks it ready.' : 'Run `gh pr ready`.') . ' The last action is `proof_cli.php open` on `artifacts.proof` (engine.md §The proof store).',
+            ($autoflow
+                ? 'Push your commits and leave the PR draft; the session that launched the run marks it ready after the CI gate (engine.md §The CI gate).'
+                : 'Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`; show any other answer to the human.')
+            . ' The last action is `proof_cli.php open` on `artifacts.proof` (engine.md §The proof store).',
         ],
     ];
 }
@@ -173,6 +178,9 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step): s
     if ($leg === 'design' && pipeline_is_plan_gap(end($ledger) ?: [])) {
         $lines[] = 'Plan gap: extend the plan (and the spec where it must say more) to cover the entry\'s `reason`; describe what is already built as state, do not re-design it (engine.md §Design size).';
     }
+    if ($leg === 'review-pr' && pipeline_ci_rounds($manifest) > 0) {
+        $lines[] = pipeline_ci_round_line($step);
+    }
     if ($leg !== 'design') {
         $lines = [...$lines, ...pipeline_plan_gap_lines($step)];
     }
@@ -196,6 +204,14 @@ function pipeline_plan_gap_lines(string $step): array
         'On an Architectural spec, append a `plan-approval` entry with `leg`, `cycle`, `at`, `reason` and outcome `looped-back` before returning `plan-insufficient`.',
         ...($step === 'review' ? ['When you return `plan-insufficient`, append no review entry.'] : []),
     ];
+}
+
+/** The CI gate's fix round (engine.md §The CI gate): the recorded failure is a finding of `review-pr`. */
+function pipeline_ci_round_line(string $step): string
+{
+    return $step === 'review'
+        ? 'The settled `CI red on the PR\'s head commit` decision is a finding of this review: read the failing job\'s log (`gh run view <run> --log-failed`, the run id from its link) and state the failure and its cause (engine.md §The CI gate).'
+        : 'Fix the `CI red` finding, or show it is unrelated to this change (the same failure on the base branch, or a flake: start `gh run rerun <run> --failed` and do not wait on it), and say which in `actions`; the CI gate reads the head commit again (engine.md §The CI gate).';
 }
 
 /** A design-size escalation that no plan approval has answered yet. */

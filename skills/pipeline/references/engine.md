@@ -70,7 +70,7 @@ steps, the loop-backs, their bounds and the halts are JavaScript, and agents exi
 
 ```
 invoking session   dispatch_cli.php kickoff → dispatch_cli.php launch → Workflow pipeline-autoflow (args: launch's JSON)
-                   … on its return: dispatch_cli.php finish → gh pr ready | halt duties → report
+                   … on its return: dispatch_cli.php finish → dispatch_cli.php ci → gh pr ready | fix round | halt duties → report
 workflow script    per step: agent(prompt, {schema}) → {status, reason, ui, size} → next step, loop-back or return
 step agent         dispatch_cli.php brief <manifest> <leg> <step> [--after …] → the leg's work → the manifest → {status, reason}
 ```
@@ -80,11 +80,12 @@ CHECKS="$HOME/.claude/skills/pipeline/checks"
 php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--decision "<verbatim>"]…
 # → {"action":"ready","manifest":…,"worktree":…,"branch":…,"notes":[…]} | {"action":"halt","reason":…}
 git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
-PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>]
+PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>] [--decision "<verbatim>"]…
 # → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"noOpen":…,"checks":…,"tables":{…}}
 #   | {"action":"done"} | {"action":"halt","reason":…}
 # start: the workflow pipeline-autoflow with that JSON as args, in the background; wait for its completion notice
 php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
+php "$CHECKS/dispatch_cli.php" ci <manifest> --poll <n>                  # after done: the CI gate, polled (§The CI gate)
 ```
 
 The invoking session — the main session or `orchestrate` — is an agent only at the two edges, and runs
@@ -99,8 +100,9 @@ launched the run, with its reason.
   permits no loop-back), `ui` from the diff and the design size from the spec's header. `--from <leg>`
   re-arms a run at that leg through `pipeline_can_navigate()`, after those checks and only for one of
   `pipeline_legs()`: a PR that needs new commits gets a new run with `--from review-pr`, without
-  editing a file. `checks` is the directory `launch` ran from, so every step's `brief` runs the same
-  code.
+  editing a file; `--decision <text>`, repeatable, appends that text to `decisions` verbatim in the same
+  write, after `--from`'s checks (§The CI gate). `checks` is the directory `launch` ran from, so every
+  step's `brief` runs the same code.
   `tables` is what the script routes by, `pipeline_routing_tables()`: the legs in order, each leg's
   steps, the loop-back targets, the statuses per `<leg>:<step>` and the bound, built from the
   functions `interactive` routes by, so the script keeps no copy of them.
@@ -134,8 +136,9 @@ launched the run, with its reason.
   keeping the cursor's leg when the cursor already says `halted` (`brief` or the step wrote it, on the
   step that failed) or when the return names none of the pipeline's legs. When the workflow itself
   errored, pass `{"action":"halt","reason":"<the error>"}`: the cursor keeps the step that was
-  running. When `finish` prints `done` the invoking session then runs **`gh pr ready <pr>`** (§Who
-  takes the PR out of draft); on a halt after `handoff`, §Failure policy's duties.
+  running. When `finish` prints `done` the invoking session runs the CI gate and, on its `ready`,
+  **`gh pr ready <pr>`** (§The CI gate, §Who takes the PR out of draft); on a halt after `handoff`,
+  §Failure policy's duties.
 - **Resume** is `/pipeline` as always: `launch` starts from the cursor, and the step it names runs
   again.
 
@@ -394,9 +397,9 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 | **design** *(compound)* | `superpowers:brainstorming`, then `superpowers:writing-plans` for an **Architectural** design (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it); for a **Bounded** design, brainstorming's Bounded path with no `writing-plans` (§Design size) | human drives the brainstorm dialogue; if brainstorming classifies Bounded without `light`, the pipeline asks (§Design size); re-invoke `/pipeline` to continue | a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions. The brief says which path is permitted: Bounded only with `light`, otherwise Architectural | writes spec + plan pointers; the size is the spec's `**Design size:**` header, never stored |
 | **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | two steps (`pipeline_step`): a **review** agent invokes `/critique plan` (in `autoflow` it applies `/critique plan`'s procedure itself: it cannot start a reviewer) and appends the review verbatim as an open `plan-approval` entry; a fresh **resolve** agent acts on it (§Resolving a review) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth. References the issue **without a closing keyword** (§Closing links) — this PR carries no implementation yet | writes the PR# pointer |
-| **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links (§Closing links — `review-pr` reconciles them before the PR goes ready). **Leaves the PR draft** (below). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
+| **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's mechanical checks after each step** (§Mechanical checks), set closing-issue links (§Closing links — `review-pr` reconciles them before the PR goes ready). **Leaves the PR draft** (below); in `autoflow` it does not wait on CI (§The CI gate). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, writes the run's page to the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — the payload carries `nameWithOwner`, `pr` and `issue` so the page can link back to both — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
-| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | a **review** agent invokes `/critique pr` (in `autoflow` it applies `/critique pr`'s procedure itself) and appends an open `pr-review` entry; the **finish** step (its resolve step) acts on it, runs the suite unless reused, reconciles closing links (§Closing links), rewrites the proof page, runs `gh pr ready`, and opens the page last (§The proof store). In `autoflow` the finish step leaves the PR draft, and the invoking session runs `gh pr ready` after `finish` (§Who takes the PR out of draft) | feeds the PR-review gate; writes `issue_links` onto the entry; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
+| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | a **review** agent invokes `/critique pr` (in `autoflow` it applies `/critique pr`'s procedure itself) and appends an open `pr-review` entry; the **finish** step (its resolve step) acts on it, runs the suite unless reused, reconciles closing links (§Closing links), rewrites the proof page, runs `gh pr ready`, and opens the page last (§The proof store). In `autoflow` the finish step leaves the PR draft, and the invoking session runs the CI gate and `gh pr ready` after `finish` (§The CI gate, §Who takes the PR out of draft) | feeds the PR-review gate; writes `issue_links` onto the entry; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
 
 ## Design size — Bounded or Architectural
 
@@ -661,7 +664,7 @@ does not run `gh pr ready`, and neither does `verify-ui`.
 **In `autoflow` the finish step leaves it draft too.** The auto-mode classifier denies a workflow agent
 `gh pr ready`, and it is the most consequential outward write a run makes, so it stays with the
 session that answers to the owner: after the workflow returns `done` and `finish` records it, the
-invoking session runs `gh pr ready <pr>`. The guarantee is unchanged: nothing marks the PR ready
+invoking session runs the CI gate and then `gh pr ready <pr>` (§The CI gate). The guarantee is unchanged: nothing marks the PR ready
 before `review-pr`'s finish step has run.
 
 This is not a preference; it is the same guarantee the navigation guardrail makes. `gates.md` states
@@ -683,9 +686,61 @@ can stop it undrafting early — the instruction in the brief is the only contro
 
 **A PR stays untested until it carries the `ci` label** — in a repo that has one; a repo without it
 tests every push. Every fix pushed during `verify-ui` and `review-pr` is only tested once the label is
-on, and until then `gh pr checks` reads the skipped CI check as green.
-`work-on`'s leg 8 adds it before the push whose CI it watches; say it in the `implement` brief as
-well: **"add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch."**
+on, and until then `gh pr checks`, and the CI gate, read the skipped CI check as green.
+`work-on`'s leg 8 adds it before the push whose CI it watches, and the `implement` brief says it as
+well: in `interactive` **"add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI
+you watch"**; in `autoflow` before its first push, without waiting on CI (§The CI gate).
+
+## The CI gate — CI on the PR's head commit, before `gh pr ready`
+
+`gh pr ready` waits for CI on the PR's head commit, whichever step pushed it. Before #85 the only CI wait
+was `implement`'s, inherited from `work-on`'s leg 8: `verify-ui` and `review-pr`'s finish step push
+commits no step watched, and a HeaderHarbor PR went ready while CI still ran on such a commit, which then
+went red unnoticed. The same wait held `implement` for about 7 of its ~21 minutes in both viewiemedia
+runs (#77), while `review-pr:review` reads the diff, not CI.
+
+- **`implement` does not wait on CI in `autoflow`.** It adds the `ci` label before its first push (§Who
+  takes the PR out of draft), pushes and returns; its brief overrides `work-on`'s CI watch.
+  `review-pr:review` runs while CI runs. `interactive` keeps `work-on`'s watch.
+- **One gate, in the session that runs `gh pr ready`:** the invoking session once `finish` prints `done`
+  in `autoflow`, the finish step in `interactive`. `dispatch_cli.php ci <manifest> --poll <n>`
+  (`../checks/ci.php`) reads the PR's head commit and its checks once
+  (`gh pr view <pr> --json headRefOid,statusCheckRollup`), writes nothing, and prints one JSON line:
+
+| Verdict on the head commit | Answer |
+|---|---|
+| `green`: every check finished `SUCCESS`, `NEUTRAL` or `SKIPPED` | `ready` |
+| `none`: no check at all | `ready`; with `.github/workflows/*.yml` or `*.yaml` in the worktree only from the third read, since GitHub registers a push's checks seconds after it |
+| `pending` | `wait`; `halt` at the 120th read (an hour at 30 s) |
+| `red`: any other conclusion, or a status in `FAILURE` or `ERROR` | `fix` the first time in a run; `halt` once that round is spent |
+| `unreadable`: `gh` failed | `wait`; `halt` at the 120th read |
+
+A skipped check reads green, so the `ci` label has to be on before the push (§Who takes the PR out of
+draft). The session polls the gate in one background Bash and waits for its completion notice:
+
+```bash
+poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll); echo "$answer" | grep -q '"action":"wait"'; do sleep 30; poll=$((poll + 1)); done; echo "$answer"
+```
+
+- **`ready`** → `gh pr ready <pr>`.
+- **`fix`** → one automatic fix round (owner, #85). The answer's `decision`, `CI red on the PR's head
+  commit <sha>: <check> failed (<link>)`, goes into `decisions` verbatim with the re-arm:
+  `git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"`, then
+  `launch <manifest> "<manifest stem>.diff" --from review-pr --decision "<its decision>"` and a new
+  `pipeline-autoflow` workflow. The review step reads the failing job's log and states the failure as a
+  finding; the finish step fixes it, or shows it unrelated (the same failure on the base branch, or a
+  flake whose failed jobs it reruns without waiting); then `finish`, and this gate again.
+- **`halt`** → `finish <manifest> '<the answer>'`: the answer names `review-pr` and its reason, so
+  `finish` records the halt there. The PR stays draft, and §Failure policy's duties after `handoff`
+  follow. A red after the round halts: a decision that starts `CI red on the PR's head commit` is the
+  round spent, once per run, so a resumed run halts on its next red too. An empty answer (a usage error)
+  is a halt as well. After a halt on the hour nothing needs re-reviewing: run the loop again by hand on
+  the halted manifest (`ci` is read-only and refuses only a retired mode or a missing PR) rather than
+  `launch`, which would re-run `review-pr:review`.
+- **In `interactive`** the finish step runs the same loop, `gh pr ready` on `ready`, and shows any other
+  answer to the human; there is no automatic round.
+- **The merge watch stays on `state`** (§After the merge): once the PR is ready, CI on its head has
+  settled.
 
 ## Closing links — settled at `review-pr`, never assumed
 
@@ -762,8 +817,8 @@ and the dispatch prompt is one line naming that file; in `autoflow` the step pri
 **An `autoflow` brief adds what a workflow agent needs** (`pipeline_leg_overrides('autoflow')`): a
 review step applies `/critique`'s procedure itself — Stage 0, Stage 1 and the rubric — because it
 cannot start the reviewer, so `--verify` and `alternatives` are unavailable; `review-plan`'s resolve
-step has no independent read; `implement` executes the plan inline, with no subagents; the finish step
-leaves the PR draft; every step works from `cd <worktree>` and is told the owner authorised the run;
+step has no independent read; `implement` executes the plan inline, with no subagents, and does not wait on CI; the
+finish step pushes and leaves the PR draft; every step works from `cd <worktree>` and is told the owner authorised the run;
 and `## Return` asks for a structured `{status, reason}` instead of a line.
 
 **A review step's brief is crafted context** (`../../critique/SKILL.md` §Reviewer contract): pointers,
@@ -984,6 +1039,9 @@ Under `autoflow` these are the only stops. **No finding stops a run.**
 - **An `autoflow` step the run cannot accept** — a status the step may not return fails the step's
   schema, and `brief` halts a step the ledger does not support (`resolve` with no open review,
   `review` with one already open) → **halt**.
+- **CI on the PR's head commit red after the fix round, or not settled in an hour** (§The CI gate) →
+  **halt**, the PR still draft: `finish` records the gate's answer on `review-pr`, and the duties after
+  `handoff` under *Bound exhaustion* apply.
 - **A stopped `autoflow` workflow** — `TaskStop`, a dead session, a workflow error: `finish` with
   `{"action":"halt","reason":…}` records it; the cursor names the step that was running.
 - **Playwright genuinely unavailable** → **halt.** No visual claim without proof.

@@ -167,10 +167,11 @@ it('drops the independent read and the subagents in autoflow', function () {
     expect(pipeline_brief(brief_manifest('implement', ['mode' => 'interactive']), 'implement', '/tmp/m.json'))->not->toContain('no subagents');
 });
 
-it('tells implement to add the ci label before the push whose CI it watches, in both modes', function () {
+it('tells an autoflow implement not to wait on CI, and an interactive one to label before the push whose CI it watches', function () {
+    expect(pipeline_brief(brief_manifest('implement', ['mode' => 'autoflow']), 'implement', '/tmp/m.json'))
+        ->toContain('Add the `ci` label (`gh pr edit <pr> --add-label ci`) before your first push, in a repo that has one, and do not wait on CI after it: this overrides `work-on`\'s CI watch; the CI gate reads the PR\'s head commit before the PR goes ready (engine.md §The CI gate).')
+        ->not->toContain('the push whose CI you watch');
     expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))
-        ->toContain('Add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch.');
-    expect(pipeline_brief(brief_manifest('implement', ['mode' => 'interactive']), 'implement', '/tmp/m.json'))
         ->toContain('Add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch.');
 });
 
@@ -179,10 +180,29 @@ it('leaves the PR draft at the autoflow finish step for the session that launche
     $brief = pipeline_brief(brief_manifest('review-pr', ['mode' => 'autoflow', 'gate_ledger' => [$open]]), 'review-pr', '/tmp/m.json');
 
     expect($brief)
-        ->toContain('Leave the PR draft; the session that launched the run marks it ready.')
+        ->toContain('Push your commits and leave the PR draft; the session that launched the run marks it ready after the CI gate (engine.md §The CI gate).')
         ->toContain('On a loop-back, stop there: no suite.')
         ->not->toContain('gh pr ready');
     expect(strpos($brief, 'Complete the open entry'))->toBeLessThan(strpos($brief, 'The last action is `proof_cli.php open`'));
+});
+
+it('has the interactive finish step run the CI gate before gh pr ready', function () {
+    $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
+
+    expect(pipeline_brief(brief_manifest('review-pr', ['gate_ledger' => [$open]]), 'review-pr', '/tmp/m.json'))
+        ->toContain('Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`; show any other answer to the human. The last action is `proof_cli.php open`');
+});
+
+it('makes a recorded red CI a finding of review-pr\'s review and resolve steps, and only then', function () {
+    $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 2, 'at' => '2026-09-22T12:00:00Z', 'review' => 'r'];
+    $round = ['mode' => 'autoflow', 'decisions' => ['The engine never edits.', "CI red on the PR's head commit abc123: CI / ci failed (https://github.com/acme/app/actions/runs/11/job/12)"]];
+    $review = 'The settled `CI red on the PR\'s head commit` decision is a finding of this review: read the failing job\'s log (`gh run view <run> --log-failed`, the run id from its link) and state the failure and its cause (engine.md §The CI gate).';
+    $resolve = 'Fix the `CI red` finding, or show it is unrelated to this change (the same failure on the base branch, or a flake: start `gh run rerun <run> --failed` and do not wait on it), and say which in `actions`; the CI gate reads the head commit again (engine.md §The CI gate).';
+
+    expect(pipeline_brief(brief_manifest('review-pr', $round), 'review-pr', '/tmp/m.json', 'review'))->toContain($review)->not->toContain($resolve);
+    expect(pipeline_brief(brief_manifest('review-pr', [...$round, 'gate_ledger' => [$open]]), 'review-pr', '/tmp/m.json', 'resolve'))->toContain($resolve)->not->toContain($review);
+    expect(pipeline_brief(brief_manifest('review-pr', ['mode' => 'autoflow']), 'review-pr', '/tmp/m.json', 'review'))->not->toContain('finding of this review: read the failing job');
+    expect(pipeline_brief(brief_manifest('implement', $round), 'implement', '/tmp/m.json'))->not->toContain($review)->not->toContain($resolve);
 });
 
 it('tells every autoflow step where to work, that the run is authorised, and to return a structured result', function () {
