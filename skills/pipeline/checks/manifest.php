@@ -19,6 +19,18 @@ function manifest_write(string $path, array $data): void
     file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
 }
 
+/** Where a branch's manifest lives in its worktree: kickoff writes it there, the status line reads it there. */
+function manifest_path(string $worktree, string $branch): string
+{
+    return rtrim($worktree, '/') . '/.claude/pipeline/' . str_replace('/', '-', $branch) . '.json';
+}
+
+/** Finished: `status: done` as the dispatcher writes it, or the old engine's `leg: done`. */
+function manifest_finished(array $manifest): bool
+{
+    return ($manifest['cursor']['status'] ?? null) === 'done' || ($manifest['cursor']['leg'] ?? null) === 'done';
+}
+
 /** @return list<string> missing required keys */
 function manifest_validate(array $data): array
 {

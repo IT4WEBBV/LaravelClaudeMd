@@ -75,7 +75,7 @@ function dispatch_cli_next(string $manifestPath): array
     if ($refusal !== null) {
         return pipeline_halt($refusal);
     }
-    if (dispatch_cli_finished($manifest)) {
+    if (manifest_finished($manifest)) {
         return ['action' => 'done'];
     }
     $invalid = dispatch_cli_invalid($manifest);
@@ -102,12 +102,6 @@ function dispatch_cli_mode_problem(string $refusal, array $manifest): ?string
     $mode = (string) ($manifest['mode'] ?? '');
 
     return pipeline_retired_mode($mode) ?? ($mode === 'autoflow' ? null : "{$refusal}; this run's mode is {$mode} (resume it with /pipeline, which uses next)");
-}
-
-/** Finished: `status: done` as this dispatcher writes it, or the old engine's `leg: done`. */
-function dispatch_cli_finished(array $manifest): bool
-{
-    return ($manifest['cursor']['status'] ?? null) === 'done' || ($manifest['cursor']['leg'] ?? null) === 'done';
 }
 
 function dispatch_cli_returned(string $manifestPath, string $diffPath): array
@@ -181,7 +175,7 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
     if ($from !== null || $decisions !== []) {
         manifest_write($manifestPath, $manifest);
     }
-    if (dispatch_cli_finished($manifest)) {
+    if (manifest_finished($manifest)) {
         return ['action' => 'done'];
     }
     $leg = $manifest['cursor']['leg'];
