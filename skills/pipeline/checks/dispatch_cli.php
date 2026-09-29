@@ -413,10 +413,12 @@ function dispatch_cli_ci(string $manifestPath, int $poll): array
         return pipeline_halt('the CI gate needs a PR: artifacts.pr is not set');
     }
     $worktree = rtrim($manifest['worktree'], '/');
+    $view = dispatch_cli_pr_view($worktree, $pr, 'headRefOid,statusCheckRollup');
 
     return pipeline_ci_answer(
         $manifest,
-        dispatch_cli_pr_view($worktree, $pr, 'headRefOid,statusCheckRollup'),
+        $view,
+        (string) ($view['headRefOid'] ?? ''),
         glob("{$worktree}/.github/workflows/*.y*ml") !== [],
         $poll,
     );

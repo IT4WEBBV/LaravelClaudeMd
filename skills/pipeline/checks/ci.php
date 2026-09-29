@@ -8,8 +8,8 @@
 /** Reads before a pending or unreadable CI halts: an hour, 30 s apart. */
 const PIPELINE_CI_POLLS = 120;
 
-/** With workflows in the worktree, no check at all counts as no CI only from this read on: GitHub registers a push's checks seconds after it. */
-const PIPELINE_CI_NONE_POLLS = 3;
+/** Reads GitHub gets to catch up with a push: its head moved to the pushed commit, its checks registered. */
+const PIPELINE_CI_PUSH_POLLS = 3;
 
 /** How the gate's failure record starts in `decisions`; one such decision is the run's fix round spent. */
 const PIPELINE_CI_RED = "CI red on the PR's head commit ";
@@ -73,10 +73,11 @@ function pipeline_ci_verdict(array $rollup): array
 /**
  * What the session does next: `wait` and read again, `ready` (`gh pr ready`), `fix` (the decision into
  * `decisions` through `launch --from review-pr --decision`), or `halt` (`finish`'s input). `$view` is
- * `gh pr view <pr> --json headRefOid,statusCheckRollup`, null when gh could not read it; `$workflows`
- * whether the worktree has GitHub Actions workflows; `$poll` this read's number, from 1.
+ * `gh pr view <pr> --json headRefOid,statusCheckRollup`, null when gh could not read it; `$head` the
+ * worktree's `HEAD`, which GitHub's head must be before its checks count; `$workflows` whether the
+ * worktree has GitHub Actions workflows; `$poll` this read's number, from 1.
  */
-function pipeline_ci_answer(array $manifest, ?array $view, bool $workflows, int $poll): array
+function pipeline_ci_answer(array $manifest, ?array $view, string $head, bool $workflows, int $poll): array
 {
     $last = $poll >= PIPELINE_CI_POLLS;
     if ($view === null) {
@@ -84,17 +85,30 @@ function pipeline_ci_answer(array $manifest, ?array $view, bool $workflows, int 
             ? pipeline_ci_halt("CI on PR #{$manifest['artifacts']['pr']} had not settled after an hour, and gh could not read its checks at the last read", ['verdict' => 'unreadable'])
             : ['action' => 'wait', 'verdict' => 'unreadable'];
     }
+    if ($view['headRefOid'] !== $head) {
+        return pipeline_ci_mismatch($manifest, $view['headRefOid'], $head, $poll);
+    }
     $ci = pipeline_ci_verdict($view['statusCheckRollup']);
     $read = ['verdict' => $ci['verdict'], 'sha' => $view['headRefOid']];
 
     return match ($ci['verdict']) {
         'green' => ['action' => 'ready', ...$read],
-        'none' => ['action' => $workflows && $poll < PIPELINE_CI_NONE_POLLS ? 'wait' : 'ready', ...$read],
+        'none' => ['action' => $workflows && $poll < PIPELINE_CI_PUSH_POLLS ? 'wait' : 'ready', ...$read],
         'pending' => $last
             ? pipeline_ci_halt("CI on {$read['sha']} has not finished after an hour: " . implode(', ', $ci['pending']), $read)
             : ['action' => 'wait', ...$read],
         'red' => pipeline_ci_red($manifest, [...$read, 'failing' => $ci['failing']]),
     };
+}
+
+/** GitHub's head is not the worktree's: a push still showing is waited for, one that did not land halts. */
+function pipeline_ci_mismatch(array $manifest, string $sha, string $head, int $poll): array
+{
+    $read = ['verdict' => 'mismatch', 'sha' => $sha, 'head' => $head];
+
+    return $poll < PIPELINE_CI_PUSH_POLLS
+        ? ['action' => 'wait', ...$read]
+        : pipeline_ci_halt("PR #{$manifest['artifacts']['pr']}'s head on GitHub is {$sha}, but the worktree's HEAD is {$head}: the two must match before its checks count; push the branch, or reconcile it when GitHub is ahead, and run the CI gate again", $read);
 }
 
 /** The first red of a run is its fix round; a red after it halts. */

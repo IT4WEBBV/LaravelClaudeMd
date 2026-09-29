@@ -53,19 +53,19 @@ it('reads no checks as none, a red check over a pending one as red, and all fini
 });
 
 it('answers ready on green, and on no checks at once without workflows or from the third read with them', function () {
-    expect(pipeline_ci_answer(ci_manifest(), ci_view([ci_run('ci', 'COMPLETED', 'SUCCESS')]), true, 1))->toBe(['action' => 'ready', 'verdict' => 'green', 'sha' => 'abc123']);
-    expect(pipeline_ci_answer(ci_manifest(), ci_view([]), false, 1))->toBe(['action' => 'ready', 'verdict' => 'none', 'sha' => 'abc123']);
-    expect(pipeline_ci_answer(ci_manifest(), ci_view([]), true, 2))->toBe(['action' => 'wait', 'verdict' => 'none', 'sha' => 'abc123']);
-    expect(pipeline_ci_answer(ci_manifest(), ci_view([]), true, 3))->toBe(['action' => 'ready', 'verdict' => 'none', 'sha' => 'abc123']);
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([ci_run('ci', 'COMPLETED', 'SUCCESS')]), 'abc123', true, 1))->toBe(['action' => 'ready', 'verdict' => 'green', 'sha' => 'abc123']);
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([]), 'abc123', false, 1))->toBe(['action' => 'ready', 'verdict' => 'none', 'sha' => 'abc123']);
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([]), 'abc123', true, 2))->toBe(['action' => 'wait', 'verdict' => 'none', 'sha' => 'abc123']);
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([]), 'abc123', true, 3))->toBe(['action' => 'ready', 'verdict' => 'none', 'sha' => 'abc123']);
 });
 
 it('waits on pending checks and on a PR gh cannot read, and halts at the hour', function () {
     $pending = ci_view([ci_run('ci', 'IN_PROGRESS')]);
 
-    expect(pipeline_ci_answer(ci_manifest(), $pending, true, 119))->toBe(['action' => 'wait', 'verdict' => 'pending', 'sha' => 'abc123']);
-    expect(pipeline_ci_answer(ci_manifest(), $pending, true, 120))->toBe(['action' => 'halt', 'leg' => 'review-pr', 'reason' => 'CI on abc123 has not finished after an hour: CI / ci', 'verdict' => 'pending', 'sha' => 'abc123']);
-    expect(pipeline_ci_answer(ci_manifest(), null, true, 119))->toBe(['action' => 'wait', 'verdict' => 'unreadable']);
-    expect(pipeline_ci_answer(ci_manifest(), null, true, 120))->toBe(['action' => 'halt', 'leg' => 'review-pr', 'reason' => 'CI on PR #7 had not settled after an hour, and gh could not read its checks at the last read', 'verdict' => 'unreadable']);
+    expect(pipeline_ci_answer(ci_manifest(), $pending, 'abc123', true, 119))->toBe(['action' => 'wait', 'verdict' => 'pending', 'sha' => 'abc123']);
+    expect(pipeline_ci_answer(ci_manifest(), $pending, 'abc123', true, 120))->toBe(['action' => 'halt', 'leg' => 'review-pr', 'reason' => 'CI on abc123 has not finished after an hour: CI / ci', 'verdict' => 'pending', 'sha' => 'abc123']);
+    expect(pipeline_ci_answer(ci_manifest(), null, 'abc123', true, 119))->toBe(['action' => 'wait', 'verdict' => 'unreadable']);
+    expect(pipeline_ci_answer(ci_manifest(), null, 'abc123', true, 120))->toBe(['action' => 'halt', 'leg' => 'review-pr', 'reason' => 'CI on PR #7 had not settled after an hour, and gh could not read its checks at the last read', 'verdict' => 'unreadable']);
 });
 
 it('answers one fix round on red, with the failures verbatim as its decision, and halts on red after it', function () {
@@ -77,10 +77,24 @@ it('answers one fix round on red, with the failures verbatim as its decision, an
     $failures = 'CI / ci failed (https://github.com/acme/app/actions/runs/11/job/ci); Validate / validate failed (https://github.com/acme/app/actions/runs/11/job/validate)';
     $decision = "CI red on the PR's head commit abc123: {$failures}";
 
-    expect(pipeline_ci_answer(ci_manifest(['Keep the guard']), $red, true, 1))
+    expect(pipeline_ci_answer(ci_manifest(['Keep the guard']), $red, 'abc123', true, 1))
         ->toBe(['action' => 'fix', 'verdict' => 'red', 'sha' => 'abc123', 'failing' => $failing, 'decision' => $decision]);
-    expect(pipeline_ci_answer(ci_manifest(['Keep the guard', $decision]), $red, true, 1))
+    expect(pipeline_ci_answer(ci_manifest(['Keep the guard', $decision]), $red, 'abc123', true, 1))
         ->toBe(['action' => 'halt', 'leg' => 'review-pr', 'reason' => "CI red again after the fix round, on abc123: {$failures}", 'verdict' => 'red', 'sha' => 'abc123', 'failing' => $failing]);
+});
+
+it('answers mismatch while GitHub\'s head is not the worktree\'s HEAD, before any verdict, and halts with both shas at the third read', function () {
+    $mismatch = ['action' => 'wait', 'verdict' => 'mismatch', 'sha' => 'abc123', 'head' => 'def456'];
+    $reason = "PR #7's head on GitHub is abc123, but the worktree's HEAD is def456: the two must match before its checks count; push the branch, or reconcile it when GitHub is ahead, and run the CI gate again";
+    $green = ci_view([ci_run('ci', 'COMPLETED', 'SUCCESS')]);
+
+    expect(pipeline_ci_answer(ci_manifest(), $green, 'def456', true, 1))->toBe($mismatch);
+    expect(pipeline_ci_answer(ci_manifest(), $green, 'def456', true, 2))->toBe($mismatch);
+    expect(pipeline_ci_answer(ci_manifest(), $green, 'def456', true, 3))
+        ->toBe(['action' => 'halt', 'leg' => 'review-pr', 'reason' => $reason, 'verdict' => 'mismatch', 'sha' => 'abc123', 'head' => 'def456']);
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([ci_run('ci', 'COMPLETED', 'FAILURE')]), 'def456', true, 1))->toBe($mismatch);
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([]), 'def456', false, 1))->toBe($mismatch);
+    expect(pipeline_ci_answer(ci_manifest(), null, 'def456', true, 1))->toBe(['action' => 'wait', 'verdict' => 'unreadable']);
 });
 
 it('counts the recorded CI failures in decisions, and nothing else', function () {
