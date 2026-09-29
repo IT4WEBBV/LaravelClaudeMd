@@ -287,7 +287,7 @@ function pipeline_added_with(array $added, string $outcome, string $problem): ?s
 
 /**
  * What a step did to an earlier ledger entry, as the words before "ledger entry" in its halt
- * (`added actions to`, `changed outcome on`, `removed`), or null when it left the entry as it was.
+ * (`added actions to`, `changed outcome on`, `removed`, `replaced`), or null when it left the entry as it was.
  * `$only` limits the comparison to those keys: the open entry a resolve step completes. Top-level keys
  * only; both sides come normalized, so key order is not a change.
  */
