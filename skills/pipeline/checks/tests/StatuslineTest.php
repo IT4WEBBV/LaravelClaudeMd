@@ -34,6 +34,11 @@ it('leaves the PR out before the run has one, and names a run without an issue b
         ->toBe(['feature/issue-415-x  implement  pending  47m']);
 });
 
+it('reads a PR recorded as its URL by its number', function () {
+    expect(pipeline_status_lines([status_run(['artifacts' => ['issue' => 415, 'pr' => 'https://github.com/acme/app/pull/419']])], 1_000_000, null))
+        ->toBe(['#415  implement  pending  47m  PR#419']);
+});
+
 it('shows a halted run in red with its reason on one line, cut at 60 columns', function () {
     $halted = fn (?string $reason) => status_run(['cursor' => array_filter(['leg' => 'design', 'status' => 'halted', 'reason' => $reason])], 12);
 
@@ -81,4 +86,49 @@ it('lists halted runs first, then by issue, at most four with a count of the res
         '#5  implement  pending  47m',
         '#7  implement  pending  47m  +2 more',
     ]);
+});
+
+it('finds each worktree\'s manifest by its branch, never the snapshot beside it, and links from the primary\'s config', function () {
+    $primary = suite_repo();
+    mkdir($primary . '/.claude');
+    file_put_contents($primary . '/.claude/work-on.config.md', "## Repo\n- repo: acme/app   # gh --repo\n");
+    [$run, $other] = [$primary . '-run', $primary . '-other'];
+    pipeline_git($primary, ['worktree', 'add', '-q', $run, '-b', 'feature/issue-7-x']);
+    pipeline_git($primary, ['worktree', 'add', '-q', $other, '-b', 'feature/issue-8-y']);
+    pipeline_git($primary, ['worktree', 'add', '-q', '--detach', $primary . '-detached']);
+    $manifest = [
+        'branch' => 'feature/issue-7-x', 'worktree' => $run, 'mode' => 'autoflow',
+        'cursor' => ['leg' => 'implement', 'status' => 'pending'], 'artifacts' => ['issue' => 7, 'pr' => 9],
+    ];
+    manifest_write(manifest_path($run, 'feature/issue-7-x'), $manifest);
+    manifest_write($run . '/.claude/pipeline/feature-issue-7-x.before.json', $manifest);
+    manifest_write(manifest_path($other, 'feature/issue-8-y'), [...$manifest, 'branch' => 'feature/issue-8-y', 'mode' => 'interactive', 'artifacts' => ['issue' => 8]]);
+    mkdir($run . '/sub');
+
+    $scan = pipeline_status_scan($run . '/sub');
+    expect($scan['repo'])->toBe('acme/app')
+        ->and($scan['runs'])->toHaveCount(2);
+
+    expect(checks_cli('statusline_cli.php', [$run . '/sub']))->toBe([
+        'code' => 0,
+        'stdout' => "\033]8;;https://github.com/acme/app/issues/7\007#7\033]8;;\007  implement  pending  0m  \033]8;;https://github.com/acme/app/pull/9\007PR#9\033]8;;\007",
+    ]);
+});
+
+it('prints nothing outside a git repo, for a missing directory, or without an argument', function () {
+    $dir = sys_get_temp_dir() . '/pipeline-status-' . uniqid();
+    mkdir($dir);
+
+    expect(checks_cli('statusline_cli.php', [$dir]))->toBe(['code' => 0, 'stdout' => '']);
+    expect(checks_cli('statusline_cli.php', [$dir . '/gone']))->toBe(['code' => 0, 'stdout' => '']);
+    expect(checks_cli('statusline_cli.php', []))->toBe(['code' => 0, 'stdout' => '']);
+    expect(pipeline_status_scan(''))->toBe(['repo' => null, 'runs' => []]);
+});
+
+it('keeps a PHP warning off stdout, where the status line would print it as a row', function () {
+    $repo = suite_repo();
+    $branch = pipeline_git($repo, ['branch', '--show-current']);
+    manifest_write(manifest_path($repo, $branch), ['mode' => 'autoflow', 'branch' => 'x', 'cursor' => [], 'artifacts' => []]);
+
+    expect(checks_cli('statusline_cli.php', [$repo]))->toBe(['code' => 0, 'stdout' => 'x  0m']);
 });

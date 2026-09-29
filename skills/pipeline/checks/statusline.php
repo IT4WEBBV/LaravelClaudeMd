@@ -7,11 +7,62 @@
  */
 
 require_once __DIR__ . '/manifest.php';
+require_once __DIR__ . '/suite.php';
+require_once __DIR__ . '/kickoff.php';
 
 const PIPELINE_STATUS_MAX_LINES = 4;
 const PIPELINE_STATUS_STALE_SECONDS = 90 * 60;
 const PIPELINE_STATUS_RED = "\033[31m";
 const PIPELINE_STATUS_YELLOW = "\033[33m";
+
+/**
+ * Every worktree's manifest, by the branch git lists for it (never a glob: `<stem>.before.json`
+ * sits beside each manifest), and the repo named in the primary checkout's work-on config.
+ *
+ * @return array{repo: ?string, runs: list<array{manifest: array, mtime: int}>}
+ */
+function pipeline_status_scan(string $cwd): array
+{
+    // `git -C ''` would run wherever PHP was started
+    if (! is_dir($cwd)) {
+        return ['repo' => null, 'runs' => []];
+    }
+    [$code, $porcelain] = pipeline_git_run($cwd, ['worktree', 'list', '--porcelain']);
+    if ($code !== 0) {
+        return ['repo' => null, 'runs' => []];
+    }
+    $worktrees = pipeline_status_worktrees($porcelain);
+
+    $runs = [];
+    foreach ($worktrees as $worktree) {
+        if ($worktree['branch'] === null) {
+            continue;
+        }
+        $path = manifest_path($worktree['path'], $worktree['branch']);
+        $manifest = manifest_read($path);
+        if ($manifest !== null) {
+            $runs[] = ['manifest' => $manifest, 'mtime' => (int) filemtime($path)];
+        }
+    }
+
+    return ['repo' => pipeline_status_repo($worktrees[0]['path']), 'runs' => $runs];
+}
+
+/** @return list<array{path: string, branch: ?string}> the primary checkout first, as git lists it */
+function pipeline_status_worktrees(string $porcelain): array
+{
+    return array_map(fn (string $entry) => [
+        'path' => preg_match('/^worktree (.+)$/m', $entry, $path) ? $path[1] : '',
+        'branch' => preg_match('#^branch refs/heads/(.+)$#m', $entry, $branch) ? $branch[1] : null,
+    ], preg_split('/\n\n+/', $porcelain));
+}
+
+function pipeline_status_repo(string $primary): ?string
+{
+    $config = $primary . '/.claude/work-on.config.md';
+
+    return is_file($config) ? pipeline_repo_config_value((string) file_get_contents($config), 'Repo', 'repo') : null;
+}
 
 /** @param list<array{manifest: array, mtime: int}> $runs @return list<string> */
 function pipeline_status_lines(array $runs, int $now, ?string $repo): array
@@ -49,8 +100,8 @@ function pipeline_status_order(array $manifest): array
 function pipeline_status_line(array $manifest, int $age, ?string $repo): string
 {
     $cursor = $manifest['cursor'];
-    $issue = isset($manifest['artifacts']['issue']) ? (int) $manifest['artifacts']['issue'] : null;
-    $pr = isset($manifest['artifacts']['pr']) ? (int) $manifest['artifacts']['pr'] : null;
+    $issue = pipeline_status_number($manifest['artifacts']['issue'] ?? null);
+    $pr = pipeline_status_number($manifest['artifacts']['pr'] ?? null);
     $halted = ($cursor['status'] ?? null) === 'halted';
     $reason = $halted ? pipeline_status_reason((string) ($cursor['reason'] ?? '')) : '';
 
@@ -62,6 +113,12 @@ function pipeline_status_line(array $manifest, int $age, ?string $repo): string
         $pr === null ? '' : pipeline_status_link("PR#{$pr}", pipeline_status_url($repo, "pull/{$pr}")),
         $reason === '' ? '' : pipeline_status_color($reason, PIPELINE_STATUS_RED),
     ], fn (string $part) => $part !== ''));
+}
+
+/** An issue or PR as the manifest records it, a number or its GitHub URL, as the number a URL can carry. */
+function pipeline_status_number(int|string|null $recorded): ?int
+{
+    return preg_match('/(\d+)$/', (string) $recorded, $number) ? (int) $number[1] : null;
 }
 
 function pipeline_status_age(int $seconds): string
