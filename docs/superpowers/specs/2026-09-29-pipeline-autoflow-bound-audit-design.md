@@ -155,6 +155,21 @@ The whole pipeline suite passes.
   writes): the issue asks for a check, and #71 settled the transfer.
 - `run_audit_gates()` and `run_audit_charged()` both split a step's label and status; one shared helper
   is left for a third use.
+- Three blind spots of the `bound:` line, each a missed signal, never a false alarm, and each in a run
+  rare on two axes at once; none justifies more machinery:
+  - **A next agent that never started.** The refused loop-back is inferred from the journal's last step
+    charging a leg, which holds because a routed loop-back's next step leaves a `started` record. When
+    the next agent is rejected before it starts (a narrowed `tables.allowed`, an unsatisfiable schema),
+    the journal holds a `failed` record with an empty `agentId` and no `started`, which
+    `pipeline_run_journal()` drops; the routed loop-back then sits last, is read as refused, and the line
+    under-counts both sides by one. The run has halted on the agent failure anyway.
+  - **An `unknown` cycle under a transcribed bound.** Assumption 7 holds only under an honoured bound;
+    when the bound was transcribed, `pipeline_loop_counts()` hands the audit the bound itself at that
+    gate rather than a count, so a reconstructed manifest can never read `MISMATCH` there.
+  - **A Bounded escalation refused at the bound.** The refused decrement assumes the refused entry is a
+    counted `looped-back` one; a second Bounded `plan-insufficient` refused at the bound wrote a
+    `design-size` entry instead (engine.md §Escalation), so the ledger side is one lower than the
+    decrement assumes.
 
 ## Assumptions
 

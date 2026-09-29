@@ -43,7 +43,7 @@
 ### Task 1: the `bound:` line in `run_audit.php`
 
 **Files:**
-- Modify: `skills/pipeline/checks/run_audit.php` (docblock lines 3–11; new functions after `run_audit_line()`; the CLI's last lines 96–98)
+- Modify: `skills/pipeline/checks/run_audit.php` (docblock lines 3–11; new functions after `run_audit_line()`; the CLI's last lines 97–99)
 - Test: `skills/pipeline/checks/tests/RunAuditTest.php`
 - Modify: `skills/pipeline/references/engine.md` (§`autoflow`, the paragraph after the three after-run commands), `skills/pipeline/SKILL.md` (*Cost per run*)
 
@@ -265,7 +265,7 @@ git commit -m "feat(pipeline): run_audit prints whether each gate the run looped
 - [ ] **Step 1: Write the failing test.** In `AutoflowScriptTest.php`, after *halts before any agent when launch's tables are missing or incomplete* (its `->with([...]);` block), add:
 
 ```php
-it('halts before any agent when launch\'s tables give review-plan, which plan gaps are charged to, no loop-back', function () {
+it('halts before any agent when launch\'s tables have no review-plan loop-back, the gate plan gaps are charged to', function () {
     $start = autoflow_start('implement');
     unset($start['tables']['loopTarget']['review-plan']);
 
