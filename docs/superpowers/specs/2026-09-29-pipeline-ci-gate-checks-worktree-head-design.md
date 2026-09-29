@@ -52,9 +52,11 @@ spec's §Out of scope left it for this issue.
   2. **`$view['headRefOid'] !== $head`**: verdict `mismatch`. `wait` before read
      `PIPELINE_CI_PUSH_POLLS` (3), then `halt`. The answer carries `sha` (GitHub's head, as every read
      answer does) and `head` (the worktree's). The halt reason names both:
-     *PR #`<pr>`'s head on GitHub is `<sha>`, but the worktree's HEAD is `<head>`: the last push did not
-     land; push the branch and run the CI gate again*. It names `review-pr` through
-     `pipeline_ci_halt()`, so `finish` records it there, as it does a CI halt.
+     *PR #`<pr>`'s head on GitHub is `<sha>`, but the worktree's HEAD is `<head>`: the two must match
+     before its checks count; push the branch, or reconcile it when GitHub is ahead, and run the CI gate
+     again*. The gate knows only that the two differ, not why: a push that did not land and a GitHub head
+     that moved past the worktree (a push from another checkout, a force-push) answer the same. It names
+     `review-pr` through `pipeline_ci_halt()`, so `finish` records it there, as it does a CI halt.
   3. Otherwise today's verdict table, unchanged: `green`, `none`, `pending`, `red`.
 
   The mismatch comes before the verdict on purpose: a red on the old commit must not start the fix round
@@ -78,8 +80,8 @@ as today, with `$head` passed in. The docblock names the second read.
 - **engine.md §The CI gate**: the command reads the worktree's `HEAD` beside the PR; the table gains a
   first row, `mismatch`: GitHub's head is not the worktree's `HEAD` → `wait`; `halt` at the third read,
   with both shas; checked before the checks' verdict, so neither a green nor a red on an older commit
-  counts. The `halt` bullet says what to do after a mismatch halt: push the branch, then run the loop again
-  by hand on the halted manifest, as after a halt on the hour (nothing needs re-reviewing).
+  counts. The `halt` bullet says what to do after a mismatch halt: once the heads match (push the branch, or
+  reconcile it when GitHub is ahead), run the loop again by hand on the halted manifest, as after a halt on the hour (nothing needs re-reviewing).
 - **engine.md §Failure policy**: the CI bullet adds *or GitHub's head still not the worktree's `HEAD` at
   the third read*.
 - **pipeline `SKILL.md` §`autoflow` step 5**: the gate is on the PR's head commit, *which must be the

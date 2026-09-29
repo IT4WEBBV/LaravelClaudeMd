@@ -16,7 +16,7 @@
 ## Global Constraints
 
 - Suite, from the worktree root on the host: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`. `vendor/` is missing in a fresh worktree: run `composer install --no-interaction --quiet` first; it must be a real directory, never a symlink to the primary's.
-- The mismatch halt reason, verbatim: `PR #<pr>'s head on GitHub is <sha>, but the worktree's HEAD is <head>: the last push did not land; push the branch and run the CI gate again`.
+- The mismatch halt reason, verbatim: `PR #<pr>'s head on GitHub is <sha>, but the worktree's HEAD is <head>: the two must match before its checks count; push the branch, or reconcile it when GitHub is ahead, and run the CI gate again`.
 - The unreadable-`HEAD` halt reason, verbatim: `the CI gate cannot read the worktree's HEAD at <worktree>: <git's stderr>`.
 - A `mismatch` answer is `{action, verdict: 'mismatch', sha, head}` (`wait`) or `{action: 'halt', leg: 'review-pr', reason, verdict: 'mismatch', sha, head}`. Every other answer keeps its exact current shape, with no `head` key.
 - `ci` stays read-only. `finish`, `brief.php`, `pipeline-autoflow.js`, the shell loop, `orchestrate`'s docs and the merge watch do not change.
@@ -61,7 +61,7 @@ leaving every expectation as it is. Then add, before *counts the recorded CI fai
 ```php
 it('answers mismatch while GitHub\'s head is not the worktree\'s HEAD, before any verdict, and halts with both shas at the third read', function () {
     $mismatch = ['action' => 'wait', 'verdict' => 'mismatch', 'sha' => 'abc123', 'head' => 'def456'];
-    $reason = "PR #7's head on GitHub is abc123, but the worktree's HEAD is def456: the last push did not land; push the branch and run the CI gate again";
+    $reason = "PR #7's head on GitHub is abc123, but the worktree's HEAD is def456: the two must match before its checks count; push the branch, or reconcile it when GitHub is ahead, and run the CI gate again";
     $green = ci_view([ci_run('ci', 'COMPLETED', 'SUCCESS')]);
 
     expect(pipeline_ci_answer(ci_manifest(), $green, 'def456', true, 1))->toBe($mismatch);
@@ -127,7 +127,7 @@ function pipeline_ci_mismatch(array $manifest, string $sha, string $head, int $p
 
     return $poll < PIPELINE_CI_PUSH_POLLS
         ? ['action' => 'wait', ...$read]
-        : pipeline_ci_halt("PR #{$manifest['artifacts']['pr']}'s head on GitHub is {$sha}, but the worktree's HEAD is {$head}: the last push did not land; push the branch and run the CI gate again", $read);
+        : pipeline_ci_halt("PR #{$manifest['artifacts']['pr']}'s head on GitHub is {$sha}, but the worktree's HEAD is {$head}: the two must match before its checks count; push the branch, or reconcile it when GitHub is ahead, and run the CI gate again", $read);
 }
 ```
 
@@ -194,7 +194,7 @@ Then add after *gates an interactive run as well, since its finish step runs the
 it('does not answer ready while GitHub\'s head is not the worktree\'s HEAD, and halts on it at the third read', function () {
     $fixture = ci_fixture(ci_head('SUCCESS'), true, [], 'def456');
     $before = file_get_contents($fixture['manifest']);
-    $reason = "PR #7's head on GitHub is abc123, but the worktree's HEAD is def456: the last push did not land; push the branch and run the CI gate again";
+    $reason = "PR #7's head on GitHub is abc123, but the worktree's HEAD is def456: the two must match before its checks count; push the branch, or reconcile it when GitHub is ahead, and run the CI gate again";
 
     expect(ci_gate($fixture)['json'])->toBe(['action' => 'wait', 'verdict' => 'mismatch', 'sha' => 'abc123', 'head' => 'def456']);
     $halt = ci_gate($fixture, ['--poll', '3'])['stdout'];
@@ -310,7 +310,7 @@ with
 with
 
 ```markdown
-  is a halt as well. After a halt on the hour, or on a `mismatch` once the branch is pushed, nothing needs
+  is a halt as well. After a halt on the hour, or on a `mismatch` once the heads match, nothing needs
   re-reviewing: run the loop again by hand on the halted manifest (`ci` is read-only and refuses only a
   retired mode, a missing PR or a worktree whose `HEAD` git cannot read) rather than `launch`, which would
   re-run `review-pr:review`.
@@ -344,7 +344,7 @@ with
 ```
 
 and in the same step replace `` **`halt`:** `finish <manifest> '<the answer>'`, then as any halt. `` with
-`` **`halt`:** `finish <manifest> '<the answer>'`, then as any halt; on a `mismatch` the branch did not reach GitHub: once it is pushed, the loop runs again by hand. ``
+`` **`halt`:** `finish <manifest> '<the answer>'`, then as any halt; on a `mismatch` GitHub's head and the worktree's `HEAD` differ: once they match (push the branch, or reconcile it when GitHub is ahead), the loop runs again by hand. ``
 
 - [ ] **Step 6: Check and run the suite**
 
