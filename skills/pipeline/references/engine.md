@@ -126,12 +126,15 @@ launched the run, with its reason.
   return, then writes `cursor: {leg, status: pending}` — so after a `TaskStop` or a dead session the
   cursor still names the step that was running — and the snapshot `<manifest stem>.before.json`, and
   prints the brief. It prints a halt instead when the return does not hold, or when the ledger does not
-  support the step (`resolve` with no open review, `review` with one already open). The step writes
-  its results into the manifest (`manifest.md` §What a leg writes) and returns `{status, reason}`;
+  support the step (`resolve` with no open review, `review` with one already open, the design step the
+  manifest does not call for). The step writes its results into the manifest (`manifest.md` §What a
+  leg writes) and returns `{status, reason}`;
   `implement` also returns `ui`, copied from `dispatch_cli.php ui <diff>` (`pipeline_triggers()` over
-  its diff), and `design` returns `size`, copied from `dispatch_cli.php size <manifest>`
-  (`DesignSize::fromSpec()` over the spec it committed). Both are required on every return of their
-  step and ignored on a halt; the script takes `ui` only from `implement` and `size` only from `design`.
+  its diff), and each `design` step returns `size`, copied from `dispatch_cli.php size <manifest>`
+  (`DesignSize::fromSpec()` over the committed spec). Both are required on every return of their
+  step and ignored on a halt; the script takes `ui` only from `implement` and `size` only from `design`,
+  after each design step: the spec step's size decides whether the plan step runs (§Design size,
+  *`autoflow`'s design*).
 - **`finish`** records the return: `done` sets `cursor.status: done`, but only with the cursor on
   `review-pr` — anywhere else it records the halt "the workflow returned done at <leg>" — and only when
   the last snapshot is `review-pr`'s resolve step's and that step's return holds (§The check at the next
@@ -435,7 +438,7 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 
 | Leg | Invokes | Interactive form | Autonomous form | Manifest I/O |
 |---|---|---|---|---|
-| **design** *(compound)* | `superpowers:brainstorming`, then `superpowers:writing-plans` for an **Architectural** design (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it); for a **Bounded** design, brainstorming's Bounded path with no `writing-plans` (§Design size) | human drives the brainstorm dialogue; if brainstorming classifies Bounded without `light`, the pipeline asks (§Design size); re-invoke `/pipeline` to continue | a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions. The brief says which path is permitted: Bounded only with `light`, otherwise Architectural | writes spec + plan pointers; the size is the spec's `**Design size:**` header, never stored |
+| **design** *(compound)* | `superpowers:brainstorming`, then `superpowers:writing-plans` for an **Architectural** design (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it); for a **Bounded** design, brainstorming's Bounded path with no `writing-plans` (§Design size) | human drives the brainstorm dialogue; if brainstorming classifies Bounded without `light`, the pipeline asks (§Design size); re-invoke `/pipeline` to continue | two steps (`pipeline_steps()`): a **spec** agent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions; a fresh **plan** agent reads the committed spec cold and writes the plan. A Bounded design is the spec step alone (§Design size, *`autoflow`'s design*). The brief says which path is permitted: Bounded only with `light`, otherwise Architectural | writes spec + plan pointers; the size is the spec's `**Design size:**` header, never stored |
 | **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | two steps (`pipeline_step`): a **review** agent invokes `/critique plan` (in `autoflow` it applies `/critique plan`'s procedure itself: it cannot start a reviewer) and appends the review verbatim as an open `plan-approval` entry; a fresh **resolve** agent acts on it (§Resolving a review) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth. References the issue **without a closing keyword** (§Closing links) — this PR carries no implementation yet | writes the PR# pointer |
 | **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's `static-analysis` after each step and its `format` once before the push** (§Mechanical checks), set closing-issue links (§Closing links — `review-pr` reconciles them before the PR goes ready). **Leaves the PR draft** (below); in `autoflow` it does not wait on CI (§The CI gate). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
@@ -473,6 +476,36 @@ one.* A classification never selects Bounded on its own authority.
 
 **Refuse Bounded in a package repo.** When the repo's `composer.json` `name` starts with `it4web/`,
 say so and take the Architectural path. A shared package is never small.
+
+### `autoflow`'s design — a spec step and a plan step
+
+In `autoflow` the `design` leg is two steps (`pipeline_steps()`), so the agent that writes the plan reads
+the committed spec cold, and the spec agent's exploration does not ride along into the plan (#73):
+
+- **`design:spec`** brainstorms, commits the spec, sets `artifacts.spec` and removes `artifacts.plan`: a
+  plan written for an earlier spec is not this spec's plan. It stops where brainstorming hands over to
+  `writing-plans`, and commits no plan on the Architectural path. On the Bounded path it commits the
+  plan as well and sets `artifacts.plan`: a Bounded design is this step alone (`PIPELINE_BOUNDED_STEPS`),
+  and the script skips `design:plan` on the `size` the spec step returned. It writes `artifacts` once,
+  after its last commit, so a halt before that leaves the manifest calling for the spec step again.
+- **`design:plan`** reads the spec and the code it points at, invokes `writing-plans`, commits the plan
+  and sets `artifacts.plan`. The plan goes beside the spec (`pipeline_plan_path()`:
+  `…/specs/<date>-<slug>-design.md` → `…/plans/<date>-<slug>.md`); when that file exists, from an
+  earlier pass or the Bounded plan the design grew from, the step updates it in place. An answer the plan
+  needs and the spec does not give goes into the spec's `## Assumptions`, committed before the plan.
+
+Both return `size`. The next design step is read from the manifest, as `review` / `resolve` is
+(`pipeline_design_step()`): `plan` when the spec is set and the plan is not, or when the newest ledger
+entry is a plan return (a `plan-approval` loop-back with no `review`); `spec` otherwise. `launch` starts
+there, and `brief` refuses the other step. On a loop-back the script reruns:
+
+| what sent the run back | the script reruns |
+|---|---|
+| `plan-insufficient` on an Architectural design (a plan gap; `review-plan:review`'s counts too) | `design:plan` only |
+| `looped-back` from `review-plan:resolve` | `design:spec`, then `design:plan` |
+| `plan-insufficient` on a Bounded design (an escalation) | `design:spec`, which grows the spec, then `design:plan` |
+
+`interactive` keeps one `design:run` step: the human designs inline, in one session.
 
 ### What a Bounded design commits
 
@@ -556,6 +589,8 @@ php -r 'require $argv[1] . "/triggers.php"; require $argv[1] . "/design_size.php
      as state, not re-designed), what remains;
    - add the remaining steps to the plan;
    - commit the spec, then the plan.
+   In `autoflow` the spec step grows the spec and the plan step adds the remaining steps
+   (*`autoflow`'s design*).
 3. `review-plan` re-runs over the grown spec and plan **plus `git diff origin/<base>...HEAD`**.
 4. `handoff pr` re-runs; it updates the existing PR, so the resume prompt matches the grown plan.
 5. `implement` continues.
@@ -591,7 +626,8 @@ of the plan approval**: the plan passed `review-plan` and turned out not to cove
    what is already built is described as state, not re-designed. It leaves the entry unchanged, with
    no `actions`: what it did goes in the spec, the plan and the reason it returns (#104: a design that
    recorded its answer on the entry halted the run at the next brief). Then `review-plan`, `handoff pr`
-   (updating the existing PR) and `implement` run again, as after an escalation.
+   (updating the existing PR) and `implement` run again, as after an escalation. In `autoflow` only
+   `design:plan` reruns (*`autoflow`'s design*).
 
 The entry resets `pipeline_done_legs()` like an escalation does, so the earlier plan approval cannot
 carry navigation past the re-review.
@@ -1123,7 +1159,7 @@ Under `autoflow` these are the only stops. **No finding stops a run.**
   does not bear out.
 - **An `autoflow` step the run cannot accept** — a status the step may not return fails the step's
   schema, and `brief` halts a step the ledger does not support (`resolve` with no open review,
-  `review` with one already open) → **halt**.
+  `review` with one already open, the design step the manifest does not call for) → **halt**.
 - **CI on the PR's head commit red after the fix round, or not settled in an hour, or GitHub's head still
   not the worktree's `HEAD` at the third read** (§The CI gate) →
   **halt**, the PR still draft: `finish` records the gate's answer on `review-pr`, and the duties after
