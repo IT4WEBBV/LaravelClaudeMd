@@ -248,3 +248,23 @@ it('passes the returns that route elsewhere than on, when the ledger bears them 
     'a review-pr loop-back' => ['review-pr', [['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-25T10:00:00Z', 'review' => 'r']], 'looped-back', [['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-25T10:00:00Z', 'review' => 'r', 'actions' => ['rework'], 'outcome' => 'looped-back']], ['status' => 'looped-back'], DesignSize::Architectural],
     'a verify-ui loop-back' => ['verify-ui', [], 'looped-back', [['gate' => 'verify-ui', 'leg' => 'verify-ui', 'at' => '2026-09-25T10:00:00Z', 'outcome' => 'looped-back']], ['status' => 'looped-back'], DesignSize::Architectural],
 ]);
+
+it('names the leg, what changed and which entry when a step rewrites an earlier ledger entry', function (string $leg, array $ledger, array $rewritten, string $reason) use ($noUi) {
+    $before = returned_before($leg, $ledger);
+
+    expect(pipeline_returned($before, returned_after($before, 'continued', $rewritten), $noUi, DesignSize::Architectural))
+        ->toBe(['action' => 'halt', 'reason' => $reason]);
+})->with(function () {
+    $approved = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r', 'outcome' => 'continued'];
+    $gap = ['gate' => 'plan-approval', 'leg' => 'implement', 'cycle' => 2, 'at' => '2026-09-22T12:00:00Z', 'reason' => 'needs a queue', 'outcome' => 'looped-back'];
+    $review = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r', 'annotations' => ['migration']];
+    $answered = [...$gap, 'actions' => [['claim' => 'needs a queue', 'disposition' => 'integrated', 'note' => 'plan task 4']]];
+
+    return [
+        'design writes actions onto the plan gap it answers (#104)' => ['design', [$approved, $gap], [$approved, $answered], 'design added actions to ledger entry 1 (plan gap)'],
+        'a resolve step edits the annotations of its open review' => ['review-plan', [$review], [[...$review, 'annotations' => [], 'outcome' => 'continued']], 'review-plan changed annotations on ledger entry 0 (plan-approval)'],
+        'a step drops an entry' => ['handoff', [$approved], [], 'handoff removed ledger entry 0 (plan-approval)'],
+        'two kinds of change at once' => ['implement', [$approved, $gap], [$approved, [...$answered, 'reason' => 'edited']], 'implement added actions to and changed reason on ledger entry 1 (plan gap)'],
+        'a nested edit on a closed entry' => ['handoff', [[...$approved, 'actions' => [['claim' => 'x', 'disposition' => 'integrated', 'note' => 'a']]]], [[...$approved, 'actions' => [['claim' => 'x', 'disposition' => 'integrated', 'note' => 'b']]]], 'handoff changed actions on ledger entry 0 (plan-approval)'],
+    ];
+});

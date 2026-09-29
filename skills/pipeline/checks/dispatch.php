@@ -251,11 +251,9 @@ function pipeline_ledger_problem(array $old, array $new, LegStatus $status, stri
     $kept = ['gate', 'leg', 'cycle', 'at', 'review', 'annotations'];
 
     foreach ($old as $index => $entry) {
-        $same = $index === $open
-            ? pipeline_pick($new[$index] ?? [], $kept) === pipeline_pick($entry, $kept)
-            : ($new[$index] ?? null) === $entry;
-        if (! $same) {
-            return "the leg rewrote ledger entry {$index}";
+        $change = pipeline_entry_change($entry, $new[$index] ?? null, $index === $open ? $kept : null);
+        if ($change !== null) {
+            return "{$leg} {$change} ledger entry {$index} (" . pipeline_entry_kind($entry) . ')';
         }
     }
 
@@ -287,9 +285,41 @@ function pipeline_added_with(array $added, string $outcome, string $problem): ?s
     return array_filter($added, fn ($entry) => ($entry['outcome'] ?? null) === $outcome) === [] ? $problem : null;
 }
 
-function pipeline_pick(array $entry, array $keys): array
+/**
+ * What a step did to an earlier ledger entry, as the words before "ledger entry" in its halt
+ * (`added actions to`, `changed outcome on`, `removed`), or null when it left the entry as it was.
+ * `$only` limits the comparison to those keys: the open entry a resolve step completes. Top-level keys
+ * only; both sides come normalized, so key order is not a change.
+ */
+function pipeline_entry_change(array $old, mixed $new, ?array $only = null): ?string
 {
-    return array_map(fn (string $key) => $entry[$key] ?? null, $keys);
+    if ($new === null) {
+        return 'removed';
+    }
+    if (! is_array($new)) {
+        return 'replaced';
+    }
+    if ($only !== null) {
+        [$old, $new] = [array_intersect_key($old, array_flip($only)), array_intersect_key($new, array_flip($only))];
+    }
+    $changes = array_filter([
+        'added' => array_keys(array_diff_key($new, $old)),
+        'changed' => array_keys(array_filter(array_intersect_key($new, $old), fn ($value, $key) => $value !== $old[$key], ARRAY_FILTER_USE_BOTH)),
+        'removed' => array_keys(array_diff_key($old, $new)),
+    ]);
+    $preposition = ['added' => 'to', 'changed' => 'on', 'removed' => 'from'];
+
+    return $changes === [] ? null : implode(' and ', array_map(
+        fn (string $verb, array $keys) => "{$verb} " . implode(', ', $keys) . " {$preposition[$verb]}",
+        array_keys($changes),
+        $changes,
+    ));
+}
+
+/** How a halt names a ledger entry: `plan gap` for one (`pipeline_is_plan_gap()`), else its gate. */
+function pipeline_entry_kind(array $entry): string
+{
+    return pipeline_is_plan_gap($entry) ? 'plan gap' : (string) ($entry['gate'] ?? 'no gate');
 }
 
 function pipeline_route(array $after, string $leg, string $step, array $triggers, DesignSize $size): array

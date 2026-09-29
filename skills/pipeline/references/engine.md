@@ -1053,8 +1053,10 @@ Under `autoflow` these are the only stops. **No finding stops a run.**
   (`cursor.status: halted`, `cursor.reason`); a human resumes. **No silent retry** beyond that one — a retry hides
   the failure and the machinery may be in an unknown state.
   - **A halted manifest is the one the check rejected.** When the reason names a key the leg was not
-    allowed to change, repair it from `<manifest stem>.before.json`, the snapshot taken at dispatch,
-    before the next `next` or `launch`; otherwise the run resumes with the leg's change in place.
+    allowed to change, or a ledger entry it rewrote (*design added actions to ledger entry 1 (plan
+    gap)*: the leg, what changed and the entry), repair it from `<manifest stem>.before.json`, the
+    snapshot taken at dispatch, before the next `next` or `launch`; otherwise the run resumes with the
+    leg's change in place.
   - **In `autoflow`** a review step that returns nothing runs once more, on Opus; a step that throws,
     any other step that returns nothing, or a station that would need an agent the step cannot start,
     halts at once. The halt reaches the invoking session as the workflow's return, and `finish` writes it to
