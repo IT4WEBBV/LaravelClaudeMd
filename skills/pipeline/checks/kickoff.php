@@ -299,7 +299,7 @@ function pipeline_kickoff_prepare(string $worktree, string $branch, ?string $bas
         pipeline_git($worktree, ['branch', '--unset-upstream', $branch]);
     }
     pipeline_exclude_manifest($worktree);
-    $path = rtrim($worktree, '/') . '/.claude/pipeline/' . str_replace('/', '-', $branch) . '.json';
+    $path = manifest_path($worktree, $branch);
     manifest_write($path, $manifest);
 
     return $path;

@@ -37,9 +37,12 @@ done
 
 # 4. Make the hook executable
 chmod +x ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh
+
+# 5. Link the status line script (settings.json's statusLine runs ~/.claude/statusline-command.sh)
+ln -sfn ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/statusline/statusline-command.sh ~/.claude/statusline-command.sh
 ```
 
-Then wire the hooks in `~/.claude/settings.json`. The scripts live in this repo and update with
+Then wire the hooks and the status line in `~/.claude/settings.json`. The scripts live in this repo and update with
 every pull, so this wiring is the only per-machine step — and the one thing that does not reach
 the other machine on its own:
 
@@ -55,10 +58,14 @@ the other machine on its own:
 }
 ```
 
+```json
+"statusLine": { "type": "command", "command": "$HOME/.claude/statusline-command.sh", "refreshInterval": 5 }
+```
+
 `git-freshness.sh` has three modes:
 - `session` — at startup: syncs both config repos (fast-forward only, never over local work) and
   links any skill that has no symlink yet (and any skill's `workflow/*.js` into
-  `~/.claude/workflows/`), then checks the launch directory.
+  `~/.claude/workflows/`, and the status line script when `~/.claude/statusline-command.sh` does not exist), then checks the launch directory.
 - `edit` — the repo owning the file being written, once per repo per session.
 - `checkout` — drops cached verdicts after a branch switch.
 
@@ -88,6 +95,34 @@ A newly linked skill is picked up by the **next** Claude Code session.
   instructions are not ours.
 - Skill names must be unique across the two repos. On a clash the hook keeps whichever was linked
   first, and step 3 lets the second `ln` win — both silently. Rename one.
+
+## Status line
+
+`statusline/statusline-command.sh` is the status line: directory, branch, model, context and rate
+limits on the first row, and below it one row per unfinished `autoflow` run of the session's repo,
+read from the run manifests by `skills/pipeline/checks/statusline_cli.php`:
+
+```
+#415  implement  pending  47m  PR#419
+```
+
+The age is the time since the manifest last changed and turns yellow past 90 minutes without a step
+boundary (commits do not touch the manifest, so this is not orchestrate's stall rule); a halted run
+shows its reason in red; the issue and the PR are links. At most four rows. `refreshInterval: 5`
+re-runs the script every five seconds, so the rows move while the session waits on its workflows; it
+costs no tokens. Without runs, or without `php`, the first row is all there is.
+
+`~/.claude/statusline-command.sh` is a symlink to it (step 5). The `session` hook creates that link when
+nothing is there, never over an existing file. A machine that still has its own copy: compare it, then
+replace it, and add `"refreshInterval": 5` to `statusLine` in `~/.claude/settings.json`:
+
+```bash
+diff ~/.claude/statusline-command.sh ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/statusline/statusline-command.sh
+ln -sfn ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/statusline/statusline-command.sh ~/.claude/statusline-command.sh
+```
+
+Its tests: `bash statusline/tests/statusline.test.sh`; the rows' rendering is in the pipeline suite
+(`StatuslineTest.php`).
 
 ## Hook tests
 
