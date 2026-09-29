@@ -593,8 +593,11 @@ it('refuses size without a readable manifest and ui without a diff file', functi
     expect(dispatch_cli(['ui', '/nonexistent/x.diff']))->toMatchArray(['code' => 1, 'stdout' => '']);
 });
 
-/** A finished autoflow run on PR 7, and a fake gh first on PATH that answers `pr view` from pr.json (none: gh fails). */
-function ci_fixture(?array $view, bool $workflows = true, array $decisions = []): array
+/**
+ * A finished autoflow run on PR 7, with a fake gh first on PATH that answers `pr view` from pr.json (none:
+ * gh fails) and a fake git that answers `rev-parse HEAD` from head (none: git fails).
+ */
+function ci_fixture(?array $view, bool $workflows = true, array $decisions = [], ?string $head = 'abc123'): array
 {
     $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'artifacts' => ['spec' => null, 'plan' => null, 'pr' => 7, 'issue' => null], 'decisions' => $decisions]);
     mkdir($fixture['dir'] . '/bin');
@@ -605,6 +608,15 @@ echo "$*" >> "$GH_FAKE/calls"
 cat "$GH_FAKE/pr.json"
 SH);
     chmod($fixture['dir'] . '/bin/gh', 0755);
+    file_put_contents($fixture['dir'] . '/bin/git', <<<'SH'
+#!/bin/sh
+[ -f "$GH_FAKE/head" ] || { echo 'fatal: not a git repository' >&2; exit 128; }
+cat "$GH_FAKE/head"
+SH);
+    chmod($fixture['dir'] . '/bin/git', 0755);
+    if ($head !== null) {
+        file_put_contents($fixture['dir'] . '/head', $head);
+    }
     if ($view !== null) {
         file_put_contents($fixture['dir'] . '/pr.json', json_encode($view));
     }
@@ -673,6 +685,29 @@ it('gates an interactive run as well, since its finish step runs the same loop',
     manifest_write($fixture['manifest'], [...manifest_read($fixture['manifest']), 'mode' => 'interactive']);
 
     expect(ci_gate($fixture)['json'])->toBe(['action' => 'ready', 'verdict' => 'green', 'sha' => 'abc123']);
+});
+
+it('does not answer ready while GitHub\'s head is not the worktree\'s HEAD, and halts on it at the third read', function () {
+    $fixture = ci_fixture(ci_head('SUCCESS'), true, [], 'def456');
+    $before = file_get_contents($fixture['manifest']);
+    $reason = "PR #7's head on GitHub is abc123, but the worktree's HEAD is def456: the two must match before its checks count; push the branch, or reconcile it when GitHub is ahead, and run the CI gate again";
+
+    expect(ci_gate($fixture)['json'])->toBe(['action' => 'wait', 'verdict' => 'mismatch', 'sha' => 'abc123', 'head' => 'def456']);
+    $halt = ci_gate($fixture, ['--poll', '3'])['stdout'];
+    expect(json_decode($halt, true))->toBe(['action' => 'halt', 'leg' => 'review-pr', 'reason' => $reason, 'verdict' => 'mismatch', 'sha' => 'abc123', 'head' => 'def456']);
+    expect(file_get_contents($fixture['manifest']))->toBe($before);
+
+    dispatch_cli(['finish', $fixture['manifest'], trim($halt)]);
+    expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-pr', 'status' => 'halted', 'reason' => $reason]);
+});
+
+it('halts the gate at once when git cannot read the worktree\'s HEAD, before gh is asked', function () {
+    $fixture = ci_fixture(ci_head('SUCCESS'), true, [], null);
+    $before = file_get_contents($fixture['manifest']);
+
+    expect(ci_gate($fixture)['json'])->toBe(['action' => 'halt', 'reason' => "the CI gate cannot read the worktree's HEAD at {$fixture['dir']}: fatal: not a git repository"]);
+    expect(is_file($fixture['dir'] . '/calls'))->toBeFalse();
+    expect(file_get_contents($fixture['manifest']))->toBe($before);
 });
 
 it('halts the gate on a run without a PR or a readable manifest, and leaves the manifest alone', function () {
