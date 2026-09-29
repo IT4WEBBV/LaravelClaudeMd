@@ -172,9 +172,12 @@ The transcript dir is `~/.claude/projects/<project>/<session>/subagents/workflow
 the Workflow result. `run_cost_cli.php` prints per step the weighted cost, the peak context, the wall
 time and the part of it spent waiting on tools, and on its `run:` line the total, the run's span in
 minutes and the largest step peak. `run_audit.php` prints whether `ui` over the final diff agrees with
-a `verify-ui` entry, and whether each gate's newest ledger entries agree with what the steps reported.
-It stays as the after-run report: with the boundary check in place a `MISMATCH` means the check has a
-hole, never a halt.
+a `verify-ui` entry, whether each gate's newest ledger entries agree with what the steps reported, and
+(`bound:`) whether each gate the run looped back at holds no more `looped-back` ledger entries than
+`PIPELINE_LOOP_BOUND`, the loop-back the run halted on not counted: `tables.bound` and `loops` reach the
+script through the invoking session's copy of `launch`'s answer, and no boundary check counts
+loop-backs. It stays as the after-run report: with the boundary check in place a `MISMATCH` means a
+check has a hole or the script ran with another bound, never a halt.
 
 **Where a step works.** The worktree travels in the brief (*"Work only in `<worktree>`"*) and in
 absolute paths, never in the launch directory: `orchestrate` launches up to four runs from its primary

@@ -2,8 +2,9 @@
 
 /**
  * After a `/pipeline autoflow` run: the two things the workflow takes on report (spec 2026-09-23 §No check
- * on what a step reports), as facts. Each step's return is checked at the next `brief` (engine.md
- * §`autoflow`, The check at the next boundary); a MISMATCH here means that check has a hole, never a halt.
+ * on what a step reports), as facts, and the bound it takes on transcription (#86). Each step's return is
+ * checked at the next `brief` (engine.md §`autoflow`, The check at the next boundary); a MISMATCH here
+ * means a check has a hole or the script ran with another bound, never a halt.
  *
  *   php run_audit.php <manifest> <final PR diff> <run transcript dir>
  *
@@ -84,6 +85,49 @@ function run_audit_line(string $name, array $reported, array $recorded): string
     );
 }
 
+/** The looping leg a journal step's return charges a loop-back to, as the script charges it; null for any other return. */
+function run_audit_charged(array $step): ?string
+{
+    [$leg, $name] = explode(':', $step['label'], 2) + [1 => ''];
+    $status = is_array($step['result']) ? ($step['result']['status'] ?? null) : null;
+
+    return match (true) {
+        $status === 'plan-insufficient' => 'review-plan',
+        $status === 'looped-back' && ($name === 'resolve' || $leg === 'verify-ui') => $leg,
+        default => null,
+    };
+}
+
+/**
+ * Whether the script ran with `PIPELINE_LOOP_BOUND` (#86): `tables.bound` and `loops` reach it through the
+ * invoking session's copy of `launch`'s answer. At each gate the run routed a loop-back at, the ledger's
+ * looped-back count (`pipeline_loop_counts()`, what `launch` counts from) stays within the bound. A
+ * loop-back as the journal's last step is the one the script halted on (a routed one starts the next
+ * step): the resolve step recorded it, so it is in the ledger, and it is not counted.
+ *
+ * @param list<array{label: string, result: mixed}> $steps
+ */
+function run_audit_bound(array $steps, array $ledger): string
+{
+    $charged = array_map(run_audit_charged(...), $steps);
+    $refused = array_slice($charged, -1)[0] ?? null;
+    $routed = array_count_values(array_filter($charged));
+    if ($refused !== null) {
+        $routed[$refused]--;
+    }
+    $counts = pipeline_loop_counts($ledger);
+    $judged = array_keys(array_filter($routed));
+    $held = array_combine($judged, array_map(fn (string $leg) => $counts[$leg] - (int) ($leg === $refused), $judged));
+
+    return sprintf(
+        "bound: the ledger's loop-backs where the run looped back [%s], %d allowed%s — %s",
+        implode(', ', array_map(fn (string $leg, int $count) => "{$leg} {$count}", $judged, $held)),
+        PIPELINE_LOOP_BOUND,
+        $refused === null ? '' : ", not counting the {$refused} loop-back the run halted on",
+        array_filter($held, fn (int $count) => $count > PIPELINE_LOOP_BOUND) === [] ? 'agree' : 'MISMATCH',
+    );
+}
+
 $read = fn (string $path) => is_file($path) ? (string) file_get_contents($path) : null;
 $manifest = manifest_read((string) ($argv[1] ?? ''));
 $diff = $read((string) ($argv[2] ?? ''));
@@ -95,5 +139,6 @@ if ($manifest === null || $diff === null || $journal === null) {
 }
 
 $ledger = pipeline_ledger($manifest);
-echo implode("\n", [run_audit_ui(pipeline_triggers($diff), $ledger), ...run_audit_gates(pipeline_run_journal($journal), $ledger)]), "\n";
+$steps = pipeline_run_journal($journal);
+echo implode("\n", [run_audit_ui(pipeline_triggers($diff), $ledger), ...run_audit_gates($steps, $ledger), run_audit_bound($steps, $ledger)]), "\n";
 exit(0);
