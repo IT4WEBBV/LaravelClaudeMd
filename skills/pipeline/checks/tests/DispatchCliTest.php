@@ -236,7 +236,7 @@ it('starts a run on full once its ledger records an escalation, whatever the spe
     expect($start['tier'])->toBe('light');
 });
 
-it('starts a legacy light: true manifest with a Bounded spec on medium, today\'s light agents, and names medium as its tier', function () {
+it('starts a legacy light: true manifest with a Bounded spec on medium, the former light agents, and names medium as its tier', function () {
     $fixture = dispatch_fixture(['mode' => 'autoflow', 'light' => true, 'artifacts' => ['spec' => 'spec.md', 'plan' => null, 'pr' => null, 'issue' => null]]);
     file_put_contents($fixture['dir'] . '/spec.md', "# x — design\n\n**Design size:** Bounded\n");
 

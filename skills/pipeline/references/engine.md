@@ -215,7 +215,7 @@ change.
 
 | Step | `full` | `medium` | `light` | Why |
 |---|---|---|---|---|
-| `design:spec` | opus high | opus medium | opus medium | Full: a mistake surfaces only at `review-plan` and costs a loop (design, review, resolve). Medium: a ~25-line design, and escalation is the safety net. Light: a ~15-line Bounded spec; `review-plan` catches a mistake. |
+| `design:spec` | opus high | opus medium | opus medium | Full: a mistake surfaces only at `review-plan` and costs a loop (design, review, resolve). Medium: a ~25-line design, and escalation is the safety net. Light: the same ~25-line design; `review-plan` catches a mistake. |
 | `design:plan` | opus high | opus medium | opus medium | As `design:spec`. The plan step runs only on an Architectural design, so on `full`; the `medium` and `light` entries keep every step in every tier. |
 | `review-plan:review` | fable high | fable medium | opus medium | Full: independent of the author, Fable's documented starting point; xhigh added nothing measurable in two runs, and `low` answers from memory more. Medium: a short spec is flatter work. Light: spares Fable quota; the same model as the author, accepted on a ~15-line spec (owner decision), and the PR review stays independent. |
 | `review-plan:resolve` | opus high | opus medium | sonnet medium | Full: it decides which findings to reject. Medium and light: few findings on a short spec. |

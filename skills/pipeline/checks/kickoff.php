@@ -6,6 +6,7 @@
  * value kickoff would have to compute is a halt.
  */
 
+require_once __DIR__ . '/agents.php';
 require_once __DIR__ . '/board.php';
 require_once __DIR__ . '/dispatch.php';
 require_once __DIR__ . '/manifest.php';
