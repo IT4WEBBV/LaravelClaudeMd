@@ -37,3 +37,14 @@ it('stops counting a plan approval once a later leg found the plan insufficient'
     $reReviewed = [...$ledger, ['gate' => 'plan-approval', 'leg' => 'review-plan', 'at' => '2026-09-14T11:00:00Z', 'outcome' => 'continued']];
     expect(pipeline_done_legs($reReviewed))->toBe(['review-plan']);
 });
+
+it('names the newest escalation or plan gap as the point gate passes stop counting from', function () {
+    $passed = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'at' => '2026-09-14T10:00:00Z', 'outcome' => 'continued'];
+    $escalated = ['gate' => 'design-size', 'leg' => 'implement', 'at' => '2026-09-14T10:40:00Z', 'reason' => 'migration', 'outcome' => 'escalated'];
+    $gap = ['gate' => 'plan-approval', 'leg' => 'implement', 'at' => '2026-09-14T11:40:00Z', 'reason' => 'needs a queue', 'outcome' => 'looped-back'];
+
+    expect(pipeline_reset_at([]))->toBe('');
+    expect(pipeline_reset_at([$passed]))->toBe('');
+    expect(pipeline_reset_at([$passed, $escalated]))->toBe('2026-09-14T10:40:00Z');
+    expect(pipeline_reset_at([$passed, $escalated, $gap]))->toBe('2026-09-14T11:40:00Z');
+});

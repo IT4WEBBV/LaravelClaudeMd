@@ -57,6 +57,17 @@ function pipeline_can_navigate(string $from, string $to, array $doneLegs, array 
     return true;
 }
 
+/** The newest `at` of a `design-size` escalation or a plan gap, `''` without one: gate passes before it no longer count (`../references/engine.md` §Design size, §Scoped re-review). */
+function pipeline_reset_at(array $ledger): string
+{
+    $resetAt = array_column(
+        array_filter($ledger, fn (array $entry) => ($entry['outcome'] ?? null) === 'escalated' || pipeline_is_plan_gap($entry)),
+        'at',
+    );
+
+    return $resetAt === [] ? '' : max($resetAt);
+}
+
 /**
  * The gate legs that have run, as `pipeline_can_navigate`'s `$doneLegs`. A gate counts once it has
  * a `continued` entry — but only one newer than the latest `design-size` escalation or plan gap (a
@@ -68,11 +79,7 @@ function pipeline_done_legs(array $ledger): array
 {
     $legOf = ['plan-approval' => 'review-plan', 'pr-review' => 'review-pr', 'verify-ui' => 'verify-ui'];
 
-    $resetAt = array_column(
-        array_filter($ledger, fn (array $entry) => ($entry['outcome'] ?? null) === 'escalated' || pipeline_is_plan_gap($entry)),
-        'at',
-    );
-    $since = $resetAt === [] ? '' : max($resetAt);
+    $since = pipeline_reset_at($ledger);
 
     $done = [];
     foreach ($ledger as $entry) {
