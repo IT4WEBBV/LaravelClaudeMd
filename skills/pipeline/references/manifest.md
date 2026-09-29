@@ -83,6 +83,7 @@ the PR.
 | `actions[].disposition` | `integrated` (edited and committed) \| `recorded` (logged, no edit) \| `open-question` (carried verbatim into the PR body) |
 | `actions[].note` | what was done, or why it was not |
 | `issue_links` | **`pr-review` entries only** — the closing-link reconciliation, one entry per related issue: `{"issue": 1926, "outcome": "closes" \| "stays-open" \| "dropped-but-closes"}` (`engine.md` §Closing links). Absent on a run with no linked issue |
+| `reviewed_sha` | **`pr-review` entries only** — the commit the review step reviewed, `git rev-parse HEAD`, 40 hex characters. Required on the entry a `review-pr` review step adds; never changed after (a resolve step that touches it halts). A later review of the PR is scoped to what changed since the newest `continued` one (`engine.md` §Scoped re-review) |
 | `outcome` | `continued` \| `looped-back` \| `halted` \| `escalated` (only on `design-size`). **Absent on an open entry**: a review step writes the review without an outcome, and only the resolve step sets it |
 
 **A `verify-ui` entry is the thin shape**: `gate`, `cycle`, `at`, `outcome`, and nothing else —
@@ -123,7 +124,8 @@ A leg writes only its results: `artifacts`, `last_sha`, `suite`, its `gate_ledge
 `cursor.status` — plus `cursor.reason` when it halts. It never moves `cursor.leg` and never writes a
 brief. In `interactive`, after every return `returned` compares the manifest with its
 snapshot (`pipeline_returned()`, `../checks/dispatch.php`) and **halts** when any other key changed,
-when an existing ledger entry was rewritten (the resolve step may only complete the open entry), or
+when an existing ledger entry was rewritten (the resolve step may only complete the open entry, leaving
+its `gate`, `leg`, `cycle`, `at`, `review`, `annotations` and `reviewed_sha` as they are), or
 when the status does not agree with the ledger. In `autoflow` the next `brief` (or, after the last
 step, `finish`) makes the same comparison against that step's snapshot, and also halts when the status,
 `ui` or `size` the step returned to the script disagrees with the manifest, its diff or the spec
