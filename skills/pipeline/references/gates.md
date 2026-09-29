@@ -29,8 +29,9 @@ a stored `gate_policy`) is **deleted by decision, not oversight**: two of its th
 effects — adjudicate nothing, escalate nothing — are now the default everywhere, which left only
 "do not loop me back to `design`", and that did not justify a stored per-gate field of its own.
 
-**`light` is not a mode, and not a second chain.** It permits a **Bounded** design (`engine.md`
-§Design size): a ~15-line spec and a ~10-line plan instead of a full design. Legs, gates and
+**`medium` and `light` are not modes, and not a second chain.** They permit a **Bounded** design
+(`engine.md` §Design size): a ~15-line spec and a ~10-line plan instead of a full design, and in
+`autoflow` they pick the agents tier (`engine.md` §Agents per step). Legs, gates and
 navigation are identical for both sizes. `mode` decides how a gate is resolved; the design size
 decides how much design a gate reviews. Neither changes which gates exist.
 

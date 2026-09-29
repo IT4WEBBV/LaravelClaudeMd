@@ -919,17 +919,23 @@ it('kicks off an issue: the declared create, no upstream, the manifest excluded 
     expect(kickoff_calls($fixture))->toBe(['api repos/acme/app/issues/69', 'api /repos/acme/app/issues/69/dependencies/blocked_by']);
 });
 
-it('writes the mode, light and the decisions verbatim into the first manifest', function () {
+it('writes the mode, the tier and the decisions verbatim into the first manifest', function (array $arguments, string $tier) {
     $fixture = kickoff_fixture();
 
-    $ready = kickoff($fixture, ['#69', '--light', '--mode', 'autoflow', '--decision', 'Fold in #53: add pipeline_ledger()', '--decision', 'Keep the guard'])['json'];
+    $ready = kickoff($fixture, [...$arguments, '--mode', 'autoflow', '--decision', 'Fold in #53: add pipeline_ledger()', '--decision', 'Keep the guard'])['json'];
+    $manifest = manifest_read($ready['manifest']);
 
-    expect(manifest_read($ready['manifest']))->toMatchArray([
+    expect($manifest)->toMatchArray([
         'mode' => 'autoflow',
-        'light' => true,
+        'tier' => $tier,
         'decisions' => ['Fold in #53: add pipeline_ledger()', 'Keep the guard'],
     ]);
-});
+    expect($manifest)->not->toHaveKey('light');
+})->with([
+    'medium' => [['#69', '--medium'], 'medium'],
+    'light' => [['#69', '--light'], 'light'],
+    'light, before the item' => [['--light', '#69'], 'light'],
+]);
 
 it('halts a kickoff for the removed auto mode before anything is created, naming autoflow', function () {
     $fixture = kickoff_fixture();
@@ -1053,6 +1059,8 @@ it('refuses a kickoff it cannot parse', function (array $arguments) {
     'a flag without its value' => [['69', '--decision']],
     'a base without its value' => [['69', '--base']],
     'two items' => [['69', '70']],
+    'two tier flags' => [['69', '--medium', '--light']],
+    'a tier flag twice' => [['69', '--light', '--light']],
 ]);
 
 /**

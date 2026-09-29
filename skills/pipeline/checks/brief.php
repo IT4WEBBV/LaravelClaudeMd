@@ -186,9 +186,10 @@ function pipeline_brief_state(array $manifest, string $leg): string
         $lines[] = "- full suite {$suite['outcome']} over tree `{$suite['tree']}` at `{$sha}`: {$suite['passed']} passed, {$suite['failed']} failed";
     }
     if ($leg === 'design') {
-        $lines[] = empty($manifest['light'])
-            ? '- design size: the Architectural path is required (no `light`)'
-            : '- design size: the Bounded path is permitted (`light`)';
+        $tier = AgentTier::fromManifest($manifest);
+        $lines[] = $tier->permitsBounded()
+            ? "- design size: the Bounded path is permitted (`{$tier->value}`)"
+            : '- design size: the Architectural path is required (no `medium` or `light`)';
     }
 
     return "## Settled decisions and state\n\n" . implode("\n", $lines);

@@ -66,7 +66,7 @@ final class PipelineKickoffHalt extends RuntimeException
  * The spec's steps in order (`docs/superpowers/specs/2026-09-24-pipeline-kickoff-design.md`). Up to the
  * create nothing exists, so a halt there leaves nothing behind.
  *
- * @param  array{mode: string, light: bool, base: ?string, decisions: list<string>}  $options
+ * @param  array{mode: string, tier: AgentTier, base: ?string, decisions: list<string>}  $options
  */
 function pipeline_kickoff(string $repoRoot, string $item, array $options): array
 {
@@ -326,7 +326,7 @@ function pipeline_kickoff_manifest(string $branch, string $worktree, string $ite
         ...($options['base'] === null ? [] : ['base' => $options['base']]),
         'cursor' => ['leg' => 'design', 'status' => 'pending'],
         'artifacts' => $issue === null ? ['idea' => $item] : ['issue' => $issue['number']],
-        ...($options['light'] ? ['light' => true] : []),
+        ...($options['tier'] === AgentTier::Full ? [] : ['tier' => $options['tier']->value]),
         ...($options['decisions'] === [] ? [] : ['decisions' => $options['decisions']]),
     ];
 }

@@ -79,7 +79,7 @@ step agent         dispatch_cli.php brief <manifest> <leg> <step> [--after …] 
 
 ```bash
 CHECKS="$HOME/.claude/skills/pipeline/checks"
-php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--base <branch>] [--decision "<verbatim>"]…
+php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--medium|--light] [--base <branch>] [--decision "<verbatim>"]…
 # → {"action":"ready","manifest":…,"worktree":…,"branch":…,"notes":[…]} | {"action":"halt","reason":…}
 git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
 PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>] [--decision "<verbatim>"]…
@@ -353,7 +353,7 @@ latent drift bug. The issue number is a pointer, which is what the manifest is f
 call and leaves the session nothing to judge:
 
 ```bash
-php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--base <branch>] [--decision "<verbatim>"]…
+php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--medium|--light] [--base <branch>] [--decision "<verbatim>"]…
 ```
 
 It runs the declared `worktree.create` as declared, from the primary checkout, with only `<branch>`
@@ -454,10 +454,10 @@ ignored.
 **The first `manifest_write` carries everything no step will look up.** Kickoff — the
 session that holds the invocation, `/pipeline` itself or `orchestrate` for its runs — writes
 `branch`, `worktree`, `mode`, `base` when the invocation named one, `cursor: {leg: design, status:
-pending}`, `light: true` when the invocation said `light`, the pointers `artifacts.idea` / `artifacts.issue` when the invocation named
+pending}`, `tier` when the invocation named `medium` or `light` (`tier: "medium"` / `tier: "light"`; nothing for no word, which is `full`), the pointers `artifacts.idea` / `artifacts.issue` when the invocation named
 an idea file or an issue, and `decisions` (verbatim) when settled decisions were stated inline.
 Nothing that runs the loop, in any mode, reads an artifact to recover any of these, so a field
-kickoff leaves out is simply absent from every brief: a `light` run would get an Architectural design
+kickoff leaves out is simply absent from every brief: a `medium` or `light` run would get an Architectural design
 brief, and inline decisions would never reach a reviewer.
 
 ## After the merge — the run removes its own slot
@@ -502,7 +502,7 @@ The pipeline **invokes** the existing skills; it never reimplements them. Leg na
 
 | Leg | Invokes | Interactive form | Autonomous form | Manifest I/O |
 |---|---|---|---|---|
-| **design** *(compound)* | `superpowers:brainstorming`, then `superpowers:writing-plans` for an **Architectural** design (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it); for a **Bounded** design, brainstorming's Bounded path with no `writing-plans` (§Design size) | human drives the brainstorm dialogue; if brainstorming classifies Bounded without `light`, the pipeline asks (§Design size); re-invoke `/pipeline` to continue | two steps (`pipeline_steps()`): a **spec** agent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions; a fresh **plan** agent reads the committed spec cold and writes the plan. A Bounded design is the spec step alone (§Design size, *`autoflow`'s design*). The brief says which path is permitted: Bounded only with `light`, otherwise Architectural | writes spec + plan pointers; the size is the spec's `**Design size:**` header, never stored |
+| **design** *(compound)* | `superpowers:brainstorming`, then `superpowers:writing-plans` for an **Architectural** design (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it); for a **Bounded** design, brainstorming's Bounded path with no `writing-plans` (§Design size) | human drives the brainstorm dialogue; if brainstorming classifies Bounded without `medium` or `light`, the pipeline asks (§Design size); re-invoke `/pipeline` to continue | two steps (`pipeline_steps()`): a **spec** agent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions; a fresh **plan** agent reads the committed spec cold and writes the plan. A Bounded design is the spec step alone (§Design size, *`autoflow`'s design*). The brief says which path is permitted: Bounded only with `medium` or `light`, otherwise Architectural | writes spec + plan pointers; the size is the spec's `**Design size:**` header, never stored |
 | **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | two steps (`pipeline_step`): a **review** agent invokes `/critique plan` (in `autoflow` it applies `/critique plan`'s procedure itself: it cannot start a reviewer) and appends the review verbatim as an open `plan-approval` entry; a fresh **resolve** agent acts on it (§Resolving a review) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
 | **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth. References the issue **without a closing keyword** (§Closing links) — this PR carries no implementation yet | writes the PR# pointer |
 | **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's `static-analysis` after each step and its `format` once before the push** (§Mechanical checks), set closing-issue links (§Closing links — `review-pr` reconciles them before the PR goes ready). **Leaves the PR draft** (below); in `autoflow` it does not wait on CI (§The CI gate). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
@@ -526,11 +526,13 @@ the exact header line and `Architectural` for anything else, so every older spec
 
 ### Who picks the size — always a human
 
-`/pipeline [interactive|autoflow] [light] <idea | number | spec-path>`. The word `light` **permits** Bounded.
-It matters only while `design` has not run; on a resume the size comes from the spec and `light` is
-ignored, with a note saying so.
+`/pipeline [interactive|autoflow] [medium|light] <idea | number | spec-path>`. The word `medium` or
+`light` **permits** Bounded, and in `autoflow` names the agents tier (§Agents per step); no word means
+`full`. The permit matters only while `design` has not run; on a resume the size comes from the spec
+and the word permits nothing more, with a note saying so (the tier kickoff recorded still picks a
+Bounded design's agents).
 
-| | with `light` | without `light` |
+| | with `medium` or `light` | with neither |
 |---|---|---|
 | `interactive` | brainstorming runs normally; Bounded when it classifies Bounded | when brainstorming classifies Bounded, **ask** as one multiple-choice question: *"This looks like a small change: continue with a short design (Bounded), or write the full spec and plan?"* Yes → Bounded. No → tell brainstorming to take the Architectural path |
 | `autoflow` | the design brief permits the Bounded path | the design brief requires the Architectural path |
