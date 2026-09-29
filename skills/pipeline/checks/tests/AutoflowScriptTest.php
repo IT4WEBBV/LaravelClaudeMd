@@ -185,7 +185,7 @@ it('halts at the next brief when a stub resolve step leaves its entry open (the 
 it('walks stub steps that write what their briefs ask to done, through a retried review (the replay smoke pass)', function () {
     $start = autoflow_start('design', spec: "# x — design\n\n**Design size:** Architectural\n");
     $plan = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-25T10:00:00Z', 'review' => 'r', 'annotations' => []];
-    $pr = [...$plan, 'gate' => 'pr-review', 'leg' => 'review-pr', 'at' => '2026-09-25T12:00:00Z'];
+    $pr = [...$plan, 'gate' => 'pr-review', 'leg' => 'review-pr', 'at' => '2026-09-25T12:00:00Z', 'reviewed_sha' => str_repeat('c', 40)];
     $done = fn (array $entry) => [...$entry, 'actions' => [], 'outcome' => 'continued'];
 
     $replay = autoflow_replay($start, [

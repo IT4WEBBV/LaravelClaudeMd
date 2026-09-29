@@ -61,7 +61,7 @@ function pipeline_leg_overrides(string $mode): array
         ],
         'review-pr:review' => [
             ($autoflow ? $yourself('pr', 'the PR') . ' State the suite line above.' : 'Invoke `/critique pr`, stating the suite line above.') . ' ' . $checks,
-            'Append its review verbatim as a new `pr-review` ledger entry with `gate`, `leg`, `cycle`, `at`, `review` and `annotations`, and no `outcome`.',
+            'Append its review verbatim as a new `pr-review` ledger entry with `gate`, `leg`, `cycle`, `at`, `review`, `annotations` and `reviewed_sha` (the output of `git rev-parse HEAD` in the worktree: the commit you reviewed), and no `outcome`.',
             'Act on nothing. Read-only on the checkout; the manifest is the only file you write.',
         ],
         'review-pr:resolve' => [

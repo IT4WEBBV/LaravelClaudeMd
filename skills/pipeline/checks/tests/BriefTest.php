@@ -295,3 +295,10 @@ it('tells a later step to report a plan gap only once it has found one, on eithe
     'verify-ui' => ['verify-ui', 'run'],
     'review-pr' => ['review-pr', 'review'],
 ]);
+
+it('has the review-pr review step record the commit it reviewed, and the review-plan one not', function (string $mode) {
+    expect(pipeline_brief(brief_manifest('review-pr', ['mode' => $mode]), 'review-pr', '/tmp/m.json', 'review'))
+        ->toContain('`review`, `annotations` and `reviewed_sha` (the output of `git rev-parse HEAD` in the worktree: the commit you reviewed), and no `outcome`');
+    expect(pipeline_brief(brief_manifest('review-plan', ['mode' => $mode]), 'review-plan', '/tmp/m.json', 'review'))
+        ->not->toContain('reviewed_sha');
+})->with(['autoflow', 'interactive']);
