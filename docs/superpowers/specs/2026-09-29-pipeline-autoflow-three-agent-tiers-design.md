@@ -225,3 +225,26 @@ answer has no `tier` and halts before any agent with the agents-table reason.
     (`dispatch_cli.php`, `tests/Pest.php`, both in that order).
 11. No probe was needed: the change adds a table and a string to data the script already reads, and
     `agent()` already accepts `sonnet` and `opus` at `medium` and `high` in today's table.
+
+Added by the `design:plan` step, for questions the plan needed answered:
+
+12. *What does a `tier` that is not a string do (`true`, `3`, `["light"]`, a hand edit)?* It reads as
+    `Full`, like an unknown string, instead of a `TypeError` in `launch`: `fromManifest()` hands
+    `tryFrom()` only a string. A `tier` key that is present decides alone, readable or not, so an unknown
+    `tier` beside a legacy `light: true` reads as `Full`: the new field is the one the hand edit touched,
+    and the heavier side is the safe one.
+13. *How does kickoff carry the tier into the manifest?* `dispatch_cli_kickoff_args()` puts an
+    `AgentTier` in `$options['tier']`; `pipeline_kickoff_manifest()` writes its `value` unless it is
+    `Full`. `kickoff.php` gets no `require_once 'agents.php'`: `dispatch_cli.php` loads `agents.php`
+    before `kickoff.php`, `tests/Pest.php` does too, and `statusline.php`, which also loads
+    `kickoff.php`, never calls `pipeline_kickoff_manifest()`.
+14. *Where does `tier` sit in `launch`'s answer?* Right after `profile`, before `agents`:
+    `DispatchCliTest` compares the whole answer with `toBe`, which checks key order, and engine.md's
+    example line lists the keys in that order.
+15. *What do the engine.md table's *Why* cells say for the two lower tiers?* Today's `Light:` sentence
+    becomes `Medium:`, and a `Light:` sentence follows with the issue's *Why (light)* cell. Where both
+    say the same, one `Medium and light:` sentence.
+16. *Does engine.md's "Fable stays the reviewer" paragraph still hold?* On `full` and `medium`. The spec's
+    doc list does not name it, but with `light` running both reviews on Opus it would contradict the
+    table, so it gains one sentence: `light` takes that lever for a tiny change (the issue's owner
+    decision), and its PR review on Opus stays independent of Sonnet's code.
