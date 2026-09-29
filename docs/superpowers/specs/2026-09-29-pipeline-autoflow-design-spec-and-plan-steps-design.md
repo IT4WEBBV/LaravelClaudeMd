@@ -32,7 +32,7 @@ and `resolve`:
 - **`design:spec`** explores, brainstorms, writes and commits the spec, sets `artifacts.spec` and removes
   `artifacts.plan`. It stops where brainstorming hands over to `writing-plans`.
 - **`design:plan`** is a fresh agent. It reads the committed spec cold, and the code the spec points at,
-  invokes `writing-plans`, commits the plan and sets `artifacts.plan`.
+  invokes `writing-plans`, commits the plan at the path beside the spec and sets `artifacts.plan`.
 
 Both return `size`, copied from `dispatch_cli.php size`, as `design:run` does today; the boundary check
 compares it with the spec header after either step.
@@ -64,8 +64,9 @@ always runs first; the script reads the `size` it returned and skips `design:pla
 - `plan` when the newest ledger entry is a plan return: `gate: plan-approval`, `outcome: looped-back`, and
   no `review` key (the entry a step writes when it returns `plan-insufficient` on an Architectural spec,
   `review-plan:review`'s included);
-- `spec` otherwise: a `review-plan` loop-back (a resolved review, it has `review`), a `design-size`
-  escalation (the grow form), or a navigation back to `design`.
+- `spec` otherwise: a `review-plan` loop-back (a resolved review, it has `review`) or a `design-size`
+  escalation (the grow form). A navigation back to `design` (`--from design`) derives by the same rule:
+  `plan` while the newest entry is still a plan return, `spec` otherwise.
 
 This is what the snapshot check needs: `dispatch_cli_snapshot_step()` reads the step from the snapshot the
 brief took before the step ran, and each of the pre-step states above names one step. `launch` gives the
@@ -104,14 +105,24 @@ and `pipeline_design_step()` reads the same entry, so the choice stays mechanica
 `pipeline_leg_overrides()` keeps `design:run` for `interactive` and adds:
 
 - `design:spec` — invoke `superpowers:brainstorming` and stop at the spec: on the Architectural path the
-  plan is `design:plan`'s. The `## Assumptions` line, the no-build line, the probe line and the
-  pre-2026-09-14 line, as `design:run` has them. Commit the spec; set `artifacts.spec` and remove
-  `artifacts.plan`. On the Bounded path, commit the plan as a second commit and set `artifacts.plan`: a
-  Bounded design has no plan step.
+  plan is `design:plan`'s, so the step does not invoke `writing-plans` and commits no plan. The
+  `## Assumptions` line, the no-build line, the probe line and the pre-2026-09-14 line, as `design:run`
+  has them. Commit the spec; on the Bounded path, commit the plan as a second commit (a Bounded design
+  has no plan step). Then, after the last commit and in one manifest write, set `artifacts.spec` and
+  remove `artifacts.plan`, or on the Bounded path set it to the plan. A step that halts before that write
+  leaves the manifest calling for the spec step again, never for the plan step over a half-written spec
+  or a Bounded spec with no plan.
 - `design:plan` — read the committed spec cold and the code it points at, and invoke
   `superpowers:writing-plans` on it; do not re-design. Where the plan needs an answer the spec does not
   give, add the question and the assumed answer to the spec's `## Assumptions` and commit that before the
   plan. The no-build line and the pre-2026-09-14 line. Commit the plan; set `artifacts.plan`.
+- The plan's path is derived from the spec's, by the naming both already follow
+  (`pipeline_plan_path()`: `…/specs/<date>-<slug>-design.md` → `…/plans/<date>-<slug>.md`). The
+  `design:plan` brief names it: when that file exists it is this design's plan, from an earlier pass or
+  the Bounded plan the design grew from, and the step updates it in place and writes no second plan. The
+  spec step removes the `artifacts.plan` pointer, not the file, so a review loop-back and the grow form
+  reach the plan they extend, and a loop-back on a later day does not leave a second, dated plan beside
+  a stale one. A spec named otherwise gets no path line, and `writing-plans` names the plan.
 
 The grow-form line splits by step: `design:spec` grows the spec (header Architectural, a `## Grown from
 Bounded` section), `design:plan` adds the remaining steps to the plan; `design:run` keeps today's line. The
@@ -124,6 +135,13 @@ step; it already lets the plan step extend the spec where it must say more.
 - `run_cost.php` and `run_audit.php`: labels come from the agent's `label` (`design:spec`, `design:plan`),
   and `run_audit` counts no design status. Older transcripts keep `design:run`.
 - `interactive` (`next`, `returned`, `pipeline_runs_inline()`).
+
+### A run in flight when this lands
+
+An `autoflow` run still on the old script asks for `brief … design run` or passes `--after design:run`.
+The first halts cleanly (`design has no run step`); the second is a usage error (exit 1, the text on
+stderr, no halt JSON) that the step agent has to read. A relaunch fixes both: `launch` hands out the new
+tables and `startStep`. The PR body says so.
 
 ## Approaches considered
 
@@ -149,8 +167,12 @@ step; it already lets the plan step extend the spec where it must say more.
   `startStep` and `tables.bounded`.
 - `BriefTest`: `design:spec` and `design:plan` carry their lines; `interactive` `design:run` is unchanged;
   the grow-form line per step.
-- After merge, not in this PR: Architectural `autoflow` runs show `design:spec` and `design:plan` in
-  `run_cost_cli.php`, each peak below the old single-step peak on a comparable issue (#73's first criterion).
+- `BriefTest`: the `design:plan` brief names the plan beside the spec, over a grown manifest too; the
+  `design:spec` brief says to write `artifacts` last and to commit no plan on the Architectural path.
+- After merge, not in this PR (#73's first criterion): over the next 5 Architectural `autoflow` runs in
+  this repo, `run_cost_cli.php` shows `design:spec` and `design:plan`, and the median of each run's
+  higher first-pass design peak (the larger of the two steps') is below 213k, the single step's median
+  in the #92 measurement. See Assumption 11 for what follows if it is not.
 
 ## Assumptions
 
@@ -181,3 +203,17 @@ step; it already lets the plan step extend the spec where it must say more.
    already hard-codes; the PHP derivation and the brief's refusal check it at every design step, and a
    stub-step replay proves they agree.
 10. No probe was needed: no approach hinged on whether something works at all.
+11. *What if the split does not lower the peak?* The measurement puts the peak in whole-file reads of
+    `brief.php`, `dispatch_cli.php` and the tests, and `design:plan` reads the code the spec points at to
+    write verbatim test and code bodies: its reads alone may reach the old peak, which moves the peak to
+    the plan step and adds one agent's fixed cost. This is not measurable before merge. The criterion
+    under *Done when* decides it: if the median does not fall below 213k, #73 is reopened with the
+    numbers, and the plan step's reads (not a further split) are the next change.
+12. *Can a resume land on the plan step of a Bounded design, or over a half-revised spec?* Not through
+    the spec step: it writes `artifacts` once, after its last commit, so a halt before that write leaves
+    the manifest calling for the spec step. Only a hand-edited manifest (spec set, plan empty, a Bounded
+    header) reaches it; `launch` then halts with `design has no plan step`, and the fix is to set
+    `artifacts.plan` or clear `artifacts.spec`. `pipeline_design_step()` stays size-blind, since the size
+    reader (`dispatch_cli_design_size()`) reads files and `dispatch.php` does not.
+13. *Which plan file does the plan step write?* The one beside the spec (`pipeline_plan_path()`), so a
+    rerun updates the plan it is extending instead of writing a new dated file; see *The briefs*.

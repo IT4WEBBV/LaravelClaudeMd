@@ -23,11 +23,12 @@
 - engine.md `## ` headings do not change: `LockStepTest` resolves the briefs' `§` names against them.
 - No step returns `tasks` (#72 is closed).
 - This repo has no `.changelog/` and no `CHANGELOG.md`: no changelog entry. The PR closes #73.
+- The PR body carries the spec's *A run in flight when this lands*: a run on the old script halts at `brief … design run` or fails at `--after design:run` (a usage error, no halt JSON); a relaunch fixes both.
 
 ## Review Focus
 
 1. **A plan step that finds the spec step kept the old `artifacts.plan`** must halt at its brief, not run over a stale plan pointer. Task 3's smoke case *the spec step kept the old plan* pins it through the real `brief`.
-2. **A resumed run** (`launch` on a halted design) starts at the step that has not run: `plan` when the spec is set and the plan is not. Task 2's `launch` test and Task 3's first smoke case (a run started at `design` with a committed spec) pin it.
+2. **A resumed run** (`launch` on a halted design) starts at the step that has not run: `plan` when the spec is set and the plan is not. Task 2's `launch` test and Task 3's first smoke case (a run started at `design` with a committed spec) pin it. That resume is right only because the spec step writes `artifacts` once, after its last commit (Task 1's brief line): a spec step that halts earlier leaves the manifest calling for the spec step, never for the plan step over a half-revised spec or a Bounded spec with no plan (spec Assumption 12).
 3. **`review-plan:review`'s own `plan-insufficient`** on an Architectural design reruns only `design:plan`, on both sides: the script (status and size) and `pipeline_design_step()` (an entry with no `review`). Task 2 pins the PHP row, Task 3 the script's labels.
 4. **A Bounded escalation** reruns `design:spec` and then, because the grown spec returns Architectural, `design:plan`; a second Bounded `plan-insufficient` stays counted. Task 3's escalation case and the existing *exempts one Bounded escalation* case pin both.
 5. **`tables` from an older `launch`** (no `bounded`) halts before any agent instead of running a Bounded design's plan step. Task 3's incomplete-tables dataset gains that row.
@@ -44,11 +45,11 @@
 ### Task 1: the briefs of `design:spec` and `design:plan`
 
 **Files:**
-- Modify: `skills/pipeline/checks/brief.php` (`pipeline_leg_overrides()`, `pipeline_brief_overrides()`, a new `pipeline_grow_form_line()`)
+- Modify: `skills/pipeline/checks/brief.php` (`pipeline_leg_overrides()`, `pipeline_brief_overrides()`, new `pipeline_grow_form_line()` and `pipeline_plan_path()`)
 - Test: `skills/pipeline/checks/tests/BriefTest.php`
 
 **Interfaces:**
-- Produces: override keys `design:spec` and `design:plan` in `pipeline_leg_overrides($mode)` for both modes (Task 2's key test and `brief` rely on them); `pipeline_grow_form_line(string $step): string`.
+- Produces: override keys `design:spec` and `design:plan` in `pipeline_leg_overrides($mode)` for both modes (Task 2's key test and `brief` rely on them); `pipeline_grow_form_line(string $step): string`; `pipeline_plan_path(string $spec): ?string`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -76,10 +77,11 @@ it('splits autoflow\'s design into a spec step that stops at the spec and a plan
 
     expect($spec)
         ->toContain('`design` leg, `spec` step')
-        ->toContain('- Invoke `superpowers:brainstorming` and stop at the spec: on the Architectural path, where brainstorming hands over to `superpowers:writing-plans`, the plan is the next step\'s, `design:plan` (engine.md §Design size).')
+        ->toContain('- Invoke `superpowers:brainstorming` and stop at the spec: on the Architectural path, where brainstorming hands over to `superpowers:writing-plans`, the plan is the next step\'s, `design:plan`, so do not invoke `writing-plans` and commit no plan (engine.md §Design size).')
         ->toContain('write each question and the answer you assumed into the spec\'s `## Assumptions` section')
-        ->toContain('- Commit the spec. Set `artifacts.spec` and remove `artifacts.plan`: the plan step writes this spec\'s plan and sets it. On the Bounded path, commit the plan as well, a second commit, and set `artifacts.plan`: a Bounded design has no plan step.')
-        ->not->toContain('Commit the spec, then the plan: two commits.');
+        ->toContain('- Commit the spec; on the Bounded path, commit the plan as well, a second commit: a Bounded design has no plan step. Then, after your last commit and in one manifest write, set `artifacts.spec` and remove `artifacts.plan` (the plan step writes this spec\'s plan and sets it), or on the Bounded path set `artifacts.plan` to the plan: a halt before that write leaves the manifest calling for this step again.')
+        ->not->toContain('Commit the spec, then the plan: two commits.')
+        ->not->toContain('The plan goes at');
     expect($plan)
         ->toContain('`design` leg, `plan` step')
         ->toContain('- Read the committed spec (`artifacts.spec`) cold, and the code it points at, and invoke `superpowers:writing-plans` on it; do not re-design what the spec settles (engine.md §Design size).')
@@ -112,10 +114,31 @@ it('asks for grow form only after an escalation no plan approval has answered, s
 });
 ```
 
+Add after it:
+
+```php
+it('points the plan step at the plan beside the spec, the one a loop-back or the grow form extends', function () {
+    $escalated = ['gate' => 'design-size', 'leg' => 'implement', 'at' => '2026-09-22T12:00:00Z', 'reason' => 'migration', 'outcome' => 'escalated'];
+    $spec = 'docs/superpowers/specs/2026-09-22-x-design.md';
+    $line = '- The plan goes at `docs/superpowers/plans/2026-09-22-x.md`, beside the spec: when that file exists it is this design\'s plan, from an earlier pass or the Bounded plan this design grew from, so update it in place and write no second plan.';
+    $brief = fn (string $step, array $ledger) => pipeline_brief(brief_manifest('design', ['mode' => 'autoflow', 'gate_ledger' => $ledger, 'artifacts' => ['spec' => $spec, 'plan' => null, 'pr' => 42, 'issue' => null]]), 'design', '/tmp/m.json', $step);
+
+    expect($brief('plan', []))->toContain($line);
+    expect($brief('plan', [$escalated]))
+        ->toContain($line)
+        ->toContain('Add the remaining steps to the plan');
+    expect($brief('spec', [$escalated]))->not->toContain('The plan goes at');
+    expect(pipeline_brief(brief_manifest('design', ['mode' => 'autoflow']), 'design', '/tmp/m.json', 'plan'))->not->toContain('The plan goes at');
+    expect(pipeline_plan_path($spec))->toBe('docs/superpowers/plans/2026-09-22-x.md');
+    expect(pipeline_plan_path('/tmp/wt/docs/superpowers/specs/2026-09-22-x-design.md'))->toBe('/tmp/wt/docs/superpowers/plans/2026-09-22-x.md');
+    expect(pipeline_plan_path('docs/spec.md'))->toBeNull();
+});
+```
+
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='design'`
-Expected: FAIL. All three tests fail on their `autoflow` `design:spec` / `design:plan` briefs: `pipeline_brief_overrides()` reads `pipeline_leg_overrides(...)["design:spec"]`, an undefined key (a warning Pest reports, or a `TypeError` in `array_map` over null); the `interactive` `design:run` assertions alone would pass.
+Expected: FAIL. All four tests fail on their `autoflow` `design:spec` / `design:plan` briefs: `pipeline_brief_overrides()` reads `pipeline_leg_overrides(...)["design:spec"]`, an undefined key (a warning Pest reports, or a `TypeError` in `array_map` over null); the `interactive` `design:run` assertions alone would pass. The path test also calls the undefined `pipeline_plan_path()`.
 
 - [ ] **Step 3: Implement**
 
@@ -140,12 +163,12 @@ and replace the `'design:run' => [ … ],` entry with:
             'Commit the spec, then the plan: two commits. Set `artifacts.spec` and `artifacts.plan`.',
         ],
         'design:spec' => [
-            'Invoke `superpowers:brainstorming` and stop at the spec: on the Architectural path, where brainstorming hands over to `superpowers:writing-plans`, the plan is the next step\'s, `design:plan` (engine.md §Design size).',
+            'Invoke `superpowers:brainstorming` and stop at the spec: on the Architectural path, where brainstorming hands over to `superpowers:writing-plans`, the plan is the next step\'s, `design:plan`, so do not invoke `writing-plans` and commit no plan (engine.md §Design size).',
             $assumptions,
             $reads,
             $probe,
             $exemplars,
-            'Commit the spec. Set `artifacts.spec` and remove `artifacts.plan`: the plan step writes this spec\'s plan and sets it. On the Bounded path, commit the plan as well, a second commit, and set `artifacts.plan`: a Bounded design has no plan step.',
+            'Commit the spec; on the Bounded path, commit the plan as well, a second commit: a Bounded design has no plan step. Then, after your last commit and in one manifest write, set `artifacts.spec` and remove `artifacts.plan` (the plan step writes this spec\'s plan and sets it), or on the Bounded path set `artifacts.plan` to the plan: a halt before that write leaves the manifest calling for this step again.',
         ],
         'design:plan' => [
             'Read the committed spec (`artifacts.spec`) cold, and the code it points at, and invoke `superpowers:writing-plans` on it; do not re-design what the spec settles (engine.md §Design size).',
@@ -167,10 +190,16 @@ In `pipeline_brief_overrides()`, replace
 with
 
 ```php
+    $plan = pipeline_plan_path((string) ($manifest['artifacts']['spec'] ?? ''));
+    if ($leg === 'design' && $step === 'plan' && $plan !== null) {
+        $lines[] = "The plan goes at `{$plan}`, beside the spec: when that file exists it is this design's plan, from an earlier pass or the Bounded plan this design grew from, so update it in place and write no second plan.";
+    }
     if ($leg === 'design' && pipeline_design_grows($ledger)) {
         $lines[] = pipeline_grow_form_line($step);
     }
 ```
+
+(The spec step removes the `artifacts.plan` pointer, so the brief's pointers never name the plan a loop-back or the grow form extends; this line does, by the naming spec and plan already share.)
 
 and add after `pipeline_design_grows()`:
 
@@ -185,6 +214,14 @@ function pipeline_grow_form_line(string $step): string
         'plan' => 'Add the remaining steps to the plan, as the spec\'s `## Grown from Bounded` section names them; do not re-design it.',
         default => 'Grow the spec and the plan; do not re-design them.',
     };
+}
+
+/** The plan beside a spec, by the naming both follow (`…/specs/<date>-<slug>-design.md` → `…/plans/<date>-<slug>.md`); null for a spec named otherwise. */
+function pipeline_plan_path(string $spec): ?string
+{
+    $plan = preg_replace('#(^|/)specs/([^/]+)-design\.md$#', '$1plans/$2.md', $spec, 1, $count);
+
+    return $count === 1 ? $plan : null;
 }
 ```
 
@@ -601,7 +638,7 @@ it('reruns the spec step and then the plan step on a review loop-back, whose bri
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='AutoflowScriptTest'`
-Expected: FAIL. The Architectural walks and the brief list already pass (Task 2's tables give `design` `['spec', 'plan']`); these fail: *runs a Bounded design as its spec step alone* (the script runs `design:plan` after a Bounded spec: `no return scripted for design:plan`, a halt), every *reruns only the plan step* row (the script reruns `design:spec` first: no return scripted for it), both smoke cases (`design:spec` / `design:plan` order), *exempts one Bounded escalation* (a `design:plan` after the Bounded `design:spec`), and the two new incomplete-tables rows (the script ignores `bounded`, so it starts an agent).
+Expected: FAIL. The Architectural walks and the brief list already pass (Task 2's tables give `design` `['spec', 'plan']`); these fail: *runs a Bounded design as its spec step alone* (the script runs `design:plan` after a Bounded spec: `no return scripted for design:plan`, a halt), every *reruns only the plan step* row (the script reruns `design:spec` first: no return scripted for it), both smoke cases (`design:spec` / `design:plan` order), *halts on launch's bound when plan gaps keep looping back to design* (the old script reruns `design:spec` after the gap and runs out of scripted returns), *exempts one Bounded escalation* (a `design:plan` after the Bounded `design:spec`), and the two new incomplete-tables rows (the script ignores `bounded`, so it starts an agent).
 
 - [ ] **Step 3: Implement**
 
@@ -724,6 +761,8 @@ with
 
 and in the same bullet, `support the step (`resolve` with no open review, `review` with one already open)` becomes `support the step (`resolve` with no open review, `review` with one already open, the design step the manifest does not call for)`.
 
+§Failure policy repeats that list under *An `autoflow` step the run cannot accept*: there, `` `review` with one already open) → **halt**.`` becomes `` `review` with one already open, the design step the manifest does not call for) → **halt**.``
+
 - [ ] **Step 2: engine.md §Stations, the design row's *Autonomous form* cell**
 
 Replace the cell text `a subagent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions. The brief says which path is permitted: Bounded only with `light`, otherwise Architectural` with
@@ -744,12 +783,15 @@ the committed spec cold, and the spec agent's exploration does not ride along in
 
 - **`design:spec`** brainstorms, commits the spec, sets `artifacts.spec` and removes `artifacts.plan`: a
   plan written for an earlier spec is not this spec's plan. It stops where brainstorming hands over to
-  `writing-plans`. On the Bounded path it commits the plan as well and sets `artifacts.plan`: a Bounded
-  design is this step alone (`PIPELINE_BOUNDED_STEPS`), and the script skips `design:plan` on the `size`
-  the spec step returned.
+  `writing-plans`, and commits no plan on the Architectural path. On the Bounded path it commits the
+  plan as well and sets `artifacts.plan`: a Bounded design is this step alone (`PIPELINE_BOUNDED_STEPS`),
+  and the script skips `design:plan` on the `size` the spec step returned. It writes `artifacts` once,
+  after its last commit, so a halt before that leaves the manifest calling for the spec step again.
 - **`design:plan`** reads the spec and the code it points at, invokes `writing-plans`, commits the plan
-  and sets `artifacts.plan`. An answer the plan needs and the spec does not give goes into the spec's
-  `## Assumptions`, committed before the plan.
+  and sets `artifacts.plan`. The plan goes beside the spec (`pipeline_plan_path()`:
+  `…/specs/<date>-<slug>-design.md` → `…/plans/<date>-<slug>.md`); when that file exists, from an
+  earlier pass or the Bounded plan the design grew from, the step updates it in place. An answer the plan
+  needs and the spec does not give goes into the spec's `## Assumptions`, committed before the plan.
 
 Both return `size`. The next design step is read from the manifest, as `review` / `resolve` is
 (`pipeline_design_step()`): `plan` when the spec is set and the plan is not, or when the newest ledger
