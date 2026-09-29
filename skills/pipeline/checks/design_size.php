@@ -21,6 +21,15 @@ enum DesignSize: string
         return self::tryFrom($match[1]) ?? self::Architectural;
     }
 
+    /** The agents profile a design of this size runs on (`../references/engine.md` §Agents per step). */
+    public function profile(): string
+    {
+        return match ($this) {
+            self::Bounded => 'light',
+            self::Architectural => 'full',
+        };
+    }
+
     /** Why this design must grow, or null while it may stay as it is. */
     public function escalation(array $triggers, int $codeLines): ?string
     {

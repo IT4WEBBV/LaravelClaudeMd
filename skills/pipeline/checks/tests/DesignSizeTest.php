@@ -29,3 +29,8 @@ it('does not escalate a bounded design on a package bump or a UI change alone', 
 it('never escalates an architectural design', function () use ($none) {
     expect(DesignSize::Architectural->escalation([...$none, 'migration' => true, 'auth' => true], 5000))->toBeNull();
 });
+
+it('names the agents profile a size runs on', function () {
+    expect(DesignSize::Bounded->profile())->toBe('light');
+    expect(DesignSize::Architectural->profile())->toBe('full');
+});
