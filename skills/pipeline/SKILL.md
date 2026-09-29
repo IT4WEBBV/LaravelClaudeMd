@@ -39,7 +39,8 @@ git + gh. See the references before driving a run — the enforcement lives ther
 - **Cost per run** — after every `autoflow` run the invoking session reports two outputs with the
   result: `checks/run_cost_cli.php` (weighted cost and wall time per step, the run's span, the largest
   step peak) and `checks/run_audit.php` (whether `ui` and each gate's ledger agree with what the steps
-  reported). A `MISMATCH` is a signal, never a halt (`references/engine.md` §`autoflow`).
+  reported, and whether the ledger's loop-backs stay within the bound). A `MISMATCH` is a signal, never
+  a halt (`references/engine.md` §`autoflow`).
 
 The deterministic guardrails are tested PHP in `checks/` (run
 `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`).
