@@ -11,6 +11,41 @@ const PIPELINE_AGENT_MODELS = ['opus', 'sonnet', 'fable'];
 
 const PIPELINE_AGENT_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
+/**
+ * The agents tier an `autoflow` run's invocation named (`../references/engine.md` §Agents per step):
+ * `medium` or `light`, and `full` with no word. Its values are `PIPELINE_AGENTS`' tier keys.
+ */
+enum AgentTier: string
+{
+    case Full = 'full';
+    case Medium = 'medium';
+    case Light = 'light';
+
+    /** The manifest's `tier`; else `medium` for a legacy `light: true`; else `full`. A `tier` that is not one of the three reads as `full`, the heavier side. */
+    public static function fromManifest(array $manifest): self
+    {
+        if (array_key_exists('tier', $manifest)) {
+            $tier = $manifest['tier'];
+
+            return (is_string($tier) ? self::tryFrom($tier) : null) ?? self::Full;
+        }
+
+        return empty($manifest['light']) ? self::Full : self::Medium;
+    }
+
+    /** Whether the word permits a Bounded design (`../references/engine.md` §Design size). */
+    public function permitsBounded(): bool
+    {
+        return $this !== self::Full;
+    }
+
+    /** The tier a design of this size runs on: up, never down. */
+    public function forDesign(DesignSize $size): self
+    {
+        return $size === DesignSize::Bounded ? $this : self::Full;
+    }
+}
+
 /** `full` and `light` hold every step; `loopedBack` replaces a step's entry once a gate looped back to its leg; `retry` reruns a review that returned nothing; `smoke` runs a smoke run's stubs. */
 const PIPELINE_AGENTS = [
     'full' => [

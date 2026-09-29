@@ -100,3 +100,30 @@ it('starts a run on full after an escalation, on the spec\'s size once a spec ex
         'an escalation before a spec, with the light flag' => [[...$escalated, 'light' => true], DesignSize::Architectural, 'full'],
     ];
 });
+
+it('reads the tier the invocation named from the manifest, and the heavier side from anything else', function (array $manifest, AgentTier $tier) {
+    expect(AgentTier::fromManifest($manifest))->toBe($tier);
+})->with([
+    'no word' => [[], AgentTier::Full],
+    'tier: medium' => [['tier' => 'medium'], AgentTier::Medium],
+    'tier: light' => [['tier' => 'light'], AgentTier::Light],
+    'tier: full, written by hand' => [['tier' => 'full'], AgentTier::Full],
+    'a legacy light: true' => [['light' => true], AgentTier::Medium],
+    'tier beside a legacy light: true' => [['tier' => 'light', 'light' => true], AgentTier::Light],
+    'an unknown tier' => [['tier' => 'heavy'], AgentTier::Full],
+    'a tier naming another table entry' => [['tier' => 'loopedBack'], AgentTier::Full],
+    'a tier that is not a string' => [['tier' => true], AgentTier::Full],
+    'a tier that is a list' => [['tier' => ['light']], AgentTier::Full],
+    'an unknown tier beside a legacy light: true' => [['tier' => 'heavy', 'light' => true], AgentTier::Full],
+]);
+
+it('permits a Bounded design on medium and light, not on full', function () {
+    expect(AgentTier::Full->permitsBounded())->toBeFalse();
+    expect(AgentTier::Medium->permitsBounded())->toBeTrue();
+    expect(AgentTier::Light->permitsBounded())->toBeTrue();
+});
+
+it('keeps a Bounded design on the named tier and moves an Architectural one up to full', function (AgentTier $tier) {
+    expect($tier->forDesign(DesignSize::Bounded))->toBe($tier);
+    expect($tier->forDesign(DesignSize::Architectural))->toBe(AgentTier::Full);
+})->with(AgentTier::cases());
