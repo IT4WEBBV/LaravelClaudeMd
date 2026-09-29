@@ -37,7 +37,7 @@ git + gh. See the references before driving a run — the enforcement lives ther
   run's last action; `PIPELINE_NO_OPEN=1` suppresses that for headless and unattended runs.
   Backend-only runs have no page and are unaffected.
 - **Cost per run** — after every `autoflow` run the invoking session reports two outputs with the
-  result: `checks/run_cost_cli.php` (weighted cost and wall time per step, the run's span, the largest
+  result: `checks/run_cost_cli.php` (cost weighted per model and wall time per step, the run's span, the largest
   step peak) and `checks/run_audit.php` (whether `ui` and each gate's ledger agree with what the steps
   reported, and whether the ledger's loop-backs stay within the bound). A `MISMATCH` is a signal, never
   a halt (`references/engine.md` §`autoflow`).
@@ -64,7 +64,9 @@ The deterministic guardrails are tested PHP in `checks/` (run
   fresh `/pipeline <idea>` never runs unattended by surprise. `auto`, the dispatcher engine, was
   removed (#87): `/pipeline auto` is refused, naming `autoflow`.
 - **`light` permits a small design.** A Bounded design is a ~15-line spec and a ~10-line plan
-  instead of a full design; every leg and both reviews still run. Without `light`, `interactive`
+  instead of a full design; every leg and both reviews still run. In `autoflow` a small change also
+  runs on lighter agents on the design, review-plan, verify-ui and resolve steps
+  (`references/engine.md` §Agents per step). Without `light`, `interactive`
   asks when brainstorming finds the change small, and `autoflow` always writes the full design. A
   Bounded run that turns out bigger grows its design and is re-reviewed (`references/engine.md`
   §Design size).

@@ -83,7 +83,7 @@ php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [-
 # → {"action":"ready","manifest":…,"worktree":…,"branch":…,"notes":[…]} | {"action":"halt","reason":…}
 git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
 PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>] [--decision "<verbatim>"]…
-# → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"noOpen":…,"checks":…,"tables":{…}}
+# → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"noOpen":…,"checks":…,"tables":{…},"profile":…,"agents":{…}}
 #   | {"action":"done"} | {"action":"halt","reason":…}
 # start: the workflow pipeline-autoflow with that JSON as args, in the background; wait for its completion notice
 php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
@@ -108,6 +108,9 @@ launched the run, with its reason.
   `tables` is what the script routes by, `pipeline_routing_tables()`: the legs in order, each leg's
   steps, the loop-back targets, the statuses per `<leg>:<step>` and the bound, built from the
   functions `interactive` routes by, so the script keeps no copy of them.
+  `agents` and `profile` are the step agents' models and efforts and the profile the run starts on
+  (§Agents per step); an invalid `agents` override in the manifest halts `launch` with the other
+  manifest checks, before anything is written.
 - **The script** gives each step a schema whose `status` allows only what that step may return
   (`tables.allowed`, from `LegStatus::allowedFor()`), continues, loops back or returns on that status,
   counts each loop-back against `tables.bound`, 2 per gate (`gates.md` §Loop-backs), and returns `{action: done}` or
@@ -118,8 +121,9 @@ launched the run, with its reason.
   `review-plan`'s bound. A status it cannot route halts, and so do `args` that are not a `launch` `start` answer
   or whose `tables.loopTarget` has no `review-plan`, the gate every `plan-insufficient` is charged to; `tables`
   missing or incomplete halts with a reason that names them. `AutoflowScriptTest` replays the script
-  on `launch`'s answer. A review step runs on Fable, and once more on Opus when it returns nothing;
-  `handoff` runs at low effort; a step that throws or returns nothing halts the run.
+  on `launch`'s answer. Every step runs on the model and effort `agents` gives it (§Agents per step),
+  and `agents` or `profile` missing or incomplete halts before any agent; a review step that returns
+  nothing runs once more on the retry entry; a step that throws or returns nothing halts the run.
 - **A step** first runs `dispatch_cli.php brief <manifest> <leg> <step>`, followed on every step but
   the run's first by what the step before it returned: `--after <leg>:<step> --status <status>`, plus
   `--ui` after `implement` and `--size` after `design` (§The check at the next boundary). It checks that
@@ -173,7 +177,9 @@ php "$CHECKS/run_audit.php" <manifest> "<manifest stem>.diff" <the run's transcr
 ```
 
 The transcript dir is `~/.claude/projects/<project>/<session>/subagents/workflows/wf_<id>/`, named in
-the Workflow result. `run_cost_cli.php` prints per step the weighted cost, the peak context, the wall
+the Workflow result. `run_cost_cli.php` prints per step the weighted cost — each call's token types
+weighed per model (`PIPELINE_MODEL_FACTORS`, relative to Opus), the models named after the step's
+label — the peak context, the wall
 time and the part of it spent waiting on tools, and on its `run:` line the total, the run's span in
 minutes and the largest step peak. `run_audit.php` prints whether `ui` over the final diff agrees with
 a `verify-ui` entry, whether each gate's newest ledger entries agree with what the steps reported, and
@@ -191,6 +197,53 @@ or with `git -C <worktree>`, as the `autoflow` brief says.
 **What a workflow agent cannot do.** It cannot start agents, so no step dispatches one; its brief says
 how each station's dispatch is done by the step itself. And the auto-mode classifier denies it
 `gh pr ready`, so that write stays with the invoking session.
+
+## Agents per step — one table, explicit model and effort
+
+Every `autoflow` step's agent runs on a model and an effort from one table, `PIPELINE_AGENTS` in
+`../checks/agents.php`; no step inherits the session's `~/.claude/settings.json`, which differs per
+machine and changes silently. `launch` hands the table to the script as `agents` in its `start` answer
+(`pipeline_agent_table()`, the manifest's override laid over it) with `profile`, the profile the run
+starts on (`pipeline_start_profile()`); the script names no model or effort, and a missing or
+incomplete `agents` or `profile` halts it before any agent. Models are `agent()`'s aliases, efforts its
+levels. The owner's constraints are tokens (plan limits), quality and speed, not price.
+
+| Step | `full` | `light` | Why |
+|---|---|---|---|
+| `design:spec` | opus high | opus medium | Full: a mistake surfaces only at `review-plan` and costs a loop (design, review, resolve). Light: a ~25-line design, and escalation is the safety net. |
+| `design:plan` | opus high | opus medium | As `design:spec`. The plan step runs only on an Architectural design, so on `full`; the `light` entry keeps every step in both profiles. |
+| `review-plan:review` | fable high | fable medium | Full: independent of the author, Fable's documented starting point; xhigh added nothing measurable in two runs, and `low` answers from memory more. Light: a short spec is flatter work. |
+| `review-plan:resolve` | opus high | opus medium | Full: it decides which findings to reject. Light: few findings on a short plan. |
+| `handoff:run` | sonnet low | sonnet low | Near-mechanical. Haiku 4.5 has no effort setting and writes `implement`'s prompt: rejected. |
+| `implement:run` | opus high | opus high | Light keeps high: TDD and the escalation check after every commit happen here, and its time goes to CI and Pint, not the model. |
+| `verify-ui:run` | sonnet high | sonnet medium | Mostly browser operation; full stays high because it is a gate that can send the run back to `implement`. Light: few states to capture. |
+| `review-pr:review` | fable high | fable high | The last gate before a human merges, on either size. |
+| `review-pr:resolve` | opus high | opus medium | Full: nothing reviews it afterwards unless it loops back. Light: targeted fixes on a small diff. |
+| `implement:run` after a loop-back | opus xhigh | opus xhigh | A `verify-ui` or `review-pr` loop-back is the failure signal to rerun with more effort. |
+| a review that returned nothing, once | opus xhigh | opus xhigh | Rare; it fires on `null`, not on a review with no findings, and compensates for reviewing with the author's model. |
+| a smoke run's stub step | sonnet low | sonnet low | A stub does no real work. |
+
+**Which profile.** `launch` starts the run on `full` once the ledger records an `escalated` entry; else,
+once a spec exists, on `light` when it says Bounded and `full` otherwise; else on `light` when the
+manifest says `light`, the only signal before `design` runs. The script then sets the profile after
+every `continued` design step from the size it returned (`light` for Bounded, unless the run has
+escalated), and to `full` on a Bounded escalation, so the grow-form design and every step after it run
+on `full`: escalation is one way, in the run as on a resume. Every step, `design`
+included, runs on the current profile.
+
+**The loop-back entry.** A step whose leg a gate has looped back to in this run — `loops` counts on from
+the ledger's, so a resume keeps it — takes its `loopedBack` entry when it has one: `implement:run` after
+a `verify-ui` or `review-pr` loop-back. A plan gap loops back to `design`, which has none.
+
+**The override.** A manifest may set `agents: {"<leg>:<step>": {"model": …, "effort": …}}` by hand for a
+one-off experiment; either field may be left out and keeps the table's. It replaces that step's entry
+in both profiles and its loop-back entry; the retry and smoke entries are not overridable. `launch`
+halts on an override that is not an object of `autoflow` steps each naming a known model or effort
+(*the manifest's agents override is invalid: …*), and a leg that writes `agents` halts at the next brief.
+
+**Fable stays the reviewer.** Reviews on Opus would be the largest token lever, but give up an
+independent reviewer. `run_cost_cli.php` weighs each call by its model (§`autoflow`), so a model swap
+shows in the figure; effort shows mostly as turns and wall time.
 
 ## Interactive — the same loop, the human resolves
 
@@ -1105,7 +1158,8 @@ Under `autoflow` these are the only stops. **No finding stops a run.**
     gap)*: the leg, what changed and the entry), repair it from `<manifest stem>.before.json`, the
     snapshot taken at dispatch, before the next `next` or `launch`; otherwise the run resumes with the
     leg's change in place.
-  - **In `autoflow`** a review step that returns nothing runs once more, on Opus; a step that throws,
+  - **In `autoflow`** a review step that returns nothing runs once more, on the retry entry (Opus,
+    §Agents per step); a step that throws,
     any other step that returns nothing, or a station that would need an agent the step cannot start,
     halts at once. The halt reaches the invoking session as the workflow's return, and `finish` writes it to
     the manifest.
@@ -1115,8 +1169,9 @@ Under `autoflow` these are the only stops. **No finding stops a run.**
   ledger entry and the PR carry the review and what was done about it, as for any review. A usage
   limit on the Opus dispatch too is the hard failure: halt, and put the reset time in the failure
   written to the manifest so the human knows when a resume can work. In `autoflow` the review step
-  itself runs on Fable; when it returns nothing — a usage limit in a background session — the script
-  runs it once more on Opus (in an interactive session a usage limit pauses the workflow, which
+  itself runs on Fable (§Agents per step); when it returns nothing — a usage limit in a background
+  session — the script runs it once more on the retry entry, Opus (in an interactive session a usage
+  limit pauses the workflow, which
   continues by itself), and a usage limit on that run too is the same hard failure.
 - **Kickoff halts** (§The work item) — these fire *before* the worktree exists, so they leave
   nothing behind and there is no manifest yet to write to; report and stop.
