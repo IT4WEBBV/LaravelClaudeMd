@@ -38,6 +38,14 @@ function dispatch_cli_files(string $manifestPath): array
     return ['brief' => "{$stem}.brief.md", 'before' => "{$stem}.before.json", 'diff' => "{$stem}.diff"];
 }
 
+/** git in the run's worktree, for the scope of a re-review of the PR (`pipeline_review_scope()`). */
+function dispatch_cli_git(array $manifest): Closure
+{
+    $worktree = rtrim($manifest['worktree'], '/');
+
+    return fn (array $args): array => pipeline_git_run($worktree, $args);
+}
+
 function dispatch_cli_emit(string $manifestPath, array $manifest, string $action = 'dispatch'): array
 {
     $leg = $manifest['cursor']['leg'];
@@ -46,7 +54,7 @@ function dispatch_cli_emit(string $manifestPath, array $manifest, string $action
 
     manifest_write($manifestPath, $manifest);
     manifest_write($files['before'], $manifest);
-    file_put_contents($files['brief'], pipeline_brief($manifest, $leg, $manifestPath, $step));
+    file_put_contents($files['brief'], pipeline_brief($manifest, $leg, $manifestPath, $step, dispatch_cli_git($manifest)));
 
     return [
         'action' => $action,
@@ -274,7 +282,7 @@ function dispatch_cli_brief(string $manifestPath, string $leg, string $step, arr
     manifest_write($manifestPath, $manifest);
     manifest_write(dispatch_cli_files($manifestPath)['before'], $manifest);
 
-    return pipeline_brief($manifest, $leg, $manifestPath, $step);
+    return pipeline_brief($manifest, $leg, $manifestPath, $step, dispatch_cli_git($manifest));
 }
 
 /**

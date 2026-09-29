@@ -80,16 +80,20 @@ function pipeline_leg_overrides(string $mode): array
     ];
 }
 
-/** `$step` is given in `autoflow` (the workflow script names it) and derived from the ledger in `interactive`. */
-function pipeline_brief(array $manifest, string $leg, string $manifestPath, ?string $step = null): string
+/**
+ * `$step` is given in `autoflow` (the workflow script names it) and derived from the ledger in `interactive`.
+ * `$git` runs git in the worktree; only `review-pr`'s review step asks it, for its scope (engine.md §Scoped re-review).
+ */
+function pipeline_brief(array $manifest, string $leg, string $manifestPath, ?string $step = null, ?callable $git = null): string
 {
     $step ??= pipeline_step($manifest, $leg);
+    $scope = $git !== null && "{$leg}:{$step}" === 'review-pr:review' ? pipeline_review_scope($manifest, $git) : null;
 
     return implode("\n\n", [
         pipeline_brief_role($manifest, $leg, $step),
         pipeline_brief_pointers($manifest, $manifestPath, $leg, $step),
         pipeline_brief_state($manifest, $leg),
-        pipeline_brief_overrides($manifest, $leg, $step),
+        pipeline_brief_overrides($manifest, $leg, $step, $scope),
         pipeline_brief_return($leg, $step, (string) $manifest['mode']),
     ]) . "\n";
 }
@@ -171,7 +175,7 @@ function pipeline_brief_state(array $manifest, string $leg): string
     return "## Settled decisions and state\n\n" . implode("\n", $lines);
 }
 
-function pipeline_brief_overrides(array $manifest, string $leg, string $step): string
+function pipeline_brief_overrides(array $manifest, string $leg, string $step, ?array $scope = null): string
 {
     $lines = pipeline_leg_overrides((string) $manifest['mode'])["{$leg}:{$step}"];
     $ledger = pipeline_ledger($manifest);
@@ -184,6 +188,9 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step): s
     }
     if ($leg === 'review-pr' && pipeline_ci_rounds($manifest) > 0) {
         $lines[] = pipeline_ci_round_line($step);
+    }
+    if ($scope !== null) {
+        $lines[] = pipeline_review_scope_line($scope);
     }
     $base = $manifest['base'] ?? null;
     if ($leg === 'handoff' && $base !== null) {
@@ -339,6 +346,20 @@ function pipeline_merge_files(string $merge, callable $git): ?array
     }
 
     return $files;
+}
+
+/** The review-pr review step's target once a review of the PR has completed (`../references/engine.md` §Scoped re-review). */
+function pipeline_review_scope_line(array $scope): string
+{
+    ['since' => $since, 'base' => $base, 'commits' => $commits, 'files' => $files] = $scope;
+    $whole = $files === []
+        ? "no file more: no merge since met this branch's changes"
+        : "read whole at HEAD, the files where a merge since met this branch's changes: " . implode(', ', array_map(fn (string $file) => "`{$file}`", $files));
+    $target = $commits === 0 && $files === []
+        ? "nothing was committed on this branch since `{$since}`: review only what the settled decisions above ask of the PR, and say so"
+        : "the branch's own commits since ({$commits}), as patches, `git log -p --no-merges {$since}..HEAD ^{$base}`, plus `git diff HEAD` (Stage 0 runs over both); and {$whole}; what the settled decisions above ask of the PR stays in your target wherever it lies";
+
+    return "Scoped re-review (engine.md §Scoped re-review): a review of this PR completed at `{$since}`, which HEAD contains, so your target is what changed since, not the whole PR: {$target}. Read beyond the target only where a finding needs it.";
 }
 
 function pipeline_brief_return(string $leg, string $step, string $mode): string

@@ -302,3 +302,51 @@ it('has the review-pr review step record the commit it reviewed, and the review-
     expect(pipeline_brief(brief_manifest('review-plan', ['mode' => $mode]), 'review-plan', '/tmp/m.json', 'review'))
         ->not->toContain('reviewed_sha');
 })->with(['autoflow', 'interactive']);
+
+it('scopes review-pr\'s review step to what changed since the last completed review, naming its commit and not the review', function () {
+    $dir = rereview_repo(['shared.php' => "a\nb\nc\nd\ne\nf\ng\n"]);
+    $reviewed = rereview_commit($dir, ['shared.php' => "A\nb\nc\nd\ne\nf\ng\n"]);
+    rereview_main_moves($dir, ['shared.php' => "a\nb\nc\nd\ne\nf\nG\n"]);
+    rereview_merge($dir);
+    rereview_commit($dir, ['fix.php' => "<?php\n"]);
+    $manifest = brief_manifest('review-pr', ['mode' => 'autoflow', 'worktree' => $dir, 'gate_ledger' => [rereview_entry('continued', $reviewed)]]);
+
+    expect(pipeline_brief($manifest, 'review-pr', '/tmp/m.json', 'review', fn (array $args) => pipeline_git_run($dir, $args)))
+        ->toContain("Scoped re-review (engine.md §Scoped re-review): a review of this PR completed at `{$reviewed}`, which HEAD contains, so your target is what changed since, not the whole PR:")
+        ->toContain("the branch's own commits since (1), as patches, `git log -p --no-merges {$reviewed}..HEAD ^origin/main`, plus `git diff HEAD` (Stage 0 runs over both)")
+        ->toContain("read whole at HEAD, the files where a merge since met this branch's changes: `shared.php`")
+        ->toContain('Read beyond the target only where a finding needs it.')
+        ->not->toContain('gate_ledger[0]')
+        ->not->toContain('EARLIER REVIEW TEXT');
+    expect(pipeline_brief($manifest, 'review-pr', '/tmp/m.json', 'review'))->not->toContain('Scoped re-review');
+});
+
+it('says when no merge met the branch, and when nothing was committed since the review', function () {
+    $sha = str_repeat('a', 40);
+
+    expect(pipeline_review_scope_line(['since' => $sha, 'base' => 'origin/main', 'commits' => 2, 'files' => []]))
+        ->toContain("the branch's own commits since (2)")
+        ->toContain("and no file more: no merge since met this branch's changes")
+        ->toContain('what the settled decisions above ask of the PR stays in your target wherever it lies');
+    expect(pipeline_review_scope_line(['since' => $sha, 'base' => 'origin/main', 'commits' => 0, 'files' => []]))
+        ->toContain("nothing was committed on this branch since `{$sha}`: review only what the settled decisions above ask of the PR, and say so")
+        ->not->toContain('git log');
+});
+
+it('asks git only on review-pr\'s review step, and briefs the whole PR when git cannot scope it', function (string $leg, string $step, int $calls) {
+    $asked = [];
+    $git = function (array $args) use (&$asked) {
+        $asked[] = $args;
+
+        return [1, '', 'not a git repository'];
+    };
+    $manifest = brief_manifest($leg, ['mode' => 'autoflow', 'gate_ledger' => [rereview_entry('continued', str_repeat('a', 40))]]);
+
+    expect(pipeline_brief($manifest, $leg, '/tmp/m.json', $step, $git))->not->toContain('Scoped re-review');
+    expect($asked)->toHaveCount($calls);
+})->with([
+    'review-pr review' => ['review-pr', 'review', 1],
+    'review-pr resolve' => ['review-pr', 'resolve', 0],
+    'review-plan review' => ['review-plan', 'review', 0],
+    'implement' => ['implement', 'run', 0],
+]);
