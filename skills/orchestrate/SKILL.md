@@ -13,7 +13,7 @@ One unattended `/pipeline` run per issue, in dependency order. **Pipeline owns e
 
 ## Where it runs
 
-A `claude --bg` session in the primary checkout; never `EnterWorktree`. Elsewhere you are the **launcher**: run Step 1 read-only and ask its questions, then `spinoff` the orchestrator and stop (commands §Where am I).
+A `claude --bg` session in the primary checkout; never `EnterWorktree`. Elsewhere you are the **launcher**: run Step 1 read-only and ask its questions, then `spinoff` the orchestrator and stop (commands §Where am I). The owner watches the runs on the status line (pipeline `SKILL.md`, *Run status line*); you never read it.
 
 `/orchestrate <issue> …` runs each issue as a `/pipeline autoflow` run. A leading `auto` or `autoflow` from an older command line changes nothing; when it was `auto`, say once in the plan report that `auto` was removed (#87) and the batch runs as `autoflow`. It needs `repo`, `worktree.create`, `worktree.remove`, `branch.issue` in `.claude/work-on.config.md`; name a missing one and stop.
 

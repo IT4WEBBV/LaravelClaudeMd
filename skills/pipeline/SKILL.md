@@ -40,6 +40,9 @@ git + gh. See the references before driving a run — the enforcement lives ther
   result: `checks/run_cost_cli.php` (weighted cost and wall time per step, the run's span, the largest
   step peak) and `checks/run_audit.php` (whether `ui` and each gate's ledger agree with what the steps
   reported). A `MISMATCH` is a signal, never a halt (`references/engine.md` §`autoflow`).
+- **Run status line** — the status line shows each unfinished `autoflow` run of the session's repo,
+  one row each (issue, leg, status, age, PR), read from the manifests by `checks/statusline_cli.php`;
+  no writes, no `gh`. Setup: the repo's README §Status line.
 
 The deterministic guardrails are tested PHP in `checks/` (run
 `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`).

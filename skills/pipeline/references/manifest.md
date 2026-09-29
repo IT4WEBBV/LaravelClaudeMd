@@ -6,7 +6,9 @@ and the PR (state + comments). The manifest only saves the pipeline from re-prob
 durable state on every invocation — delete it and the run reconstructs (see *Reconstruction*).
 
 Read/written by the Phase A helpers in `../checks/manifest.php`:
-`manifest_read`, `manifest_write`, `manifest_validate`, `manifest_infer_cursor`.
+`manifest_read`, `manifest_write`, `manifest_validate`, `manifest_infer_cursor`, and
+`manifest_path` (where a branch's manifest lives) and `manifest_finished`. The status line
+(`../checks/statusline.php`) reads every worktree's manifest and never writes one.
 (`.claude/*` is already gitignored in this repo, so the file is never committed.)
 
 ## Fields
