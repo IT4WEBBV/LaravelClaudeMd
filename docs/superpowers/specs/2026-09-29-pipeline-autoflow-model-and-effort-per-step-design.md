@@ -98,8 +98,8 @@ $size): string` in `agents.php` (pure; `launch` passes `dispatch_cli_design_size
 
 The script keeps it current with two assignments and no other rule:
 
-- after every `continued` design step: `profile = size === 'Bounded' ? 'light' : 'full'` (next to the
-  existing `size = result.size`);
+- after every `continued` design step: `profile = size === 'Bounded' && !exempted ? 'light' : 'full'`
+  (next to the existing `size = result.size`), so once a run has escalated it stays on `full`;
 - on a `plan-insufficient` while the size is Bounded (an escalation): `profile = 'full'`, so the grow-form
   `design:spec` and every step after it take `full`.
 
@@ -170,8 +170,8 @@ after the override check, which runs with the other manifest checks before anyth
   the `start` answer line gains `"profile":…,"agents":{…}`.
 - **manifest.md**: an `agents` row (optional; the override above) and the `light` row says it also picks
   the `light` profile until a spec exists.
-- **SKILL.md**: the `light` bullet says a small change also gets lighter agents on every leg but
-  `implement` and `review-pr:review`, and names §Agents per step.
+- **SKILL.md**: the `light` bullet says a small change also gets lighter agents on the design,
+  review-plan, verify-ui and resolve steps, and names §Agents per step.
 - **`LockStepTest`** gets two cases: the engine.md section contains every row string built from
   `pipeline_agent_table([])` (the nine steps, the loop-back row, the retry row, the smoke row); and the
   script's source contains none of `'opus'`, `'sonnet'`, `'fable'`, `'haiku'`, `'low'`, `'medium'`,
@@ -295,10 +295,11 @@ answer (a cached answer passed by hand) halts before any agent with the agents-t
 13. No probe was needed: `agent()` already takes `model` (`fable`, `opus`, `sonnet`) and `effort`
     (`low` for `handoff`) in today's script, and the Workflow reference lists `effort` as
     `low | medium | high | xhigh | max`.
-14. *What does a run do when a grow-form spec step returns Bounded after an escalation?* Assumed by the
-    plan step: the two assignments stand and the profile follows the returned size (`light`), with no
-    third rule in the script. The grow-form brief asks for an `Architectural` header, `review-plan`
-    re-reviews the grown spec, and a resume takes `full` from the ledger's `escalated` entry.
+14. *What does a run do when a grow-form spec step returns Bounded after an escalation?* It stays on
+    `full`: the design assignment reads `exempted` (the script's existing once-per-run escalation flag),
+    so escalation is one way in the run exactly as it is on a resume, which takes `full` from the
+    ledger's `escalated` entry. One condition in the existing line, not a third rule. (Changed after
+    `review-plan` cycle 1; the plan step had first let the profile follow the returned size.)
 15. *What does a step line name for a call whose model is `<synthetic>`, empty, or a family the factor
     table lacks?* Assumed by the plan step: a model that does not start with `claude-` names nothing (so
     `<synthetic>` and a missing model add no family to the parenthetical); `claude-<word>-…` names

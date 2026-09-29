@@ -576,6 +576,10 @@ it('moves a light run to full when its design turns out Architectural, and on a 
         'design:spec' => [[...AUTOFLOW_C, 'size' => 'Architectural']],
         'design:plan' => [[...AUTOFLOW_C, 'size' => 'Architectural']],
     ], ['review-plan:review', 'design:spec', 'design:plan', 'review-plan:review'], ['fable medium', 'opus high', 'opus high', 'fable high']],
+    'a Bounded escalation whose grown spec still says Bounded' => ['review-plan', "# x — design\n\n**Design size:** Bounded\n", [
+        'review-plan:review' => [AUTOFLOW_PI, AUTOFLOW_STOP],
+        'design:spec' => [[...AUTOFLOW_C, 'size' => 'Bounded']],
+    ], ['review-plan:review', 'design:spec', 'review-plan:review'], ['fable medium', 'opus high', 'fable high']],
 ]);
 
 it('starts implement on its loop-back entry when the ledger already counts a verify-ui or review-pr loop-back, and not after a plan gap', function (array $entry, string $setting) {
@@ -737,7 +741,7 @@ In the step loop, replace `if (leg === 'design') size = result.size` with:
 ```js
     if (leg === 'design') {
       size = result.size
-      profile = size === 'Bounded' ? 'light' : 'full'
+      profile = size === 'Bounded' && !exempted ? 'light' : 'full' // escalation is one way, in the run as on a resume
     }
 ```
 
@@ -833,16 +837,17 @@ it('names the families a step\'s calls ran on, in first-seen order, and none for
             cost_call('m1', 10000, 20000, 100000, 1000, null, '10:00:00.000', 'claude-opus-5-5'),
             cost_call('m2', 0, 0, 0, 0, null, '10:01:00.000', '<synthetic>'),
             cost_call('m3', 10000, 20000, 100000, 1000, null, '10:02:00.000', 'claude-fable-5-1'),
-            cost_call('m4', 10000, 20000, 100000, 1000, null, '10:03:00.000', 'claude-opus-5-5'),
+            cost_call('m4', 10000, 20000, 100000, 1800, null, '10:03:00.000', 'claude-opus-5-5'),
         ]), ['status' => 'continued']],
         'a2' => ['handoff:run', cost_call('m5', 10000, 20000, 100000, 1000, null, '10:04:00.000'), ['status' => 'continued']],
     ]);
 
-    // a1: 50000 (Opus) + 0 + 112500 (Fable) + 50000 = 212500; a2 (no model, as Opus): 50000
+    // a1: 50000 (Opus) + 0 + 112500 (Fable) + 54000 = 216500; a2 (no model, as Opus): 50000; run 266500
+    // (neither total sits on a .xx5 boundary, so %.2f rounding does not depend on float storage)
     expect(checks_cli('run_cost_cli.php', [$dir])['stdout'])->toBe(implode("\n", [
-        'review-plan:review (opus+fable): 0.21M over 4 calls, peak 130k, 3.0 min (0.0 waiting on tools)',
+        'review-plan:review (opus+fable): 0.22M over 4 calls, peak 130k, 3.0 min (0.0 waiting on tools)',
         'handoff:run: 0.05M over 1 calls, peak 130k, 0.0 min (0.0 waiting on tools)',
-        'run: 0.26M weighted over 2 steps in 4.0 min; largest step peak 130k (review-plan:review)',
+        'run: 0.27M weighted over 2 steps in 4.0 min; largest step peak 130k (review-plan:review)',
     ]));
 });
 ```
@@ -862,6 +867,8 @@ In `skills/pipeline/checks/run_cost.php`, extend the file docblock's first sente
  * table (cached 2026-09-25): Opus $4 / $20, read $0.20; Fable 5.1 $10 / $50, read $0.25; Sonnet 5.5
  * $2 / $10, read $0.20; Haiku 4.5 $1 / $5, read $0.10. Cache writes are 1.25× / 2× input on every
  * model, so their factor is the input factor. Opus is 1.0, so every figure measured so far keeps its number.
+ * These factors multiply PIPELINE_COST_WEIGHTS, which stay a proxy (cache read 0.1× input where Opus 5.5's
+ * real ratio is 0.05×): change the two together, or runs stop being comparable with each other.
  */
 const PIPELINE_MODEL_FACTORS = [
     'opus' => ['input' => 1.0, 'write5m' => 1.0, 'write1h' => 1.0, 'read' => 1.0, 'output' => 1.0],
@@ -1019,8 +1026,9 @@ levels. The owner's constraints are tokens (plan limits), quality and speed, not
 **Which profile.** `launch` starts the run on `full` once the ledger records an `escalated` entry; else,
 once a spec exists, on `light` when it says Bounded and `full` otherwise; else on `light` when the
 manifest says `light`, the only signal before `design` runs. The script then sets the profile after
-every `continued` design step from the size it returned (`light` for Bounded), and to `full` on a
-Bounded escalation, so the grow-form design and every step after it run on `full`. Every step, `design`
+every `continued` design step from the size it returned (`light` for Bounded, unless the run has
+escalated), and to `full` on a Bounded escalation, so the grow-form design and every step after it run
+on `full`: escalation is one way, in the run as on a resume. Every step, `design`
 included, runs on the current profile.
 
 **The loop-back entry.** A step whose leg a gate has looped back to in this run — `loops` counts on from
@@ -1131,8 +1139,8 @@ with:
 **SKILL.md.** In the **Cost per run** bullet, replace `(weighted cost and wall time per step,` with `(cost weighted per model and wall time per step,`. In the **`light` permits a small design.** bullet, after *every leg and both reviews still run.*, add:
 
 ```markdown
-  In `autoflow` a small change also runs on lighter agents on every leg but `implement` and
-  `review-pr`'s review (`references/engine.md` §Agents per step).
+  In `autoflow` a small change also runs on lighter agents on the design, review-plan, verify-ui
+  and resolve steps (`references/engine.md` §Agents per step).
 ```
 
 - [ ] **Step 4: Run the whole suite**
