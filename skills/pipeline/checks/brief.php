@@ -180,7 +180,7 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step): s
         $lines[] = 'Grow form: the design escalated from Bounded (engine.md §Design size). Grow the spec and the plan; do not re-design them.';
     }
     if ($leg === 'design' && pipeline_is_plan_gap(end($ledger) ?: [])) {
-        $lines[] = 'Plan gap: extend the plan (and the spec where it must say more) to cover the entry\'s `reason`; describe what is already built as state, do not re-design it (engine.md §Design size).';
+        $lines[] = 'Plan gap: extend the plan (and the spec where it must say more) to cover the entry\'s `reason`; describe what is already built as state, do not re-design it (engine.md §Design size). Leave that entry as it is, with no `actions`: what you did goes in the spec, the plan and the reason you return.';
     }
     if ($leg === 'review-pr' && pipeline_ci_rounds($manifest) > 0) {
         $lines[] = pipeline_ci_round_line($step);
@@ -218,8 +218,8 @@ function pipeline_plan_gap_lines(string $step): array
     }
 
     return [
-        'While the spec\'s header says `**Design size:** Bounded`, run the escalation check first (engine.md §Design size); on escalation append the `design-size` entry and return `plan-insufficient`.',
-        'On an Architectural spec, append a `plan-approval` entry with `leg`, `cycle`, `at`, `reason` and outcome `looped-back` before returning `plan-insufficient`.',
+        'On a Bounded spec (its header says `**Design size:** Bounded`): run the escalation check first (engine.md §Design size), and only on escalation append the `design-size` entry and return `plan-insufficient`.',
+        'On an Architectural spec: only when the plan falls short of what this step needs (files or behaviour it does not name), append a `plan-approval` entry with `leg`, `cycle`, `at`, a `reason` naming what the plan lacks, and outcome `looped-back`, then return `plan-insufficient`. The size alone is no gap: an Architectural plan needs no approval beyond `review-plan`\'s.',
         ...($step === 'review' ? ['When you return `plan-insufficient`, append no review entry.'] : []),
     ];
 }

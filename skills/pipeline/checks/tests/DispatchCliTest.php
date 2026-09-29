@@ -365,8 +365,24 @@ it('halts the next brief when a step changed what only the engine writes', funct
     expect(manifest_read($fixture['manifest'])['cursor'])->toMatchArray(['leg' => 'handoff', 'status' => 'halted']);
 })->with([
     'a moved cursor' => [fn (array $m) => [...$m, 'cursor' => ['leg' => 'implement', 'status' => 'continued']], 'the leg changed cursor.leg, which only the dispatcher writes'],
-    'a rewritten ledger entry' => [fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued'], 'gate_ledger' => [[...$m['gate_ledger'][0], 'outcome' => 'looped-back']]], 'the leg rewrote ledger entry 0'],
+    'a rewritten ledger entry' => [fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued'], 'gate_ledger' => [[...$m['gate_ledger'][0], 'outcome' => 'looped-back']]], 'handoff changed outcome on ledger entry 0 (plan-approval)'],
 ]);
+
+it('halts the next brief naming the leg, the key and the entry when design writes onto the plan gap it answers (#104)', function () {
+    $approved = [...boundary_open(), 'actions' => [], 'outcome' => 'continued'];
+    $gap = ['gate' => 'plan-approval', 'leg' => 'implement', 'cycle' => 2, 'at' => '2026-09-25T11:00:00Z', 'reason' => 'needs a queue', 'outcome' => 'looped-back'];
+    $fixture = boundary_fixture('design', 'run', ['gate_ledger' => [$approved, $gap]]);
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [
+        ...$m,
+        'cursor' => [...$m['cursor'], 'status' => 'continued'],
+        'gate_ledger' => [$approved, [...$gap, 'actions' => [['claim' => 'needs a queue', 'disposition' => 'integrated', 'note' => 'plan task 4']]]],
+    ]);
+
+    $reason = 'design added actions to ledger entry 1 (plan gap)';
+    expect(boundary_brief($fixture, 'review-plan', 'review', 'design:run', ['--status', 'continued', '--size', 'Architectural'])['json'])
+        ->toBe(['action' => 'halt', 'reason' => $reason]);
+    expect(manifest_read($fixture['manifest'])['cursor'])->toMatchArray(['leg' => 'design', 'status' => 'halted', 'reason' => $reason]);
+});
 
 it('briefs the next step after a clean return, and takes its snapshot', function () {
     $fixture = boundary_fixture('handoff', 'run');

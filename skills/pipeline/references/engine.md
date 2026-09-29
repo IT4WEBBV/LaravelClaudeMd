@@ -575,13 +575,18 @@ A step on an Architectural spec that needs files or behaviour the plan does not 
 of the plan approval**: the plan passed `review-plan` and turned out not to cover the change.
 
 1. The step appends `{gate: 'plan-approval', leg: <its leg>, cycle, at, reason, outcome: 'looped-back'}`
-   and returns `plan-insufficient`. A return without that entry halts.
+   and returns `plan-insufficient`. A return without that entry halts. The `reason` names what the plan
+   lacks. The size alone is never a gap: an Architectural plan needs no approval beyond `review-plan`'s
+   (#96: a `handoff` that read the brief's plan-gap line as a rule for every Architectural spec looped a
+   covered plan back for "the owner's plan approval").
 2. The run goes back to `design` through the same bound as a `review-plan` loop-back
    (`pipeline_loop_back()` in `interactive`, `tables.bound` in `autoflow`): the entry
    counts toward the 2 cycles, and the third halts — before
    `handoff` with no push, after it with the PR left draft (§Failure policy).
 3. `design` extends the plan, and the spec where it must say more, to cover the entry's `reason`;
-   what is already built is described as state, not re-designed. Then `review-plan`, `handoff pr`
+   what is already built is described as state, not re-designed. It leaves the entry unchanged, with
+   no `actions`: what it did goes in the spec, the plan and the reason it returns (#104: a design that
+   recorded its answer on the entry halted the run at the next brief). Then `review-plan`, `handoff pr`
    (updating the existing PR) and `implement` run again, as after an escalation.
 
 The entry resets `pipeline_done_legs()` like an escalation does, so the earlier plan approval cannot
@@ -1048,8 +1053,10 @@ Under `autoflow` these are the only stops. **No finding stops a run.**
   (`cursor.status: halted`, `cursor.reason`); a human resumes. **No silent retry** beyond that one — a retry hides
   the failure and the machinery may be in an unknown state.
   - **A halted manifest is the one the check rejected.** When the reason names a key the leg was not
-    allowed to change, repair it from `<manifest stem>.before.json`, the snapshot taken at dispatch,
-    before the next `next` or `launch`; otherwise the run resumes with the leg's change in place.
+    allowed to change, or a ledger entry it rewrote (*design added actions to ledger entry 1 (plan
+    gap)*: the leg, what changed and the entry), repair it from `<manifest stem>.before.json`, the
+    snapshot taken at dispatch, before the next `next` or `launch`; otherwise the run resumes with the
+    leg's change in place.
   - **In `autoflow`** a review step that returns nothing runs once more, on Opus; a step that throws,
     any other step that returns nothing, or a station that would need an agent the step cannot start,
     halts at once. The halt reaches the invoking session as the workflow's return, and `finish` writes it to
