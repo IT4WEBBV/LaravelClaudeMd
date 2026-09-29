@@ -101,7 +101,7 @@ function pipeline_ci_answer(array $manifest, ?array $view, string $head, bool $w
     };
 }
 
-/** GitHub's head is not the worktree's: a push still showing is waited for, one that did not land halts. */
+/** GitHub's head is not the worktree's: waited for while a push may still be showing, a halt naming both shas once it persists. */
 function pipeline_ci_mismatch(array $manifest, string $sha, string $head, int $poll): array
 {
     $read = ['verdict' => 'mismatch', 'sha' => $sha, 'head' => $head];
