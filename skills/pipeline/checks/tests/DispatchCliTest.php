@@ -918,8 +918,85 @@ it('refuses a kickoff it cannot parse', function (array $arguments) {
     'interactive' => [['69', '--mode', 'interactive']],
     'an unknown flag' => [['69', '--sideways']],
     'a flag without its value' => [['69', '--decision']],
+    'a base without its value' => [['69', '--base']],
     'two items' => [['69', '70']],
 ]);
+
+/**
+ * An integration branch on origin, one commit ahead of main, that the primary has no ref for (so only
+ * kickoff's fetch can bring it back), and a `create-wt` on PATH that honours `--base`. @return string its sha
+ */
+function kickoff_integration_branch(array $fixture, string $base = 'feature/integration'): string
+{
+    $git = fn (array $args) => pipeline_git($fixture['primary'], ['-c', 'user.email=t@example.com', '-c', 'user.name=T', '-c', 'commit.gpgsign=false', ...$args]);
+    $git(['switch', '-q', '-c', $base]);
+    $git(['commit', '-q', '--allow-empty', '-m', 'integration work']);
+    $sha = $git(['rev-parse', 'HEAD']);
+    $git(['push', '-q', 'origin', $base]);
+    $git(['switch', '-q', 'main']);
+    $git(['branch', '-q', '-D', $base]);
+    $git(['update-ref', '-d', "refs/remotes/origin/{$base}"]);
+    file_put_contents($fixture['dir'] . '/bin/create-wt', <<<'SH'
+#!/bin/sh
+branch=$1; shift; base=origin/main
+while [ $# -gt 0 ]; do case $1 in --base) base=$2; shift 2 ;; *) shift ;; esac; done
+git worktree add -q ".claude/worktrees/$branch" -b "$branch" "$base"
+SH);
+    chmod($fixture['dir'] . '/bin/create-wt', 0755);
+
+    return $sha;
+}
+
+it('halts before anything is created on a base that is unsafe, not a branch on origin, or the default branch', function (string $base, string $reason) {
+    $fixture = kickoff_fixture('touch created; create-wt <branch>');
+    kickoff_integration_branch($fixture);
+
+    $halt = kickoff($fixture, ['69', '--base', $base])['json'];
+
+    expect($halt['action'])->toBe('halt');
+    expect($halt['reason'])->toContain($reason);
+    expect(is_file($fixture['primary'] . '/created'))->toBeFalse();
+    kickoff_left_nothing($fixture);
+})->with([
+    'missing on origin' => ['feature/nope', 'the base feature/nope is not a branch on origin'],
+    'unsafe for sh' => ['main; rm -rf /', "the base 'main; rm -rf /' holds characters kickoff will not pass to a shell"],
+    'the default branch' => ['main', "the base main is origin's default branch: leave --base out"],
+]);
+
+it('kicks off on a per-run base: cut from it, gh-merge-base set, recorded in the manifest', function () {
+    $fixture = kickoff_fixture('create-wt <branch> --no-start');
+    $sha = kickoff_integration_branch($fixture);
+    $branch = 'feature/issue-69-pipeline-kickoff-as-one-command';
+
+    $ready = kickoff($fixture, ['69', '--base', 'feature/integration'])['json'];
+
+    expect($ready)->toMatchArray(['action' => 'ready', 'branch' => $branch]);
+    expect(pipeline_git($ready['worktree'], ['rev-parse', 'HEAD']))->toBe($sha);
+    expect(pipeline_git($ready['worktree'], ['config', "branch.{$branch}.gh-merge-base"]))->toBe('feature/integration');
+    expect(manifest_read($ready['manifest']))->toMatchArray(['base' => 'feature/integration', 'artifacts' => ['issue' => 69]]);
+});
+
+it('sets no gh-merge-base without a base', function () {
+    $fixture = kickoff_fixture();
+
+    $ready = kickoff($fixture, ['69'])['json'];
+
+    expect(pipeline_git_run($ready['worktree'], ['config', "branch.{$ready['branch']}.gh-merge-base"])[0])->not->toBe(0);
+});
+
+it('halts when the declared create does not honour the base, naming the worktree it left', function () {
+    $fixture = kickoff_fixture("sh -c 'git worktree add -q .claude/worktrees/\$0 -b \$0 origin/main' <branch>");
+    $sha = kickoff_integration_branch($fixture);
+    $main = pipeline_git($fixture['primary'], ['rev-parse', 'origin/main']);
+
+    $halt = kickoff($fixture, ['69', '--base', 'feature/integration'])['json'];
+
+    expect($halt['action'])->toBe('halt');
+    expect($halt['reason'])
+        ->toContain('kickoff created')
+        ->toContain("the worktree's HEAD ({$main}) is not origin/feature/integration ({$sha}): the declared worktree.create did not honour --base")
+        ->toContain('remove the worktree and its branch before kicking off again');
+});
 
 function kickoff_board(): string
 {
