@@ -28,10 +28,17 @@ const PIPELINE_GATE_OF = ['review-plan' => 'plan-approval', 'review-pr' => 'pr-r
 
 const PIPELINE_LOOP_BOUND = 2;
 
-/** @return list<string> */
-function pipeline_steps(string $leg): array
+/** The legs whose steps differ on a Bounded design: its spec step commits the plan too (`../references/engine.md` §Design size). */
+const PIPELINE_BOUNDED_STEPS = ['design' => ['spec']];
+
+/** @return list<string> `autoflow` designs in a spec step and a plan step; `interactive` designs inline, in one */
+function pipeline_steps(string $leg, string $mode): array
 {
-    return in_array($leg, ['review-plan', 'review-pr'], true) ? ['review', 'resolve'] : ['run'];
+    return match (true) {
+        in_array($leg, ['review-plan', 'review-pr'], true) => ['review', 'resolve'],
+        $leg === 'design' && $mode === 'autoflow' => ['spec', 'plan'],
+        default => ['run'],
+    };
 }
 
 function pipeline_gate_of(string $leg): ?string
@@ -54,14 +61,14 @@ function pipeline_loop_target(string $leg): ?string
 /**
  * What the `autoflow` script routes by, as `launch` hands it over (`tables` in its `start` answer), so the
  * script keeps no copy: the legs in order, each leg's steps, the loop-back targets, the statuses each
- * `<leg>:<step>` may return, and the bound.
+ * `<leg>:<step>` may return, the bound, and the steps a Bounded design runs instead.
  *
- * @return array{legs: list<string>, steps: array<string, list<string>>, loopTarget: array<string, string>, allowed: array<string, list<string>>, bound: int}
+ * @return array{legs: list<string>, steps: array<string, list<string>>, loopTarget: array<string, string>, allowed: array<string, list<string>>, bound: int, bounded: array<string, list<string>>}
  */
 function pipeline_routing_tables(): array
 {
     $legs = pipeline_legs();
-    $steps = array_combine($legs, array_map(pipeline_steps(...), $legs));
+    $steps = array_combine($legs, array_map(fn (string $leg) => pipeline_steps($leg, 'autoflow'), $legs));
     $allowed = [];
     foreach ($steps as $leg => $legSteps) {
         foreach ($legSteps as $step) {
@@ -75,6 +82,7 @@ function pipeline_routing_tables(): array
         'loopTarget' => array_filter(array_combine($legs, array_map(pipeline_loop_target(...), $legs))),
         'allowed' => $allowed,
         'bound' => PIPELINE_LOOP_BOUND,
+        'bounded' => PIPELINE_BOUNDED_STEPS,
     ];
 }
 
@@ -95,14 +103,28 @@ function pipeline_open_entry(array $ledger, ?string $gate): ?int
     return null;
 }
 
-/** `review` or `resolve` on the two review legs, derived from the ledger; `run` everywhere else. */
+/** `review` or `resolve` on the two review legs, derived from the ledger; `spec` or `plan` on `autoflow`'s design; `run` everywhere else. */
 function pipeline_step(array $manifest, string $leg): string
 {
-    if (pipeline_steps($leg) === ['run']) {
-        return 'run';
-    }
+    return match (pipeline_steps($leg, (string) ($manifest['mode'] ?? ''))) {
+        ['run'] => 'run',
+        ['spec', 'plan'] => pipeline_design_step($manifest),
+        default => pipeline_open_entry(pipeline_ledger($manifest), pipeline_gate_of($leg)) === null ? 'review' : 'resolve',
+    };
+}
 
-    return pipeline_open_entry(pipeline_ledger($manifest), pipeline_gate_of($leg)) === null ? 'review' : 'resolve';
+/**
+ * `autoflow`'s next design step, read from the manifest before the step runs: `plan` once the spec step has
+ * set `artifacts.spec` and removed `artifacts.plan`, or when the newest ledger entry is a plan return
+ * (`pipeline_is_plan_return()`); `spec` otherwise — no spec yet, a `review-plan` loop-back, an escalation.
+ */
+function pipeline_design_step(array $manifest): string
+{
+    $artifacts = $manifest['artifacts'] ?? [];
+    $ledger = pipeline_ledger($manifest);
+    $planned = ! empty($artifacts['plan']) && ! pipeline_is_plan_return(end($ledger) ?: []);
+
+    return empty($artifacts['spec']) || $planned ? 'spec' : 'plan';
 }
 
 /** Anything that is not `autoflow` behaves as interactive (`gates.md` §Modes): the human designs and resolves. */
@@ -400,10 +422,10 @@ function pipeline_loop_counts(array $ledger): array
     return $counts;
 }
 
-/** Why the ledger does not support running this step now (`brief`'s check), or null. */
+/** Why the ledger or the design's artifacts do not support running this step now (`brief`'s check), or null. */
 function pipeline_step_problem(array $manifest, string $leg, string $step): ?string
 {
-    if (! in_array($leg, pipeline_legs(), true) || ! in_array($step, pipeline_steps($leg), true)) {
+    if (! in_array($leg, pipeline_legs(), true) || ! in_array($step, pipeline_steps($leg, (string) ($manifest['mode'] ?? '')), true)) {
         return "{$leg} has no {$step} step";
     }
     $gate = pipeline_gate_of($leg);
@@ -412,6 +434,7 @@ function pipeline_step_problem(array $manifest, string $leg, string $step): ?str
     return match (true) {
         $step === 'resolve' && $open === null => "no open {$gate} review to resolve",
         $step === 'review' && $open !== null => "gate_ledger[{$open}] is an open {$gate} review; resolve it first",
+        $leg === 'design' && $step !== pipeline_step($manifest, $leg) => 'the manifest calls for the design ' . pipeline_step($manifest, $leg) . " step, not {$step}: the plan step follows a spec step that set artifacts.spec and removed artifacts.plan, or a plan-insufficient on an Architectural design",
         default => null,
     };
 }

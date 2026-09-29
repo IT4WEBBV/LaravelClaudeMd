@@ -44,8 +44,9 @@
 #
 # The config repos get one more: a skill that has no symlink in ~/.claude/skills
 # yet is linked, and so is a skill's workflow script (skills/<skill>/workflow/*.js)
-# that has none in ~/.claude/workflows, so both reach every machine with its next
-# session instead of waiting for a manual relink. An existing entry is never replaced.
+# that has none in ~/.claude/workflows, and the status line script when
+# ~/.claude/statusline-command.sh does not exist, so each reaches every machine with
+# its next session instead of waiting for a manual relink. An existing entry is never replaced.
 #
 # Beyond that it touches nothing: your branch, your index and your working tree
 # are left alone, merges are predicted in a throwaway index, and deciding whether
@@ -66,6 +67,7 @@ max_listed_files=6      # the conflict list is a prompt, not an inventory
 config_repos="${GIT_FRESHNESS_CONFIG_REPOS-$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd:$HOME/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config}"
 skills_dir="${GIT_FRESHNESS_SKILLS_DIR-$HOME/.claude/skills}"
 workflows_dir="${GIT_FRESHNESS_WORKFLOWS_DIR-$HOME/.claude/workflows}"
+statusline="${GIT_FRESHNESS_STATUSLINE-$HOME/.claude/statusline-command.sh}"
 config_fetch_seconds=5  # tighter than max_fetch_seconds: the session repo still has to fit in the hook timeout
 
 config_notes=""
@@ -453,6 +455,18 @@ link_new_workflows() {
     done
 }
 
+# Link the status line script a config repo ships (statusline/statusline-command.sh) when the
+# machine has nothing at the status line path yet. An existing file or link is never replaced:
+# swapping a machine-local copy for the link is the README's one-time setup step.
+link_statusline() {
+    local script="$1/statusline/statusline-command.sh"
+
+    [ -f "$script" ] || return 0
+    { [ -e "$statusline" ] || [ -L "$statusline" ]; } && return 0
+    ln -s "$script" "$statusline" 2>/dev/null \
+        && config_tags="${config_tags}${config_tags:+, }linked the status line"
+}
+
 # The config repos are where a stale checkout is invisible by design: their
 # skills are symlinked into the skills dir, so a checkout left behind quietly
 # runs old skills on this machine. Fetch them in parallel, fast-forward their
@@ -493,6 +507,7 @@ sync_config_repos() {
 
         link_new_skills "$repo"
         link_new_workflows "$repo"
+        link_statusline "$repo"
     done <<< "$(config_repo_list)"
 }
 

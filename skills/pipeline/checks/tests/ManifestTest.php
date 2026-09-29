@@ -31,3 +31,14 @@ it('reads a manifest without a ledger as an empty one', function () {
     expect(pipeline_ledger(['cursor' => []]))->toBe([]);
     expect(pipeline_ledger(['gate_ledger' => [$entry]]))->toBe([$entry]);
 });
+
+it('puts a branch\'s manifest where kickoff writes it', function () {
+    expect(manifest_path('/w/', 'feature/issue-7-x'))->toBe('/w/.claude/pipeline/feature-issue-7-x.json');
+    expect(manifest_path('/w', 'main'))->toBe('/w/.claude/pipeline/main.json');
+});
+
+it('calls a run finished on status done, or on the old engine\'s leg done', function () {
+    expect(manifest_finished(['cursor' => ['leg' => 'review-pr', 'status' => 'done']]))->toBeTrue();
+    expect(manifest_finished(['cursor' => ['leg' => 'done', 'status' => 'continued']]))->toBeTrue();
+    expect(manifest_finished(['cursor' => ['leg' => 'implement', 'status' => 'pending']]))->toBeFalse();
+});

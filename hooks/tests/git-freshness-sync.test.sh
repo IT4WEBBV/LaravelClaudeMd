@@ -51,6 +51,7 @@ git config --global user.email test@example.com
 export GIT_FRESHNESS_CONFIG_REPOS=""
 export GIT_FRESHNESS_SKILLS_DIR="$root/no-skills-dir"
 export GIT_FRESHNESS_WORKFLOWS_DIR="$root/no-workflows-dir"
+export GIT_FRESHNESS_STATUSLINE="$root/no-statusline/statusline-command.sh"
 # Same for the retired-vault reminder: no case may read the real home.
 export GIT_FRESHNESS_VAULT_HOME="$root/no-home"
 
@@ -400,6 +401,23 @@ ln -s "$root/config5/realflows" "$root/config5/flows-link"
 printf '%s' "{\"session_id\":\"test-config5b\",\"cwd\":\"$root/config5\"}" \
     | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config5/none" GIT_FRESHNESS_WORKFLOWS_DIR="$root/config5/flows-link" bash "$hook" session >/dev/null 2>&1
 if [ -e "$root/config5/realflows/flow-auto.js" ]; then fail "nothing written through a symlinked workflows dir"; else ok "nothing written through a symlinked workflows dir"; fi
+echo
+
+echo "case 18: session start links the status line when there is none, and leaves a local one alone"
+cfg=$(fixture config6 1 statusline/statusline-command.sh)
+mkdir -p "$root/config6/fresh" "$root/config6/local"
+fresh="$root/config6/fresh/statusline-command.sh"
+out=$(printf '%s' "{\"session_id\":\"test-config6a\",\"cwd\":\"$root/config6\"}" \
+    | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config6/none" GIT_FRESHNESS_STATUSLINE="$fresh" bash "$hook" session 2>/dev/null)
+is "$(readlink "$fresh")" "$cfg/statusline/statusline-command.sh" "the status line is linked"
+contains "$out" "linked the status line" "the new link is reported"
+mine="$root/config6/local/statusline-command.sh"
+printf 'mine\n' > "$mine"
+out=$(printf '%s' "{\"session_id\":\"test-config6b\",\"cwd\":\"$root/config6\"}" \
+    | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config6/none" GIT_FRESHNESS_STATUSLINE="$mine" bash "$hook" session 2>/dev/null)
+if [ -L "$mine" ]; then fail "a machine-local file is not replaced"; else ok "a machine-local file is not replaced"; fi
+is "$(cat "$mine")" "mine" "its content is untouched"
+lacks "$out" "linked the status line" "nothing is reported"
 echo
 
 echo "----------------------------------------"

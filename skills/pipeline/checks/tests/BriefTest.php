@@ -32,7 +32,7 @@ it('completes the open entry before the finish step\'s last action', function ()
 it('has overrides for every leg and step, in autoflow and interactive', function () {
     foreach (['autoflow', 'interactive'] as $mode) {
         foreach (pipeline_legs() as $leg) {
-            foreach (in_array($leg, ['review-plan', 'review-pr'], true) ? ['review', 'resolve'] : ['run'] as $step) {
+            foreach (pipeline_steps($leg, $mode) as $step) {
                 expect(pipeline_leg_overrides($mode))->toHaveKey("{$leg}:{$step}");
             }
         }
@@ -68,8 +68,8 @@ it('permits the design size the invocation allowed', function () {
 });
 
 it('tells design to confirm by reading, probe only to choose, and leave the Expected lines to implement', function () {
-    foreach (['autoflow', 'interactive'] as $mode) {
-        expect(pipeline_brief(brief_manifest('design', ['mode' => $mode]), 'design', '/tmp/m.json'))
+    foreach ([['autoflow', 'spec'], ['interactive', 'run']] as [$mode, $step]) {
+        expect(pipeline_brief(brief_manifest('design', ['mode' => $mode]), 'design', '/tmp/m.json', $step))
             ->toContain('Do not build or run the plan\'s code, in a scratch copy or anywhere else: confirm the signatures and APIs it relies on by reading, `php -l` or grep; `implement` proves the plan\'s Expected lines (engine.md §What design proves).')
             ->toContain('The one exception: when the choice between approaches hinges on whether one of them works at all, answer that question with a throwaway probe (a few lines run on their own, never the plan\'s code, never the suite) and write the question and what the probe showed into the spec.')
             ->toContain('Plans and specs committed before 2026-09-14 are not exemplars for test or proof policy, and no plan\'s `Verified before writing` header is part of the format.')
@@ -77,12 +77,60 @@ it('tells design to confirm by reading, probe only to choose, and leave the Expe
     }
 });
 
-it('asks for grow form only after an escalation no plan approval has answered', function () {
+it('splits autoflow\'s design into a spec step that stops at the spec and a plan step that reads it cold', function () {
+    $manifest = brief_manifest('design', ['mode' => 'autoflow']);
+    $spec = pipeline_brief($manifest, 'design', '/tmp/m.json', 'spec');
+    $plan = pipeline_brief($manifest, 'design', '/tmp/m.json', 'plan');
+
+    expect($spec)
+        ->toContain('`design` leg, `spec` step')
+        ->toContain('- Invoke `superpowers:brainstorming` and stop at the spec: on the Architectural path, where brainstorming hands over to `superpowers:writing-plans`, the plan is the next step\'s, `design:plan`, so do not invoke `writing-plans` and commit no plan (engine.md §Design size).')
+        ->toContain('write each question and the answer you assumed into the spec\'s `## Assumptions` section')
+        ->toContain('- Commit the spec; on the Bounded path, commit the plan as well, a second commit, at `docs/superpowers/plans/<date>-<slug>.md` beside the spec `docs/superpowers/specs/<date>-<slug>-design.md` (`pipeline_plan_path()`): a Bounded design has no plan step, and a grown design\'s plan step extends the plan it finds there. Then, after your last commit and in one manifest write, set `artifacts.spec` and remove `artifacts.plan` (the plan step writes this spec\'s plan and sets it), or on the Bounded path set `artifacts.plan` to the plan: a halt before that write leaves the manifest calling for this step again.')
+        ->not->toContain('Commit the spec, then the plan: two commits.')
+        ->not->toContain('The plan goes at');
+    expect($plan)
+        ->toContain('`design` leg, `plan` step')
+        ->toContain('- Read the committed spec (`artifacts.spec`) cold, and the code it points at, and invoke `superpowers:writing-plans` on it; do not re-design what the spec settles (engine.md §Design size).')
+        ->toContain('- Where the plan needs an answer the spec does not give, add the question and the answer you assumed to the spec\'s `## Assumptions` and commit that before the plan, so `/critique plan` audits it.')
+        ->toContain('Do not build or run the plan\'s code')
+        ->toContain('Plans and specs committed before 2026-09-14 are not exemplars')
+        ->toContain('- Commit the plan. Set `artifacts.plan`.')
+        ->not->toContain('throwaway probe')
+        ->not->toContain('Invoke `superpowers:brainstorming`');
+    expect(pipeline_brief(brief_manifest('design'), 'design', '/tmp/m.json', 'run'))
+        ->toContain('- Commit the spec, then the plan: two commits. Set `artifacts.spec` and `artifacts.plan`.');
+});
+
+it('asks for grow form only after an escalation no plan approval has answered, split over autoflow\'s two design steps', function () {
     $escalated = ['gate' => 'design-size', 'leg' => 'implement', 'at' => '2026-09-22T12:00:00Z', 'reason' => 'migration', 'outcome' => 'escalated'];
     $approved = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'at' => '2026-09-22T13:00:00Z', 'review' => 'ok', 'outcome' => 'continued'];
+    $grown = fn (string $mode, string $step, array $ledger) => pipeline_brief(brief_manifest('design', ['mode' => $mode, 'gate_ledger' => $ledger]), 'design', '/tmp/wt/.claude/pipeline/feature-x.json', $step);
 
-    expect(pipeline_brief(brief_manifest('design', ['gate_ledger' => [$escalated]]), 'design', '/tmp/wt/.claude/pipeline/feature-x.json'))->toContain('Grow form');
-    expect(pipeline_brief(brief_manifest('design', ['gate_ledger' => [$escalated, $approved]]), 'design', '/tmp/wt/.claude/pipeline/feature-x.json'))->not->toContain('Grow form');
+    expect($grown('interactive', 'run', [$escalated]))->toContain('- Grow form: the design escalated from Bounded (engine.md §Design size). Grow the spec and the plan; do not re-design them.');
+    expect($grown('interactive', 'run', [$escalated, $approved]))->not->toContain('Grow form');
+    expect($grown('autoflow', 'spec', [$escalated]))->toContain('- Grow form: the design escalated from Bounded (engine.md §Design size). Grow the spec: its header says `**Design size:** Architectural` and a `## Grown from Bounded` section says what changed, why it grew, what already exists and what remains; do not re-design it. The plan step adds the remaining steps to the plan.');
+    expect($grown('autoflow', 'plan', [$escalated]))
+        ->toContain('- Grow form: the design escalated from Bounded (engine.md §Design size). Add the remaining steps to the plan, as the spec\'s `## Grown from Bounded` section names them; do not re-design it.')
+        ->not->toContain('Grow the spec');
+    expect($grown('autoflow', 'plan', [$escalated, $approved]))->not->toContain('Grow form');
+});
+
+it('points the plan step at the plan beside the spec, the one a loop-back or the grow form extends', function () {
+    $escalated = ['gate' => 'design-size', 'leg' => 'implement', 'at' => '2026-09-22T12:00:00Z', 'reason' => 'migration', 'outcome' => 'escalated'];
+    $spec = 'docs/superpowers/specs/2026-09-22-x-design.md';
+    $line = '- The plan goes at `docs/superpowers/plans/2026-09-22-x.md`, beside the spec: when that file exists it is this design\'s plan, from an earlier pass or the Bounded plan this design grew from, so update it in place and write no second plan.';
+    $brief = fn (string $step, array $ledger) => pipeline_brief(brief_manifest('design', ['mode' => 'autoflow', 'gate_ledger' => $ledger, 'artifacts' => ['spec' => $spec, 'plan' => null, 'pr' => 42, 'issue' => null]]), 'design', '/tmp/m.json', $step);
+
+    expect($brief('plan', []))->toContain($line);
+    expect($brief('plan', [$escalated]))
+        ->toContain($line)
+        ->toContain('Add the remaining steps to the plan');
+    expect($brief('spec', [$escalated]))->not->toContain('The plan goes at');
+    expect(pipeline_brief(brief_manifest('design', ['mode' => 'autoflow']), 'design', '/tmp/m.json', 'plan'))->not->toContain('The plan goes at');
+    expect(pipeline_plan_path($spec))->toBe('docs/superpowers/plans/2026-09-22-x.md');
+    expect(pipeline_plan_path('/tmp/wt/docs/superpowers/specs/2026-09-22-x-design.md'))->toBe('/tmp/wt/docs/superpowers/plans/2026-09-22-x.md');
+    expect(pipeline_plan_path('docs/spec.md'))->toBeNull();
 });
 
 it('tells a later leg how to report a plan gap, and design to extend the plan for it', function () {

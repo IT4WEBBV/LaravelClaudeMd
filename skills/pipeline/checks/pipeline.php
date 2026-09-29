@@ -99,3 +99,15 @@ function pipeline_is_plan_gap(array $entry): bool
         && ($entry['outcome'] ?? null) === 'looped-back'
         && ($entry['leg'] ?? 'review-plan') !== 'review-plan';
 }
+
+/**
+ * The entry a step appends when it returns `plan-insufficient` on an Architectural design: a `plan-approval`
+ * loop-back that no review wrote. Unlike `pipeline_is_plan_gap()` it counts `review-plan:review`'s own; a
+ * `review-plan` loop-back is a resolved review and carries its `review`.
+ */
+function pipeline_is_plan_return(array $entry): bool
+{
+    return ($entry['gate'] ?? null) === 'plan-approval'
+        && ($entry['outcome'] ?? null) === 'looped-back'
+        && ! array_key_exists('review', $entry);
+}

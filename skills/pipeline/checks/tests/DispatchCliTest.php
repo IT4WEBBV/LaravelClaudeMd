@@ -195,15 +195,29 @@ it('hands the autoflow script its routing tables, from the functions interactive
     expect(array_keys($tables['loopTarget']))->toBe(array_values(array_filter(pipeline_legs(), fn (string $leg) => pipeline_loop_target($leg) !== null)));
     $pairs = [];
     foreach (pipeline_legs() as $leg) {
-        expect($tables['steps'][$leg])->toBe(pipeline_steps($leg));
+        expect($tables['steps'][$leg])->toBe(pipeline_steps($leg, 'autoflow'));
         expect($tables['loopTarget'][$leg] ?? null)->toBe(pipeline_loop_target($leg));
-        foreach (pipeline_steps($leg) as $step) {
+        foreach (pipeline_steps($leg, 'autoflow') as $step) {
             $pairs[] = "{$leg}:{$step}";
             expect($tables['allowed']["{$leg}:{$step}"])->toBe($values(LegStatus::allowedFor($leg, $step)));
         }
     }
+    expect($tables['bounded'])->toBe(PIPELINE_BOUNDED_STEPS);
+    foreach ($tables['bounded'] as $leg => $bounded) {
+        expect(array_diff($bounded, $tables['steps'][$leg]))->toBe([]);
+    }
     expect(array_keys($tables['allowed']))->toBe($pairs);
 });
+
+it('launches a design at the step the manifest calls for', function (?string $spec, string $step) {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'design', 'status' => 'halted', 'reason' => 'x'], 'artifacts' => ['spec' => $spec, 'plan' => null, 'pr' => null, 'issue' => null]]);
+    file_put_contents($fixture['dir'] . '/spec.md', "# x — design\n\n**Design size:** Architectural\n");
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json']['startStep'])->toBe($step);
+})->with([
+    'no spec yet' => [null, 'spec'],
+    'a spec whose plan is not written' => ['spec.md', 'plan'],
+]);
 
 it('marks noOpen when the launch runs unattended', function () {
     $fixture = dispatch_fixture(['mode' => 'autoflow']);
@@ -295,6 +309,23 @@ it('halts a step the ledger does not support, and leaves the manifest alone', fu
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-plan', 'status' => 'continued']);
 });
 
+it('halts the brief of a design step the manifest does not call for, and leaves the manifest alone', function () {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'design', 'status' => 'pending']]);
+
+    expect(dispatch_cli(['brief', $fixture['manifest'], 'design', 'plan'])['json'])->toBe(['action' => 'halt', 'reason' => 'the manifest calls for the design spec step, not plan: the plan step follows a spec step that set artifacts.spec and removed artifacts.plan, or a plan-insufficient on an Architectural design']);
+    expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'design', 'status' => 'pending']);
+});
+
+it('briefs the plan step after a spec step that committed its spec', function () {
+    $fixture = boundary_fixture('design', 'spec', ['cursor' => ['leg' => 'design', 'status' => 'pending']]);
+    file_put_contents($fixture['dir'] . '/spec.md', "# x — design\n\n**Design size:** Architectural\n");
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued'], 'artifacts' => [...$m['artifacts'], 'spec' => 'spec.md']]);
+
+    expect(boundary_brief($fixture, 'design', 'plan', 'design:spec', ['--status', 'continued', '--size', 'Architectural'])['stdout'])
+        ->toContain('`design` leg, `plan` step')
+        ->toContain('- spec: `spec.md`');
+});
+
 it('records the workflow\'s return with finish', function (string $leg, string $decision, array $cursor) {
     $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => $leg, 'status' => 'pending']]);
 
@@ -371,7 +402,7 @@ it('halts the next brief when a step changed what only the engine writes', funct
 it('halts the next brief naming the leg, the key and the entry when design writes onto the plan gap it answers (#104)', function () {
     $approved = [...boundary_open(), 'actions' => [], 'outcome' => 'continued'];
     $gap = ['gate' => 'plan-approval', 'leg' => 'implement', 'cycle' => 2, 'at' => '2026-09-25T11:00:00Z', 'reason' => 'needs a queue', 'outcome' => 'looped-back'];
-    $fixture = boundary_fixture('design', 'run', ['gate_ledger' => [$approved, $gap]]);
+    $fixture = boundary_fixture('design', 'plan', ['gate_ledger' => [$approved, $gap], 'artifacts' => ['spec' => 'spec.md', 'plan' => 'plan.md', 'pr' => null, 'issue' => null]]);
     dispatch_leg_writes($fixture['manifest'], fn (array $m) => [
         ...$m,
         'cursor' => [...$m['cursor'], 'status' => 'continued'],
@@ -379,7 +410,7 @@ it('halts the next brief naming the leg, the key and the entry when design write
     ]);
 
     $reason = 'design added actions to ledger entry 1 (plan gap)';
-    expect(boundary_brief($fixture, 'review-plan', 'review', 'design:run', ['--status', 'continued', '--size', 'Architectural'])['json'])
+    expect(boundary_brief($fixture, 'review-plan', 'review', 'design:plan', ['--status', 'continued', '--size', 'Architectural'])['json'])
         ->toBe(['action' => 'halt', 'reason' => $reason]);
     expect(manifest_read($fixture['manifest'])['cursor'])->toMatchArray(['leg' => 'design', 'status' => 'halted', 'reason' => $reason]);
 });
@@ -396,13 +427,13 @@ it('briefs the next step after a clean return, and takes its snapshot', function
 });
 
 it('halts the next brief when the script was told another status or size than the step wrote', function (array $reported, string $reason) {
-    $fixture = boundary_fixture('design', 'run', ['cursor' => ['leg' => 'design', 'status' => 'pending'], 'artifacts' => ['spec' => 'spec.md', 'plan' => null, 'pr' => null, 'issue' => null]]);
+    $fixture = boundary_fixture('design', 'plan', ['cursor' => ['leg' => 'design', 'status' => 'pending'], 'artifacts' => ['spec' => 'spec.md', 'plan' => null, 'pr' => null, 'issue' => null]]);
     file_put_contents($fixture['dir'] . '/spec.md', "# x — design\n\n**Design size:** Architectural\n");
     dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued'], 'last_sha' => 'aaa1111']);
 
-    expect(boundary_brief($fixture, 'review-plan', 'review', 'design:run', $reported)['json'])->toBe(['action' => 'halt', 'reason' => $reason]);
+    expect(boundary_brief($fixture, 'review-plan', 'review', 'design:plan', $reported)['json'])->toBe(['action' => 'halt', 'reason' => $reason]);
 })->with([
-    'another status' => [['--status', 'halted', '--size', 'Architectural'], 'the design run step returned halted to the script but wrote continued into the manifest'],
+    'another status' => [['--status', 'halted', '--size', 'Architectural'], 'the design plan step returned halted to the script but wrote continued into the manifest'],
     'another size' => [['--status', 'continued', '--size', 'Bounded'], 'the design step returned size Bounded, but the spec says Architectural'],
     'no size' => [['--status', 'continued'], 'the design step returned size nothing, but the spec says Architectural'],
 ]);
@@ -422,10 +453,10 @@ it('halts a brief told of a step that left no snapshot, not its own, or none', f
         ->toBe(['action' => 'halt', 'reason' => "cannot check the handoff run step's return: no snapshot at {$bare['before']}"]);
     expect(manifest_read($bare['manifest'])['cursor'])->toMatchArray(['leg' => 'handoff', 'status' => 'halted']);
 
-    $other = boundary_fixture('design', 'run', ['cursor' => ['leg' => 'design', 'status' => 'pending']]);
+    $other = boundary_fixture('design', 'spec', ['cursor' => ['leg' => 'design', 'status' => 'pending']]);
     dispatch_leg_writes($other['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued']]);
     expect(boundary_brief($other, 'implement', 'run', 'handoff:run', ['--status', 'continued'])['json'])
-        ->toBe(['action' => 'halt', 'reason' => 'the snapshot is of the design run step, but the script says handoff run returned: it did not run brief']);
+        ->toBe(['action' => 'halt', 'reason' => 'the snapshot is of the design spec step, but the script says handoff run returned: it did not run brief']);
 
     $dropped = boundary_fixture('handoff', 'run');
     dispatch_leg_writes($dropped['manifest'], fn (array $m) => [...$m, 'cursor' => [...$m['cursor'], 'status' => 'continued'], 'artifacts' => [...$m['artifacts'], 'pr' => 7]]);
@@ -458,7 +489,8 @@ it('refuses a brief it cannot parse', function (array $arguments) {
     'a flag without its value' => [['handoff', 'run', '--after']],
     'an --after that is no step' => [['handoff', 'run', '--after', 'handoff:review', '--status', 'continued']],
     'a status without --after' => [['handoff', 'run', '--status', 'continued']],
-    'a flag given twice' => [['handoff', 'run', '--after', 'design:run', '--status', 'continued', '--status', 'halted']],
+    'a flag given twice' => [['handoff', 'run', '--after', 'design:spec', '--status', 'continued', '--status', 'halted']],
+    'an --after naming interactive\'s design step' => [['review-plan', 'review', '--after', 'design:run', '--status', 'continued']],
 ]);
 
 it('finishes only after a review-pr resolve step whose return holds', function () {
