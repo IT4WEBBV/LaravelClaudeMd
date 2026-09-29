@@ -40,7 +40,7 @@ function pipeline_leg_overrides(string $mode): array
             $reads,
             $probe,
             $exemplars,
-            'Commit the spec; on the Bounded path, commit the plan as well, a second commit: a Bounded design has no plan step. Then, after your last commit and in one manifest write, set `artifacts.spec` and remove `artifacts.plan` (the plan step writes this spec\'s plan and sets it), or on the Bounded path set `artifacts.plan` to the plan: a halt before that write leaves the manifest calling for this step again.',
+            'Commit the spec; on the Bounded path, commit the plan as well, a second commit, at `docs/superpowers/plans/<date>-<slug>.md` beside the spec `docs/superpowers/specs/<date>-<slug>-design.md` (`pipeline_plan_path()`): a Bounded design has no plan step, and a grown design\'s plan step extends the plan it finds there. Then, after your last commit and in one manifest write, set `artifacts.spec` and remove `artifacts.plan` (the plan step writes this spec\'s plan and sets it), or on the Bounded path set `artifacts.plan` to the plan: a halt before that write leaves the manifest calling for this step again.',
         ],
         'design:plan' => [
             'Read the committed spec (`artifacts.spec`) cold, and the code it points at, and invoke `superpowers:writing-plans` on it; do not re-design what the spec settles (engine.md §Design size).',

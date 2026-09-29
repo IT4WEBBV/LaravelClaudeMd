@@ -485,7 +485,7 @@ the committed spec cold, and the spec agent's exploration does not ride along in
 - **`design:spec`** brainstorms, commits the spec, sets `artifacts.spec` and removes `artifacts.plan`: a
   plan written for an earlier spec is not this spec's plan. It stops where brainstorming hands over to
   `writing-plans`, and commits no plan on the Architectural path. On the Bounded path it commits the
-  plan as well and sets `artifacts.plan`: a Bounded design is this step alone (`PIPELINE_BOUNDED_STEPS`),
+  plan as well, beside the spec where `pipeline_plan_path()` puts it, and sets `artifacts.plan`: a Bounded design is this step alone (`PIPELINE_BOUNDED_STEPS`),
   and the script skips `design:plan` on the `size` the spec step returned. It writes `artifacts` once,
   after its last commit, so a halt before that leaves the manifest calling for the spec step again.
 - **`design:plan`** reads the spec and the code it points at, invokes `writing-plans`, commits the plan
@@ -510,7 +510,9 @@ there, and `brief` refuses the other step. On a loop-back the script reruns:
 ### What a Bounded design commits
 
 Two commits, spec then plan, so `handoff pr` finds both in the last two commits exactly as it does
-for an Architectural design.
+for an Architectural design. They are named as `writing-plans` names them, the spec at
+`docs/superpowers/specs/<date>-<slug>-design.md` and the plan beside it at
+`docs/superpowers/plans/<date>-<slug>.md` (`pipeline_plan_path()`), so a design that grows finds its plan.
 
 The spec:
 

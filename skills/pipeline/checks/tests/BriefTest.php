@@ -86,7 +86,7 @@ it('splits autoflow\'s design into a spec step that stops at the spec and a plan
         ->toContain('`design` leg, `spec` step')
         ->toContain('- Invoke `superpowers:brainstorming` and stop at the spec: on the Architectural path, where brainstorming hands over to `superpowers:writing-plans`, the plan is the next step\'s, `design:plan`, so do not invoke `writing-plans` and commit no plan (engine.md §Design size).')
         ->toContain('write each question and the answer you assumed into the spec\'s `## Assumptions` section')
-        ->toContain('- Commit the spec; on the Bounded path, commit the plan as well, a second commit: a Bounded design has no plan step. Then, after your last commit and in one manifest write, set `artifacts.spec` and remove `artifacts.plan` (the plan step writes this spec\'s plan and sets it), or on the Bounded path set `artifacts.plan` to the plan: a halt before that write leaves the manifest calling for this step again.')
+        ->toContain('- Commit the spec; on the Bounded path, commit the plan as well, a second commit, at `docs/superpowers/plans/<date>-<slug>.md` beside the spec `docs/superpowers/specs/<date>-<slug>-design.md` (`pipeline_plan_path()`): a Bounded design has no plan step, and a grown design\'s plan step extends the plan it finds there. Then, after your last commit and in one manifest write, set `artifacts.spec` and remove `artifacts.plan` (the plan step writes this spec\'s plan and sets it), or on the Bounded path set `artifacts.plan` to the plan: a halt before that write leaves the manifest calling for this step again.')
         ->not->toContain('Commit the spec, then the plan: two commits.')
         ->not->toContain('The plan goes at');
     expect($plan)
