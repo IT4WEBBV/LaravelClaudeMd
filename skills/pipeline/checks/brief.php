@@ -80,7 +80,7 @@ function pipeline_leg_overrides(string $mode): array
         ],
         'review-pr:review' => [
             ($autoflow ? $yourself('pr', 'the PR') . ' State the suite line above.' : 'Invoke `/critique pr`, stating the suite line above.') . ' ' . $checks,
-            'Append its review verbatim as a new `pr-review` ledger entry with `gate`, `leg`, `cycle`, `at`, `review` and `annotations`, and no `outcome`.',
+            'Append its review verbatim as a new `pr-review` ledger entry with `gate`, `leg`, `cycle`, `at`, `review`, `annotations` and `reviewed_sha` (the output of `git rev-parse HEAD` in the worktree: the commit you reviewed), and no `outcome`.',
             'Act on nothing. Read-only on the checkout; the manifest is the only file you write.',
         ],
         'review-pr:resolve' => [
@@ -99,16 +99,20 @@ function pipeline_leg_overrides(string $mode): array
     ];
 }
 
-/** `$step` is given in `autoflow` (the workflow script names it) and derived from the ledger in `interactive`. */
-function pipeline_brief(array $manifest, string $leg, string $manifestPath, ?string $step = null): string
+/**
+ * `$step` is given in `autoflow` (the workflow script names it) and derived from the ledger in `interactive`.
+ * `$git` runs git in the worktree; only `review-pr`'s review step asks it, for its scope (engine.md §Scoped re-review).
+ */
+function pipeline_brief(array $manifest, string $leg, string $manifestPath, ?string $step = null, ?callable $git = null): string
 {
     $step ??= pipeline_step($manifest, $leg);
+    $scope = $git !== null && "{$leg}:{$step}" === 'review-pr:review' ? pipeline_review_scope($manifest, $git) : null;
 
     return implode("\n\n", [
         pipeline_brief_role($manifest, $leg, $step),
         pipeline_brief_pointers($manifest, $manifestPath, $leg, $step),
         pipeline_brief_state($manifest, $leg),
-        pipeline_brief_overrides($manifest, $leg, $step),
+        pipeline_brief_overrides($manifest, $leg, $step, $scope),
         pipeline_brief_return($leg, $step, (string) $manifest['mode']),
     ]) . "\n";
 }
@@ -190,7 +194,7 @@ function pipeline_brief_state(array $manifest, string $leg): string
     return "## Settled decisions and state\n\n" . implode("\n", $lines);
 }
 
-function pipeline_brief_overrides(array $manifest, string $leg, string $step): string
+function pipeline_brief_overrides(array $manifest, string $leg, string $step, ?array $scope = null): string
 {
     $lines = pipeline_leg_overrides((string) $manifest['mode'])["{$leg}:{$step}"];
     $ledger = pipeline_ledger($manifest);
@@ -207,6 +211,9 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step): s
     }
     if ($leg === 'review-pr' && pipeline_ci_rounds($manifest) > 0) {
         $lines[] = pipeline_ci_round_line($step);
+    }
+    if ($scope !== null) {
+        $lines[] = pipeline_review_scope_line($scope);
     }
     $base = $manifest['base'] ?? null;
     if ($leg === 'handoff' && $base !== null) {
@@ -269,6 +276,113 @@ function pipeline_design_grows(array $ledger): bool
     }
 
     return $grows;
+}
+
+/**
+ * The commit the newest completed review of the PR saw (`../references/engine.md` §Scoped re-review): the
+ * `reviewed_sha` of the newest `continued` `pr-review` entry that records one, newer than the latest
+ * escalation or plan gap. A halted, looped-back or open review is never a base.
+ */
+function pipeline_review_base(array $ledger): ?string
+{
+    $since = pipeline_reset_at($ledger);
+    $bases = array_filter($ledger, fn (array $entry) => ($entry['gate'] ?? null) === 'pr-review'
+        && ($entry['outcome'] ?? null) === 'continued'
+        && ($entry['at'] ?? '') > $since
+        && is_string($entry['reviewed_sha'] ?? null));
+
+    return $bases === [] ? null : end($bases)['reviewed_sha'];
+}
+
+/**
+ * What a review of the PR after a completed one reads (`../references/engine.md` §Scoped re-review), or null
+ * for the whole PR: no base, a base HEAD does not contain, a base ref that does not resolve, or any git call
+ * that fails. `$git` runs git in the worktree, as `pipeline_git_run()` does.
+ *
+ * @return array{since: string, base: string, commits: int, files: list<string>}|null
+ */
+function pipeline_review_scope(array $manifest, callable $git): ?array
+{
+    $since = pipeline_review_base(pipeline_ledger($manifest));
+    if ($since === null || $git(['merge-base', '--is-ancestor', $since, 'HEAD'])[0] !== 0) {
+        return null;
+    }
+    $base = isset($manifest['base'])
+        ? "origin/{$manifest['base']}"
+        : (pipeline_git_lines($git, ['symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD'])[0] ?? null);
+    if ($base === null) {
+        return null;
+    }
+    $range = ["{$since}..HEAD", "^{$base}"];
+    $commits = pipeline_git_lines($git, ['rev-list', '--no-merges', ...$range]);
+    $merges = pipeline_git_lines($git, ['rev-list', '--merges', ...$range]);
+    $files = $merges === null ? null : pipeline_meeting_files($merges, $git);
+
+    return $commits === null || $files === null ? null : ['since' => $since, 'base' => $base, 'commits' => count($commits), 'files' => $files];
+}
+
+/** The lines git printed, or null when it failed. */
+function pipeline_git_lines(callable $git, array $args): ?array
+{
+    [$code, $out] = $git($args);
+
+    return $code === 0 ? array_values(array_filter(explode("\n", $out), fn (string $line) => $line !== '')) : null;
+}
+
+/** The files where these merges met the branch's changes, sorted and unique, or null when git fails. */
+function pipeline_meeting_files(array $merges, callable $git): ?array
+{
+    $files = [];
+    foreach ($merges as $merge) {
+        $merged = pipeline_merge_files($merge, $git);
+        if ($merged === null) {
+            return null;
+        }
+        $files = [...$files, ...$merged];
+    }
+    $files = array_values(array_unique($files));
+    sort($files);
+
+    return $files;
+}
+
+/**
+ * One merge's meeting files: per parent after the first, what both sides changed since they last met
+ * (a conflict, a clean merge of a shared file, a resolution that took one side), and what the merge
+ * commit changed against every parent (an edit made in the merge itself).
+ */
+function pipeline_merge_files(string $merge, callable $git): ?array
+{
+    $parents = pipeline_git_lines($git, ['rev-parse', "{$merge}^@"]);
+    $files = pipeline_git_lines($git, ['diff-tree', '-c', '--no-commit-id', '--name-only', $merge]);
+    if ($parents === null || $files === null) {
+        return null;
+    }
+    $first = array_shift($parents);
+    foreach ($parents as $parent) {
+        $theirs = pipeline_git_lines($git, ['diff', '--name-only', '--no-renames', "{$first}...{$parent}"]);
+        $ours = pipeline_git_lines($git, ['diff', '--name-only', '--no-renames', "{$parent}...{$first}"]);
+        if ($theirs === null || $ours === null) {
+            return null;
+        }
+        $files = [...$files, ...array_intersect($theirs, $ours)];
+    }
+
+    return $files;
+}
+
+/** The review-pr review step's target once a review of the PR has completed (`../references/engine.md` §Scoped re-review). */
+function pipeline_review_scope_line(array $scope): string
+{
+    ['since' => $since, 'base' => $base, 'commits' => $commits, 'files' => $files] = $scope;
+    $whole = $files === []
+        ? "no file more: no merge since met this branch's changes"
+        : "read whole at HEAD, the files where a merge since met this branch's changes: " . implode(', ', array_map(fn (string $file) => "`{$file}`", $files));
+    $target = $commits === 0 && $files === []
+        ? "nothing was committed on this branch since `{$since}`: review only what the settled decisions above ask of the PR, and say so"
+        : "the branch's own commits since ({$commits}), as patches, `git log -p --no-merges {$since}..HEAD ^{$base}`, plus `git diff HEAD` (Stage 0 runs over both); and {$whole}; what the settled decisions above ask of the PR stays in your target wherever it lies";
+
+    return "Scoped re-review (engine.md §Scoped re-review): a review of this PR completed at `{$since}`, which HEAD contains, so your target is what changed since, not the whole PR: {$target}. Read beyond the target only where a finding needs it.";
 }
 
 /** What the grow form asks of each design step: `autoflow`'s spec step grows the spec, its plan step the plan (engine.md §Design size). */

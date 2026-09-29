@@ -268,3 +268,33 @@ it('names the leg, what changed and which entry when a step rewrites an earlier 
         'a nested edit on a closed entry' => ['handoff', [[...$approved, 'actions' => [['claim' => 'x', 'disposition' => 'integrated', 'note' => 'a']]]], [[...$approved, 'actions' => [['claim' => 'x', 'disposition' => 'integrated', 'note' => 'b']]]], 'handoff changed actions on ledger entry 0 (plan-approval)'],
     ];
 });
+
+it('makes a review-pr review step record the 40-character sha it reviewed, and a review-plan one nothing', function () use ($noUi, $open) {
+    $prOpen = [...$open, 'gate' => 'pr-review', 'leg' => 'review-pr'];
+    $before = returned_before('review-pr');
+    $returns = fn (array $entry) => pipeline_returned($before, returned_after($before, 'continued', [$entry]), $noUi, DesignSize::Architectural);
+    $missing = pipeline_halt('the review-pr review step must record reviewed_sha, the HEAD it reviewed (`git rev-parse HEAD`), on its entry');
+
+    expect($returns($prOpen))->toBe($missing);
+    expect($returns([...$prOpen, 'reviewed_sha' => 'abc1234']))->toBe($missing);
+    expect($returns([...$prOpen, 'reviewed_sha' => str_repeat('a1', 20)]))->toBe(['action' => 'dispatch', 'leg' => 'review-pr']);
+
+    $planBefore = returned_before('review-plan');
+    expect(pipeline_returned($planBefore, returned_after($planBefore, 'continued', [$open]), $noUi, DesignSize::Architectural))
+        ->toBe(['action' => 'dispatch', 'leg' => 'review-plan']);
+});
+
+it('halts a resolve step that adds, changes or removes reviewed_sha on the open entry', function () use ($noUi) {
+    $entry = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-25T10:00:00Z', 'review' => 'r'];
+    [$sha, $other] = [str_repeat('a1', 20), str_repeat('b2', 20)];
+    $resolve = function (array $open, array $left) use ($noUi) {
+        $before = returned_before('review-pr', [$open]);
+
+        return pipeline_returned($before, returned_after($before, 'continued', [[...$left, 'actions' => [], 'outcome' => 'continued']]), $noUi, DesignSize::Architectural);
+    };
+
+    expect($resolve([...$entry, 'reviewed_sha' => $sha], [...$entry, 'reviewed_sha' => $other]))->toBe(pipeline_halt('review-pr changed reviewed_sha on ledger entry 0 (pr-review)'));
+    expect($resolve($entry, [...$entry, 'reviewed_sha' => $sha]))->toBe(pipeline_halt('review-pr added reviewed_sha to ledger entry 0 (pr-review)'));
+    expect($resolve([...$entry, 'reviewed_sha' => $sha], $entry))->toBe(pipeline_halt('review-pr removed reviewed_sha from ledger entry 0 (pr-review)'));
+    expect($resolve([...$entry, 'reviewed_sha' => $sha], [...$entry, 'reviewed_sha' => $sha]))->toBe(['action' => 'done']);
+});

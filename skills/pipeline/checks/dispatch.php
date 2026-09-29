@@ -270,7 +270,7 @@ function pipeline_ledger_problem(array $old, array $new, LegStatus $status, stri
 {
     $gate = pipeline_gate_of($leg);
     $open = $step === 'resolve' ? pipeline_open_entry($old, $gate) : null;
-    $kept = ['gate', 'leg', 'cycle', 'at', 'review', 'annotations'];
+    $kept = ['gate', 'leg', 'cycle', 'at', 'review', 'annotations', 'reviewed_sha'];
 
     foreach ($old as $index => $entry) {
         $change = pipeline_entry_change($entry, $new[$index] ?? null, $index === $open ? $kept : null);
@@ -289,15 +289,25 @@ function pipeline_ledger_problem(array $old, array $new, LegStatus $status, stri
         $status === LegStatus::PlanInsufficient => $size === DesignSize::Bounded
             ? pipeline_added_with($addedTo('design-size'), 'escalated', 'plan-insufficient on a Bounded design needs a new design-size entry with outcome escalated')
             : pipeline_added_with($addedTo('plan-approval'), 'looped-back', 'plan-insufficient on an Architectural design needs a new plan-approval entry with outcome looped-back'),
-        $step === 'review' => count($addedTo($gate)) === 1 && pipeline_is_open($addedTo($gate)[0])
-            ? null
-            : "the review step must add exactly one open {$gate} entry",
+        $step === 'review' => pipeline_review_entry_problem($addedTo($gate), $gate),
         $step === 'resolve' => ($new[$open]['outcome'] ?? null) === $status->value
             ? null
             : "the resolve step must set the open {$gate} entry's outcome to {$status->value}",
         $leg === 'verify-ui' => count($addedTo('verify-ui')) === 1 && ($addedTo('verify-ui')[0]['outcome'] ?? null) === $status->value
             ? null
             : "the verify-ui step must add one verify-ui entry with outcome {$status->value}",
+        default => null,
+    };
+}
+
+/** A review step adds one open entry; on `pr-review` it records the commit it reviewed (`../references/engine.md` §Scoped re-review). */
+function pipeline_review_entry_problem(array $added, string $gate): ?string
+{
+    $sha = $added[0]['reviewed_sha'] ?? null;
+
+    return match (true) {
+        count($added) !== 1 || ! pipeline_is_open($added[0]) => "the review step must add exactly one open {$gate} entry",
+        $gate === 'pr-review' && ! (is_string($sha) && preg_match('/^[0-9a-f]{40}$/', $sha) === 1) => 'the review-pr review step must record reviewed_sha, the HEAD it reviewed (`git rev-parse HEAD`), on its entry',
         default => null,
     };
 }

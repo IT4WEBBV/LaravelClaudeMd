@@ -1126,3 +1126,35 @@ it('halts on an invalid board before anything is created', function () {
     expect(kickoff_calls($fixture))->toBe([]);
     kickoff_left_nothing($fixture);
 });
+
+it('scopes the review a launch --from review-pr starts with to what changed since the last completed review (#88)', function () {
+    $dir = rereview_repo();
+    $reviewed = rereview_commit($dir, ['feature.php' => "<?php // v1\n"]);
+    rereview_commit($dir, ['feature.php' => "<?php // v2\n"]);
+    pipeline_git($dir, ['switch', '-q', '-c', 'elsewhere', 'main']);
+    $elsewhere = rereview_commit($dir, ['other.php' => "<?php\n"]);
+    pipeline_git($dir, ['switch', '-q', 'feature']);
+    $passed = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r', 'outcome' => 'continued'];
+    $rereview = function (array $review) use ($dir, $passed): string {
+        $fixture = dispatch_fixture(['mode' => 'autoflow', 'worktree' => $dir, 'cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'gate_ledger' => [$passed, $review]]);
+        expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff'], '--from', 'review-pr'])['json'])
+            ->toMatchArray(['action' => 'start', 'startLeg' => 'review-pr', 'startStep' => 'review']);
+
+        return dispatch_cli(['brief', $fixture['manifest'], 'review-pr', 'review'])['stdout'];
+    };
+
+    expect($rereview(rereview_entry('continued', $reviewed)))
+        ->toContain("a review of this PR completed at `{$reviewed}`")
+        ->toContain("`git log -p --no-merges {$reviewed}..HEAD ^origin/main`");
+    expect($rereview(rereview_entry('continued', $elsewhere)))->toContain('`review-pr` leg, `review` step')->not->toContain('Scoped re-review');
+    expect($rereview(rereview_entry('halted', $reviewed)))->toContain('`review-pr` leg, `review` step')->not->toContain('Scoped re-review');
+});
+
+it('scopes an interactive run\'s re-review the same way', function () {
+    $dir = rereview_repo();
+    $reviewed = rereview_commit($dir, ['feature.php' => "<?php\n"]);
+    $fixture = dispatch_fixture(['mode' => 'interactive', 'worktree' => $dir, 'cursor' => ['leg' => 'review-pr', 'status' => 'pending'], 'gate_ledger' => [rereview_entry('continued', $reviewed)]]);
+
+    expect(dispatch_cli(['next', $fixture['manifest']])['json'])->toMatchArray(['action' => 'dispatch', 'leg' => 'review-pr', 'step' => 'review']);
+    expect(file_get_contents($fixture['brief']))->toContain("a review of this PR completed at `{$reviewed}`");
+});

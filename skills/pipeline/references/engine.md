@@ -102,7 +102,8 @@ launched the run, with its reason.
   permits no loop-back), `ui` from the diff and the design size from the spec's header. `--from <leg>`
   re-arms a run at that leg through `pipeline_can_navigate()`, after those checks and only for one of
   `pipeline_legs()`: a PR that needs new commits gets a new run with `--from review-pr`, without
-  editing a file; `--decision <text>`, repeatable, appends that text to `decisions` verbatim in the same
+  editing a file, and its review reads what changed since the last completed one (§Scoped re-review);
+  `--decision <text>`, repeatable, appends that text to `decisions` verbatim in the same
   write, after `--from`'s checks (§The CI gate). `checks` is the directory `launch` ran from, so every
   step's `brief` runs the same code.
   `tables` is what the script routes by, `pipeline_routing_tables()`: the legs in order, each leg's
@@ -933,7 +934,8 @@ finish step pushes and leaves the PR draft; every step works from `cd <worktree>
 and `## Return` asks for a structured `{status, reason}` instead of a line.
 
 **A review step's brief is crafted context** (`../../critique/SKILL.md` §Reviewer contract): pointers,
-decisions and overrides — never an earlier review, an earlier action, or another step's output.
+decisions and overrides — never an earlier review, an earlier action, or another step's output. A
+re-review of the PR names the commit the last completed review saw, never that review (§Scoped re-review).
 
 **Plans and specs committed before 2026-09-14 are not exemplars** for test or proof policy. Many carry
 the rules below, and a design subagent that reads them as examples copies the rules forward. No plan is
@@ -1053,6 +1055,57 @@ php -r 'require $argv[1] . "/suite.php";
     desyncs vendor, migrations and assets, and a wrong red would be filed as pre-existing.
 - **Failure to compute the key** (`pipeline_git` throws) is a machinery failure. Run the suite; never
   assume reuse.
+
+## Scoped re-review — a review of the PR after a completed one reads what changed since
+
+A run re-entered at `review-pr` (`launch --from review-pr`: an owner's request on a ready PR, the CI
+gate's fix round) starts with a review step. Once the PR has passed a review, that step reviews what
+changed since, not the whole PR again. Why (#88): on IT4WEBBV/Asimo PR #183 the change since the first
+review was 4 files / 13 lines of a 16-file / 1493-line PR, and each of three relaunches' review steps
+peaked at 156k–208k context. A cheaper model lowers the price per token; only the target lowers the tokens.
+
+**The review step records what it saw.** Its entry carries `reviewed_sha`, the output of
+`git rev-parse HEAD`. A `review-pr` review step whose entry lacks a 40-character one halts, and so does a
+resolve step that adds, changes or removes it (`pipeline_ledger_problem()`, `manifest.md` §`gate_ledger`).
+
+**The base** is `pipeline_review_base()`: the `reviewed_sha` of the newest `continued` `pr-review` entry
+that has one, newer than the latest escalation or plan gap (`pipeline_reset_at()`, the cut
+`pipeline_done_legs()` makes: code reviewed against a plan that grew is reviewed whole again). A halted,
+looped-back or open review is never a base: its findings were not dispositioned there.
+
+**The target** is `pipeline_review_scope()`, which `brief` (and `next` / `returned` in `interactive`)
+computes with git in the worktree for `review-pr`'s review step only, and writes into its brief as one
+override line:
+
+- the branch's own commits since the base, as patches: `git log -p --no-merges <sha>..HEAD ^<base>`, plus
+  `git diff HEAD`; Stage 0 runs over both. `<base>` is `origin/<manifest base>`, else `origin/HEAD`.
+  `^<base>` leaves out what a merge of main brought in and keeps a merged-in side's commits that are not
+  on main (a pull of the PR branch onto local commits), which `--first-parent` would drop;
+- read whole at HEAD, the files where a merge since the base met the branch's changes: per merge not on
+  the base, the files both sides changed since they last met (every conflict, a clean merge of a shared
+  file, a resolution that took one side), and the files the merge commit changed against every parent
+  (an edit made in the merge itself).
+
+What the settled decisions ask of the PR (an owner's request, the CI round's failure) stays in the
+target wherever it lies, also outside the delta. With nothing committed since the base the target is
+only that: the review checks what the settled decisions ask of the PR and says the branch did not move;
+it does not widen to the whole PR.
+
+**Otherwise the review is full, as before:** no `continued` entry with a sha, a sha HEAD does not contain
+(a rebase, a force-push), a base ref git cannot resolve (with no manifest `base` and `origin/HEAD` unset,
+every re-review on that machine stays full; `git remote set-head origin --auto` sets it), or any git call
+that fails. The scope is never narrower than git could prove textually. It cannot see a semantic
+conflict: a merge that changes only files the branch did not touch lists none, even where the branch's
+code depends on them. The full review had that blind spot in practice too; the suite and CI cover it.
+
+**A run in flight when this lands halts once.** A `review-pr` review step briefed before `reviewed_sha`
+existed returns an entry without one, and the next boundary halts on it. The open entry stays; a relaunch
+goes on to its resolve step, and that cycle is simply never a base. It is not a bug.
+
+**The earlier review is not carried:** the brief names its commit, never its entry (§What a leg brief
+consists of). A chain of scoped reviews is as sound as the earliest full review in it; the base rule keeps
+an undispositioned review out of the chain. Later, `git log --remerge-diff` (git 2.36+; one machine runs
+2.33) could show a merge as only what its resolution changed, instead of the file read whole.
 
 ## Resolving a review — the resolve step acts on it
 
