@@ -180,6 +180,8 @@ it('launches from the cursor with the ledger\'s loop-backs, the design size and 
         'noOpen' => false,
         'checks' => realpath(__DIR__ . '/..'),
         'tables' => pipeline_routing_tables(),
+        'profile' => 'light',
+        'agents' => pipeline_agent_table([]),
     ]);
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-plan', 'status' => 'pending']);
 });
@@ -208,6 +210,40 @@ it('hands the autoflow script its routing tables, from the functions interactive
     }
     expect(array_keys($tables['allowed']))->toBe($pairs);
 });
+
+it('hands the script its agents with the manifest\'s override laid over them, and the profile to start on', function () {
+    $override = ['review-plan:review' => ['model' => 'opus', 'effort' => 'xhigh']];
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'light' => true, 'agents' => $override]);
+    $start = dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json'];
+
+    expect($start['agents'])->toBe(pipeline_agent_table($override));
+    expect($start['agents']['full']['review-plan:review'])->toBe(['model' => 'opus', 'effort' => 'xhigh']);
+    expect($start['profile'])->toBe('light');
+});
+
+it('starts a run on full once its ledger records an escalation, whatever the spec and the light flag say', function () {
+    $escalated = ['gate' => 'design-size', 'leg' => 'handoff', 'at' => '2026-09-29T10:00:00Z', 'reason' => 'migration', 'outcome' => 'escalated'];
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'light' => true, 'cursor' => ['leg' => 'design', 'status' => 'pending'], 'gate_ledger' => [$escalated], 'artifacts' => ['spec' => 'spec.md', 'plan' => 'plan.md', 'pr' => null, 'issue' => null]]);
+    file_put_contents($fixture['dir'] . '/spec.md', "# x — design\n\n**Design size:** Bounded\n");
+
+    $start = dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json'];
+
+    expect($start['size'])->toBe('Bounded');
+    expect($start['profile'])->toBe('full');
+});
+
+it('halts a launch whose agents override is invalid, and leaves the manifest as it was', function (array $manifest, mixed $agents, string $what) {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', ...$manifest, 'agents' => $agents]);
+    $before = file_get_contents($fixture['manifest']);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff'], '--decision', 'Keep the guard'])['json'])
+        ->toBe(['action' => 'halt', 'reason' => "the manifest's agents override is invalid: {$what}"]);
+    expect(file_get_contents($fixture['manifest']))->toBe($before);
+})->with([
+    'a step autoflow does not have' => [[], ['design:run' => ['effort' => 'low']], '`design:run` is not an autoflow step'],
+    'a model outside the three' => [[], ['handoff:run' => ['model' => 'haiku']], '`handoff:run` names model "haiku", not one of opus, sonnet, fable'],
+    'a list, on a finished run' => [['cursor' => ['leg' => 'review-pr', 'status' => 'done']], [['model' => 'opus']], 'it is not an object'],
+]);
 
 it('launches a design at the step the manifest calls for', function (?string $spec, string $step) {
     $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'design', 'status' => 'halted', 'reason' => 'x'], 'artifacts' => ['spec' => $spec, 'plan' => null, 'pr' => null, 'issue' => null]]);
