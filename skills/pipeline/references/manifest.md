@@ -99,8 +99,11 @@ ignores every gate pass older than it.
 
 **A plan gap** is a `plan-approval` entry written by a leg after `review-plan` on an Architectural
 design (`engine.md` §Design size): `gate`, `leg` (the leg that found the gap), `cycle`, `at`, `reason`
-and `outcome: looped-back`, and no `review`. Unlike an escalation it **is** a loop-back and counts
-toward `review-plan`'s bound; like one, it resets `pipeline_done_legs()`.
+(what the plan lacks) and `outcome: looped-back`, **and nothing else**: no `review` and no `actions`,
+because nothing reviews it and no step completes it. The `design` step that answers it leaves it
+unchanged; what design did goes in the spec, the plan and the reason it returns, and a step that
+changes the entry halts the run (*What a leg writes*). Unlike an escalation it **is** a loop-back and
+counts toward `review-plan`'s bound; like one, it resets `pipeline_done_legs()`.
 
 **The loop bound is read from here, never from memory.** A review may drive a loop-back twice
 before the third must halt (`engine.md` §failure policy). Count **this gate's entries whose

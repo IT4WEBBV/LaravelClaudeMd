@@ -180,7 +180,7 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step): s
         $lines[] = 'Grow form: the design escalated from Bounded (engine.md §Design size). Grow the spec and the plan; do not re-design them.';
     }
     if ($leg === 'design' && pipeline_is_plan_gap(end($ledger) ?: [])) {
-        $lines[] = 'Plan gap: extend the plan (and the spec where it must say more) to cover the entry\'s `reason`; describe what is already built as state, do not re-design it (engine.md §Design size).';
+        $lines[] = 'Plan gap: extend the plan (and the spec where it must say more) to cover the entry\'s `reason`; describe what is already built as state, do not re-design it (engine.md §Design size). Leave that entry as it is, with no `actions`: what you did goes in the spec, the plan and the reason you return.';
     }
     if ($leg === 'review-pr' && pipeline_ci_rounds($manifest) > 0) {
         $lines[] = pipeline_ci_round_line($step);

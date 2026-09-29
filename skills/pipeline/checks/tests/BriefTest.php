@@ -92,7 +92,8 @@ it('tells a later leg how to report a plan gap, and design to extend the plan fo
     $gap = ['gate' => 'plan-approval', 'leg' => 'implement', 'cycle' => 2, 'at' => '2026-09-22T12:00:00Z', 'reason' => 'needs a queue', 'outcome' => 'looped-back'];
     expect(pipeline_brief(brief_manifest('design', ['gate_ledger' => [$gap]]), 'design', '/tmp/m.json'))
         ->toContain('- redo what `gate_ledger[0]` looped back for')
-        ->toContain('Plan gap: extend the plan');
+        ->toContain('Plan gap: extend the plan')
+        ->toContain('Leave that entry as it is, with no `actions`: what you did goes in the spec, the plan and the reason you return.');
 
     $reviewLoop = [...$gap, 'leg' => 'review-plan'];
     expect(pipeline_brief(brief_manifest('design', ['gate_ledger' => [$reviewLoop]]), 'design', '/tmp/m.json'))

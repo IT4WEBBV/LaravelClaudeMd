@@ -584,7 +584,9 @@ of the plan approval**: the plan passed `review-plan` and turned out not to cove
    counts toward the 2 cycles, and the third halts — before
    `handoff` with no push, after it with the PR left draft (§Failure policy).
 3. `design` extends the plan, and the spec where it must say more, to cover the entry's `reason`;
-   what is already built is described as state, not re-designed. Then `review-plan`, `handoff pr`
+   what is already built is described as state, not re-designed. It leaves the entry unchanged, with
+   no `actions`: what it did goes in the spec, the plan and the reason it returns (#104: a design that
+   recorded its answer on the entry halted the run at the next brief). Then `review-plan`, `handoff pr`
    (updating the existing PR) and `implement` run again, as after an escalation.
 
 The entry resets `pipeline_done_legs()` like an escalation does, so the earlier plan approval cannot
