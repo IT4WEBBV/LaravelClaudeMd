@@ -88,11 +88,11 @@ function pipeline_status_lines(array $runs, int $now, ?string $repo): array
 /** Halted first, the runs the owner has to act on; then by issue, runs without one last. */
 function pipeline_status_order(array $manifest): array
 {
-    $issue = $manifest['artifacts']['issue'] ?? null;
+    $issue = pipeline_status_number($manifest['artifacts']['issue'] ?? null);
 
     return [
         ($manifest['cursor']['status'] ?? null) === 'halted' ? 0 : 1,
-        $issue === null ? PHP_INT_MAX : (int) $issue,
+        $issue ?? PHP_INT_MAX,
         (string) ($manifest['branch'] ?? ''),
     ];
 }
@@ -132,7 +132,10 @@ function pipeline_status_age(int $seconds): string
     };
 }
 
-/** One row, whatever the halt wrote: control characters (escape sequences included) out, whitespace collapsed, 60 columns. */
+/**
+ * One row, whatever the halt wrote: control characters (escape sequences included) out, whitespace collapsed, 60 columns.
+ * Only the reason needs it: the dispatcher refuses a `cursor.leg` or `cursor.status` outside its set, and a branch is a git refname.
+ */
 function pipeline_status_reason(string $reason): string
 {
     $printable = preg_replace('/[\x00-\x08\x0E-\x1F\x7F]/', '', $reason);
