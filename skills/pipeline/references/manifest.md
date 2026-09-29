@@ -20,7 +20,7 @@ Read/written by the Phase A helpers in `../checks/manifest.php`:
 | `mode` | **required** | `interactive` or `autoflow`; every command refuses `auto`, the engine #87 removed, naming `autoflow` |
 | `cursor` | **required** | `{leg, status, reason?, retried?}` — the current leg; `status` is `pending` (written by `next`, by `launch --from`, or by `brief` as an `autoflow` step starts), the status the leg returned, `halted` (with `reason`), or `done` (written by `returned` or `finish` on a finished run; `next` and `launch` then answer `done` and dispatch nothing); `reason` only with `halted`; `retried` only after a review step's single retry in `interactive` |
 | `pipeline_id` | optional | stable id alongside `branch` |
-| `artifacts` | optional | pointers: idea, spec path, plan path, PR number, issue number (`engine.md` §The work item), `proof` — the proof page `verify-ui` wrote |
+| `artifacts` | optional | pointers: idea, spec path, plan path, PR number, issue number (`engine.md` §The work item), `proof` — the proof page `verify-ui` wrote. In `autoflow` the design's spec step removes `plan` and the plan step sets it again, so an empty `plan` beside a `spec` means the plan step is next (`engine.md` §Design size, *`autoflow`'s design*) |
 | `last_sha` | optional | HEAD at the last completed leg |
 | `gate_ledger` | optional | the audit trail — each gate's review, what the resolve step or the human did about it, and the content-trigger annotations (shape below) |
 | `lease` | optional | session id + timestamp (single-driver guard) |
