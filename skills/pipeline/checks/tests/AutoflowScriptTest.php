@@ -119,6 +119,13 @@ it('halts before any agent when launch\'s tables are missing or incomplete', fun
     'a bound that is not a number' => [function (array $start) { $start['tables']['bound'] = '2'; return $start; }],
 ]);
 
+it('halts before any agent when launch\'s tables have no review-plan loop-back, the gate plan gaps are charged to', function () {
+    $start = autoflow_start('implement');
+    unset($start['tables']['loopTarget']['review-plan']);
+
+    expect(autoflow_replay($start, []))->toBe(['labels' => [], 'prompts' => [], 'result' => ['action' => 'halt', 'leg' => 'implement', 'reason' => 'args are not a launch start answer']]);
+});
+
 /** The brief command in each prompt, after the manifest path. */
 function autoflow_briefs(array $prompts): array
 {

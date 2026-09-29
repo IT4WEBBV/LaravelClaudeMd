@@ -115,7 +115,8 @@ launched the run, with its reason.
   continuing. The design size it goes by is the one `launch` read, then the one each `design` step
   copied from its spec. A Bounded escalation is not a loop-back, and escalation is one-way (§Design
   size), so the script exempts one per run; every other `plan-insufficient` counts toward
-  `review-plan`'s bound. A status it cannot route halts, and so do `args` that are not a `launch` `start` answer; `tables`
+  `review-plan`'s bound. A status it cannot route halts, and so do `args` that are not a `launch` `start` answer
+  or whose `tables.loopTarget` has no `review-plan`, the gate every `plan-insufficient` is charged to; `tables`
   missing or incomplete halts with a reason that names them. `AutoflowScriptTest` replays the script
   on `launch`'s answer. A review step runs on Fable, and once more on Opus when it returns nothing;
   `handoff` runs at low effort; a step that throws or returns nothing halts the run.
