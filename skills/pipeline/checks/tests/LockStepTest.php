@@ -43,3 +43,11 @@ it('keeps every engine.md section a brief names', function () {
         expect(array_filter($headings[1], fn (string $heading) => str_starts_with($name, $heading)))->not->toBeEmpty("engine.md has no section '{$name}'");
     }
 });
+
+it('keeps every model and effort out of the autoflow script, which takes them from launch', function () {
+    $script = (string) file_get_contents(__DIR__ . '/../../workflow/pipeline-autoflow.js');
+
+    foreach ([...PIPELINE_AGENT_MODELS, 'haiku', ...PIPELINE_AGENT_EFFORTS] as $name) {
+        expect(preg_match("/(['\"`]){$name}\\1/", $script))->toBe(0, "the autoflow script names '{$name}'");
+    }
+});

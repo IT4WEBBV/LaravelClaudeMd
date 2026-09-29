@@ -13,7 +13,9 @@ export const meta = {
 }
 
 // The routing tables are launch's: `tables` in its start answer, built by pipeline_routing_tables() from
-// the functions interactive mode uses. meta.phases repeats the legs as labels only (meta must be a pure
+// the functions interactive mode uses. So are the agents: `agents` (pipeline_agent_table()) and the
+// profile the run starts on (pipeline_start_profile()), so the script names no model or effort
+// (engine.md §Agents per step). meta.phases repeats the legs as labels only (meta must be a pure
 // literal). AutoflowScriptTest replays this script on launch's answer with agent() faked.
 const COPIED = { design: { size: { type: 'string', enum: ['Bounded', 'Architectural'] } }, implement: { ui: { type: 'boolean' } } }
 const UNSATISFIABLE = { type: 'object', properties: { status: { type: 'string', enum: [] } }, required: ['status'] } // invalid: agent() throws before starting an agent — the smoke run's thrown error
@@ -26,6 +28,34 @@ function complete(tables) {
     && typeof loopTarget === 'object' && loopTarget !== null && Object.entries(loopTarget).every(([from, to]) => legs.includes(from) && legs.includes(to))
     && typeof bounded === 'object' && bounded !== null && Object.entries(bounded).every(([leg, list]) => legs.includes(leg) && filled(list) && list.every(step => steps[leg].includes(step)))
     && Number.isInteger(bound)
+}
+
+function isSetting(entry) {
+  return typeof entry?.model === 'string' && entry.model !== '' && typeof entry?.effort === 'string' && entry.effort !== ''
+}
+
+// Both profiles cover every step of the tables, a loop-back entry names one of those steps, and the
+// retry and smoke entries and the profile to start on are there.
+function completeAgents(agents, profile, steps) {
+  const keys = Object.entries(steps).flatMap(([leg, list]) => list.map(step => `${leg}:${step}`))
+  const { full, light, loopedBack, retry, smoke } = agents ?? {}
+  const covers = table => typeof table === 'object' && table !== null && keys.every(key => isSetting(table[key]))
+  return covers(full) && covers(light)
+    && typeof loopedBack === 'object' && loopedBack !== null && Object.entries(loopedBack).every(([key, entry]) => keys.includes(key) && isSetting(entry))
+    && isSetting(retry) && isSetting(smoke)
+    && ['full', 'light'].includes(profile)
+}
+
+function setting({ model, effort }) {
+  return { model, effort }
+}
+
+// A step whose leg a gate has looped back to in this run (loops counts on from the ledger's) takes its
+// loop-back entry when it has one; every other step its entry in the current profile.
+function settingFor(leg, step) {
+  const key = `${leg}:${step}`
+  const looped = Object.entries(loopTarget).some(([gate, target]) => target === leg && loops[gate] > 0)
+  return setting((looped && agents.loopedBack[key]) || agents[profile][key])
 }
 
 function nextLeg(leg) {
@@ -92,18 +122,16 @@ function stubPrompt(leg, step, returns) {
 async function runStep(leg, step) {
   const returns = args.stub?.steps[`${leg}:${step}`]?.shift()
   if (args.stub && !returns) return { status: 'halted', reason: `the smoke run has no stub for ${leg}:${step}` }
-  const model = returns ? 'sonnet' : step === 'review' ? 'fable' : undefined
   const opts = {
     label: `${leg}:${step}`,
     phase: leg,
     schema: returns?.throw ? UNSATISFIABLE : schemaFor(leg, step),
-    ...(model ? { model } : {}),
-    ...(leg === 'handoff' ? { effort: 'low' } : {}),
+    ...(returns ? setting(agents.smoke) : settingFor(leg, step)),
   }
   const prompt = returns ? stubPrompt(leg, step, returns) : stepPrompt(leg, step)
   try {
     const result = await agent(prompt, opts)
-    const retried = result === null && model === 'fable' ? await agent(prompt, { ...opts, model: 'opus' }) : result
+    const retried = result === null && step === 'review' && !returns ? await agent(prompt, { ...opts, ...setting(agents.retry) }) : result
     return retried ?? { status: 'halted', reason: 'the agent returned nothing' }
   } catch (error) {
     return { status: 'halted', reason: `the agent failed: ${error?.message ?? error}` }
@@ -114,10 +142,13 @@ if (args.action !== 'start') return halt(args.startLeg ?? 'launch', 'args are no
 if (!complete(args.tables)) return halt(args.startLeg ?? 'launch', 'args carry no complete tables: re-run launch from checks that have pipeline_routing_tables()')
 const { legs, steps, loopTarget, allowed, bound, bounded } = args.tables
 if (!legs.includes(args.startLeg) || !('review-plan' in loopTarget)) return halt(args.startLeg ?? 'launch', 'args are not a launch start answer') // a plan gap is charged to loops['review-plan']
+if (!completeAgents(args.agents, args.profile, steps)) return halt(args.startLeg, 'args carry no complete agents table: re-run launch from checks that have pipeline_agent_table()')
+const agents = args.agents
 
 const loops = { ...Object.fromEntries(Object.keys(loopTarget).map(gate => [gate, 0])), ...args.loops }
 let ui = args.ui
 let size = args.size
+let profile = args.profile
 let exempted = false
 let leg = args.startLeg
 let from = args.startStep
@@ -133,7 +164,10 @@ while (leg) {
     last = { ...result, leg, step }
     log(`${leg}:${step} ${result.status}${result.reason ? `: ${result.reason}` : ''}`)
     if (result.status !== 'continued') break
-    if (leg === 'design') size = result.size
+    if (leg === 'design') {
+      size = result.size
+      profile = size === 'Bounded' && !exempted ? 'light' : 'full' // escalation is one way, in the run as on a resume
+    }
   }
   if (result.status === 'halted') return halt(leg, result.reason)
   if (leg === 'implement') ui = result.ui
@@ -147,7 +181,10 @@ while (leg) {
   const target = gap ? 'design' : loopTarget[leg]
   if (!target) return halt(leg, `no loop-back from ${leg}`)
   const counted = !(gap && size === 'Bounded' && !exempted) // a Bounded escalation is not a loop-back; escalation is one-way, so once per run
-  if (!counted) exempted = true
+  if (!counted) {
+    exempted = true
+    profile = 'full' // an escalation: the grow-form design and every step after it run on full
+  }
   const gate = gap ? 'review-plan' : leg
   if (counted && ++loops[gate] > bound) return halt(leg, `${gate}: loop-back bound exhausted`)
   if (gap && size !== 'Bounded') from = 'plan' // a plan gap reruns only the plan step; a review loop-back and an escalation rerun the spec step first
