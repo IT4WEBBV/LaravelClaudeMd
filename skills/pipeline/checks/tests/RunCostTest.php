@@ -1,12 +1,12 @@
 <?php
 
-function cost_call(string $id, int $input, int $write, int $read, int $output = 50, ?array $split = null, ?string $at = null): string
+function cost_call(string $id, int $input, int $write, int $read, int $output = 50, ?array $split = null, ?string $at = null, ?string $model = null): string
 {
     $usage = ['input_tokens' => $input, 'cache_creation_input_tokens' => $write, 'cache_read_input_tokens' => $read, 'output_tokens' => $output];
     if ($split !== null) {
         $usage['cache_creation'] = $split;
     }
-    $record = ['type' => 'assistant', 'message' => ['id' => $id, 'role' => 'assistant', 'usage' => $usage]];
+    $record = ['type' => 'assistant', 'message' => ['id' => $id, 'role' => 'assistant', 'usage' => $usage, ...($model === null ? [] : ['model' => $model])]];
 
     return json_encode($at === null ? $record : [...$record, 'timestamp' => "2026-09-25T{$at}Z"]);
 }
@@ -65,7 +65,8 @@ it('weighs each call as the token audit does, once per message id', function () 
     expect($cost['calls'])->toBe(2);
     expect($cost['cost'])->toEqualWithDelta(41504, 0.001);
     expect($cost['peak'])->toBe(141001);
-    expect(pipeline_transcript_cost(''))->toBe(['calls' => 0, 'cost' => 0.0, 'peak' => 0]);
+    expect($cost['models'])->toBe([]);
+    expect(pipeline_transcript_cost(''))->toBe(['calls' => 0, 'cost' => 0.0, 'peak' => 0, 'models' => []]);
 });
 
 it('times a transcript from its earliest to its latest record, counting overlapping tool waits once', function () {
@@ -149,5 +150,53 @@ it('prints a step without timestamps as 0.0 min and spans the run over the timed
         'design:run: 0.05M over 2 calls, peak 20k, 6.5 min (0.0 waiting on tools)',
         'handoff:run: 0.04M over 1 calls, peak 300k, 0.0 min (0.0 waiting on tools)',
         'run: 0.09M weighted over 2 steps in 6.5 min; largest step peak 300k (handoff:run)',
+    ]));
+});
+
+it('weighs each token type by its model\'s factor, and a call of no known family as Opus', function () {
+    $usage = ['input_tokens' => 1000, 'cache_creation_input_tokens' => 2000, 'cache_read_input_tokens' => 10000, 'output_tokens' => 100];
+
+    // Opus: 1000 + 2000 × 1.25 + 10000 × 0.1 + 100 × 5 = 5000
+    expect(pipeline_call_cost($usage, 'claude-opus-5-5'))->toEqualWithDelta(5000, 0.001);
+    // Fable: 1000 × 2.5 + 2500 × 2.5 + 1000 × 1.25 + 500 × 2.5 = 11250
+    expect(pipeline_call_cost($usage, 'claude-fable-5-1'))->toEqualWithDelta(11250, 0.001);
+    // Sonnet: 1000 × 0.5 + 2500 × 0.5 + 1000 × 1.0 + 500 × 0.5 = 3000
+    expect(pipeline_call_cost($usage, 'claude-sonnet-5-5'))->toEqualWithDelta(3000, 0.001);
+    // Haiku: 1000 × 0.25 + 2500 × 0.25 + 1000 × 0.5 + 500 × 0.25 = 1500
+    expect(pipeline_call_cost($usage, 'claude-haiku-4-5-20251001'))->toEqualWithDelta(1500, 0.001);
+    foreach (['<synthetic>', '', 'claude-mythos-1', 'gpt-5'] as $other) {
+        expect(pipeline_call_cost($usage, $other))->toEqualWithDelta(5000, 0.001);
+    }
+    expect(pipeline_call_cost($usage))->toEqualWithDelta(5000, 0.001);
+    // a 1h write on Fable: 1000 × 2.5 + 2000 × 2 × 2.5 + 1000 × 1.25 + 500 × 2.5 = 15000
+    $hour = [...$usage, 'cache_creation' => ['ephemeral_5m_input_tokens' => 0, 'ephemeral_1h_input_tokens' => 2000]];
+    expect(pipeline_call_cost($hour, 'claude-fable-5-1'))->toEqualWithDelta(15000, 0.001);
+});
+
+it('reads each call\'s family from its model id, and none from a model that is not a claude- one', function () {
+    expect(pipeline_model_family('claude-fable-5-1'))->toBe('fable');
+    expect(pipeline_model_family('claude-haiku-4-5-20251001'))->toBe('haiku');
+    expect(pipeline_model_family('claude-mythos-1'))->toBe('mythos');
+    expect(pipeline_model_family('<synthetic>'))->toBeNull();
+    expect(pipeline_model_family(''))->toBeNull();
+});
+
+it('names the families a step\'s calls ran on, in first-seen order, and none for a step without a model', function () {
+    $dir = cost_run([
+        'a1' => ['review-plan:review', implode("\n", [
+            cost_call('m1', 10000, 20000, 100000, 1000, null, '10:00:00.000', 'claude-opus-5-5'),
+            cost_call('m2', 0, 0, 0, 0, null, '10:01:00.000', '<synthetic>'),
+            cost_call('m3', 10000, 20000, 100000, 1000, null, '10:02:00.000', 'claude-fable-5-1'),
+            cost_call('m4', 10000, 20000, 100000, 1800, null, '10:03:00.000', 'claude-opus-5-5'),
+        ]), ['status' => 'continued']],
+        'a2' => ['handoff:run', cost_call('m5', 10000, 20000, 100000, 1000, null, '10:04:00.000'), ['status' => 'continued']],
+    ]);
+
+    // a1: 50000 (Opus) + 0 + 112500 (Fable) + 54000 = 216500; a2 (no model, as Opus): 50000; run 266500
+    // (neither total sits on a .xx5 boundary, so %.2f rounding does not depend on float storage)
+    expect(checks_cli('run_cost_cli.php', [$dir])['stdout'])->toBe(implode("\n", [
+        'review-plan:review (opus+fable): 0.22M over 4 calls, peak 130k, 3.0 min (0.0 waiting on tools)',
+        'handoff:run: 0.05M over 1 calls, peak 130k, 0.0 min (0.0 waiting on tools)',
+        'run: 0.27M weighted over 2 steps in 4.0 min; largest step peak 130k (review-plan:review)',
     ]));
 });
