@@ -87,7 +87,7 @@ it('asks for grow form only after an escalation no plan approval has answered', 
 
 it('tells a later leg how to report a plan gap, and design to extend the plan for it', function () {
     expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))
-        ->toContain('On an Architectural spec, append a `plan-approval` entry with `leg`, `cycle`, `at`, `reason` and outcome `looped-back`');
+        ->toContain('On an Architectural spec: only when the plan falls short of what this step needs');
 
     $gap = ['gate' => 'plan-approval', 'leg' => 'implement', 'cycle' => 2, 'at' => '2026-09-22T12:00:00Z', 'reason' => 'needs a queue', 'outcome' => 'looped-back'];
     expect(pipeline_brief(brief_manifest('design', ['gate_ledger' => [$gap]]), 'design', '/tmp/m.json'))
@@ -280,3 +280,17 @@ it('makes handoff on a run on a base check that the PR opened into it', function
         ->toContain('- The PR must open into `feature/integration`: after `handoff pr`, `gh pr view <pr> --json baseRefName --jq .baseRefName` prints `feature/integration`; otherwise `gh pr edit <pr> --base feature/integration` before setting `artifacts.pr` (engine.md §Kickoff).');
     expect(pipeline_brief(brief_manifest('handoff'), 'handoff', '/tmp/m.json'))->not->toContain('The PR must open into');
 });
+
+it('tells a later step to report a plan gap only once it has found one, on either size', function (string $leg, string $step) {
+    foreach (['autoflow', 'interactive'] as $mode) {
+        expect(pipeline_brief(brief_manifest($leg, ['mode' => $mode]), $leg, '/tmp/m.json', $step))
+            ->toContain('On a Bounded spec (its header says `**Design size:** Bounded`): run the escalation check first (engine.md §Design size), and only on escalation append the `design-size` entry and return `plan-insufficient`.')
+            ->toContain('On an Architectural spec: only when the plan falls short of what this step needs (files or behaviour it does not name), append a `plan-approval` entry with `leg`, `cycle`, `at`, a `reason` naming what the plan lacks, and outcome `looped-back`, then return `plan-insufficient`. The size alone is no gap: an Architectural plan needs no approval beyond `review-plan`\'s.')
+            ->not->toContain('On an Architectural spec, append a `plan-approval` entry');
+    }
+})->with([
+    'handoff' => ['handoff', 'run'],
+    'implement' => ['implement', 'run'],
+    'verify-ui' => ['verify-ui', 'run'],
+    'review-pr' => ['review-pr', 'review'],
+]);

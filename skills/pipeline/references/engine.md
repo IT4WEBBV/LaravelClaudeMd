@@ -575,7 +575,10 @@ A step on an Architectural spec that needs files or behaviour the plan does not 
 of the plan approval**: the plan passed `review-plan` and turned out not to cover the change.
 
 1. The step appends `{gate: 'plan-approval', leg: <its leg>, cycle, at, reason, outcome: 'looped-back'}`
-   and returns `plan-insufficient`. A return without that entry halts.
+   and returns `plan-insufficient`. A return without that entry halts. The `reason` names what the plan
+   lacks. The size alone is never a gap: an Architectural plan needs no approval beyond `review-plan`'s
+   (#96: a `handoff` that read the brief's plan-gap line as a rule for every Architectural spec looped a
+   covered plan back for "the owner's plan approval").
 2. The run goes back to `design` through the same bound as a `review-plan` loop-back
    (`pipeline_loop_back()` in `interactive`, `tables.bound` in `autoflow`): the entry
    counts toward the 2 cycles, and the third halts — before
