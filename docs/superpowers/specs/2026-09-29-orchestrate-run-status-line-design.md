@@ -91,7 +91,7 @@ So it lives in `skills/pipeline/checks/`.
 | `pipeline_status_line(array $manifest, int $age, ?string $repo): string` | one run's line. Pure | `pipeline_status_age`, `pipeline_status_link` |
 | `pipeline_status_age(int $seconds): string` | `47m`, `1h05m`, `2d` | nothing |
 | `pipeline_status_link(string $text, ?string $url): string` | OSC 8 around `$text`; `$text` alone when `$url` is null | nothing |
-| `statusline_cli.php <cwd>` | prints `pipeline_status_lines(scan runs, time(), scan repo)` joined by `\n`, no trailing newline; nothing when there are none; exit 0 | `statusline.php` |
+| `statusline_cli.php <cwd>` | routes PHP warnings to stderr (`ini_set('display_errors', 'stderr')`), then prints `pipeline_status_lines(scan runs, time(), scan repo)` joined by `\n`, no trailing newline; nothing when there are none; exit 0 | `statusline.php` |
 | `statusline/statusline-command.sh` | the current `~/.claude/statusline-command.sh`, byte for byte, plus the runs section | `php`, `statusline_cli.php` |
 
 ### What a line shows
@@ -106,8 +106,10 @@ manifest without `mode`) shows nothing.
 - **leg**: `cursor.leg`. **status**: `cursor.status`.
 - **age**: `$now - mtime`, by `pipeline_status_age()`: under an hour `<m>m` (`0m` under a minute), under
   a day `<h>h<mm>m` (`1h05m`), else `<d>d`. **Past 90 minutes** (`> 5400` s) the age is wrapped in
-  yellow, `\033[33m…\033[0m`, the warning color the status line already uses.
-- **PR**: `PR#<artifacts.pr>` linked to `https://github.com/<repo>/pull/<n>`; absent without
+  yellow, `\033[33m…\033[0m`, the warning color the status line already uses. Yellow means no step
+  boundary for 90 minutes: commits and PR changes do not touch the manifest, so this is not
+  orchestrate's stall rule, which counts them too.
+- **PR**: `PR#<artifacts.pr>` (issue and PR cast to `int` before they enter a URL) linked to `https://github.com/<repo>/pull/<n>`; absent without
   `artifacts.pr`.
 - **halted**: the status word and the reason in red, `\033[31m…\033[0m`, each wrapped on its own. The
   reason is `cursor.reason` with control characters removed, whitespace runs collapsed to one space,
@@ -150,6 +152,9 @@ Examples (`repo` null):
    `realpath` resolves `~/.claude/statusline-command.sh` to the repo file, so the CLI is found through
    the symlink. A missing `php`, a PHP fatal (exit 255, its message on stdout under CLI
    `display_errors`), a slow run: the section is empty and the first line prints exactly as before.
+   A warning or a deprecation is different: CLI PHP prints it on stdout and still exits 0, so the
+   Python side would show it as a row. `statusline_cli.php` therefore sets `display_errors` to
+   `stderr` first; stdout holds only rows, and a fatal still exits 255.
 2. The final print appends `"\n" + runs` when `runs` is not empty; otherwise it is unchanged.
 
 ### Wiring (the owner's decision)
@@ -191,7 +196,8 @@ Written first, seen red.
 - **Discovery**, same file: a throwaway repo (`suite_repo()`) with two worktrees, an `autoflow` manifest
   and its `.before.json` in one, an `interactive` one in the other, `- repo: acme/app` in the primary's
   config: `statusline_cli.php <worktree>/sub` prints exactly one line, linked to `acme/app`. A temp dir
-  outside git prints nothing and exits 0.
+  outside git prints nothing and exits 0. A manifest with `mode: autoflow` and an empty `cursor`
+  through `statusline_cli.php` prints its row and no `Warning` on stdout.
 - **`ManifestTest.php`**: `manifest_path()` for a branch with and without `/`; `manifest_finished()`.
   The existing kickoff and dispatch tests cover the two refactored call sites.
 - **`statusline/tests/statusline.test.sh`** (bash, like `hooks/tests/`): the script outside a repo prints
@@ -212,6 +218,8 @@ the setup step, and the PR body says so.
   the line shows the leg, as the issue's example does.
 - Binding runs to the orchestrating session through `lease`: nothing writes it (the issue).
 - A hook reminder while the local file is still a regular file: the PR body carries the one-time step.
+- An atomic `manifest_write`: it is a plain `file_put_contents`, so a read that lands mid-write decodes
+  to null and that run's row is gone for one 5-second refresh. Harmless flicker, not a bug.
 
 ## Assumptions
 

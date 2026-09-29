@@ -28,7 +28,7 @@
 
 1. **The `.before.json` snapshot beside each manifest.** A glob would show every run twice; discovery reads only `manifest_path(<worktree>, <branch>)`. Pinned in Task 3's discovery test.
 2. **An empty or vanished `cwd`.** `git -C ''` runs in the current directory, which would scan whatever repo PHP was started in. `pipeline_status_scan()` returns nothing unless `is_dir($cwd)`. Pinned in Task 3.
-3. **A PHP failure.** CLI `display_errors` writes a fatal to stdout; the Python side uses stdout only on exit 0, so the first row never gains an error text. Pinned in Task 4, case 4.
+3. **A PHP failure.** CLI `display_errors` writes a fatal to stdout; the Python side uses stdout only on exit 0, so the first row never gains an error text. Pinned in Task 4, case 4. A warning or a deprecation also lands on stdout but exits 0 (a manifest missing `cursor.leg`, or a `cursor.reason` with invalid UTF-8 making `preg_replace` return null for `trim()`), so `statusline_cli.php` sets `display_errors` to `stderr` before the scan. Pinned in Task 3's warning test.
 4. **A detached worktree** (no `branch` line in the porcelain) is skipped, not an error. Pinned in Task 3.
 5. **A reason carrying escape sequences or newlines** would break the status line's rows; control characters are dropped and whitespace collapsed. Pinned in Task 2.
 
@@ -281,8 +281,8 @@ function pipeline_status_order(array $manifest): array
 function pipeline_status_line(array $manifest, int $age, ?string $repo): string
 {
     $cursor = $manifest['cursor'];
-    $issue = $manifest['artifacts']['issue'] ?? null;
-    $pr = $manifest['artifacts']['pr'] ?? null;
+    $issue = isset($manifest['artifacts']['issue']) ? (int) $manifest['artifacts']['issue'] : null;
+    $pr = isset($manifest['artifacts']['pr']) ? (int) $manifest['artifacts']['pr'] : null;
     $halted = ($cursor['status'] ?? null) === 'halted';
     $reason = $halted ? pipeline_status_reason((string) ($cursor['reason'] ?? '')) : '';
 
@@ -398,11 +398,19 @@ it('prints nothing outside a git repo, for a missing directory, or without an ar
     expect(checks_cli('statusline_cli.php', []))->toBe(['code' => 0, 'stdout' => '']);
     expect(pipeline_status_scan(''))->toBe(['repo' => null, 'runs' => []]);
 });
+
+it('keeps a PHP warning off stdout, where the status line would print it as a row', function () {
+    $repo = suite_repo();
+    $branch = pipeline_git($repo, ['branch', '--show-current']);
+    manifest_write(manifest_path($repo, $branch), ['mode' => 'autoflow', 'branch' => 'x', 'cursor' => [], 'artifacts' => []]);
+
+    expect(checks_cli('statusline_cli.php', [$repo]))->toBe(['code' => 0, 'stdout' => 'x  0m']);
+});
 ```
 
 - [ ] **Step 2: Run them to see them fail**
 
-Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='finds each worktree|prints nothing outside'`
+Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='finds each worktree|prints nothing outside|keeps a PHP warning'`
 Expected: FAIL, `Call to undefined function pipeline_status_scan()`, and the CLI fails to open `statusline_cli.php` (non-zero code).
 
 - [ ] **Step 3: Add discovery to `statusline.php`.** Below the existing `require_once`, add:
@@ -477,6 +485,9 @@ function pipeline_status_repo(string $primary): ?string
  * but 0.
  */
 
+// a warning exits 0 on stdout, which the status line would print as a row; a fatal still exits 255
+ini_set('display_errors', 'stderr');
+
 require_once __DIR__ . '/statusline.php';
 
 $scan = pipeline_status_scan((string) ($argv[1] ?? ''));
@@ -486,8 +497,8 @@ echo implode("\n", pipeline_status_lines($scan['runs'], time(), $scan['repo']));
 
 - [ ] **Step 5: Run the tests and the suite**
 
-Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='finds each worktree|prints nothing outside'`
-Expected: PASS.
+Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='finds each worktree|prints nothing outside|keeps a PHP warning'`
+Expected: PASS. Without the `ini_set` line the warning test fails on `Warning: Undefined array key "leg"` in stdout.
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`
 Expected: PASS, 0 failed.
@@ -802,8 +813,8 @@ read from the run manifests by `skills/pipeline/checks/statusline_cli.php`:
 #415  implement  pending  47m  PR#419
 ```
 
-The age is the time since the manifest last changed and turns yellow past 90 minutes (orchestrate's
-suspected stall); a halted run shows its reason in red; the issue and the PR are links. At most four
+The age is the time since the manifest last changed and turns yellow past 90 minutes without a step
+boundary (commits do not touch the manifest, so this is not orchestrate's stall rule); a halted run shows its reason in red; the issue and the PR are links. At most four
 rows. `refreshInterval: 5` re-runs the script every five seconds, so the rows move while the session
 waits on its workflows; it costs no tokens. Without runs, or without `php`, the first row is all there is.
 
