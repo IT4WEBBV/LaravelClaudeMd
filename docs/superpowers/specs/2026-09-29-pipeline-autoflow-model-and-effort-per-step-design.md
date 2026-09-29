@@ -295,3 +295,15 @@ answer (a cached answer passed by hand) halts before any agent with the agents-t
 13. No probe was needed: `agent()` already takes `model` (`fable`, `opus`, `sonnet`) and `effort`
     (`low` for `handoff`) in today's script, and the Workflow reference lists `effort` as
     `low | medium | high | xhigh | max`.
+14. *What does a run do when a grow-form spec step returns Bounded after an escalation?* Assumed by the
+    plan step: the two assignments stand and the profile follows the returned size (`light`), with no
+    third rule in the script. The grow-form brief asks for an `Architectural` header, `review-plan`
+    re-reviews the grown spec, and a resume takes `full` from the ledger's `escalated` entry.
+15. *What does a step line name for a call whose model is `<synthetic>`, empty, or a family the factor
+    table lacks?* Assumed by the plan step: a model that does not start with `claude-` names nothing (so
+    `<synthetic>` and a missing model add no family to the parenthetical); `claude-<word>-…` names
+    `<word>` even when the table lacks it, and weighs it as `opus`. The line then says which model ran
+    without claiming a factor for it.
+16. *Does the override check run on a finished run's `launch`?* Assumed by the plan step: yes, with the
+    other manifest checks and before the finished rule, so a `done` manifest with an invalid `agents`
+    halts (nothing written) instead of answering `done`.
