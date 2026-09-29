@@ -20,15 +20,34 @@ function pipeline_leg_overrides(string $mode): array
     $completeEntry = 'Complete the open entry: `actions`, then `outcome`, equal to the status you return.';
     $yourself = fn (string $procedure, string $subject) => "Apply `/critique`'s `{$procedure}` procedure to {$subject} yourself: Stage 0, Stage 1 and the rubric in `~/.claude/skills/critique/references/rubrics.md`. You are the reviewer; do not dispatch one, so `--verify` and `alternatives` are not available.";
     $checks = 'When the repo declares a `## Checks` block, run its checks first and state their result qualified by its scope (engine.md §Mechanical checks); a repo that declares none says nothing about checks.';
+    $assumptions = 'Where brainstorming would ask the human, write each question and the answer you assumed into the spec\'s `## Assumptions` section, so `/critique plan` audits exactly those.';
+    $reads = 'Do not build or run the plan\'s code, in a scratch copy or anywhere else: confirm the signatures and APIs it relies on by reading, `php -l` or grep; `implement` proves the plan\'s Expected lines (engine.md §What design proves).';
+    $probe = 'The one exception: when the choice between approaches hinges on whether one of them works at all, answer that question with a throwaway probe (a few lines run on their own, never the plan\'s code, never the suite) and write the question and what the probe showed into the spec.';
+    $exemplars = 'Plans and specs committed before 2026-09-14 are not exemplars for test or proof policy, and no plan\'s `Verified before writing` header is part of the format.';
 
     return [
         'design:run' => [
             'Invoke `superpowers:brainstorming`; on the Architectural path it hands over to `superpowers:writing-plans` (engine.md §Design size).',
-            'Where brainstorming would ask the human, write each question and the answer you assumed into the spec\'s `## Assumptions` section, so `/critique plan` audits exactly those.',
-            'Do not build or run the plan\'s code, in a scratch copy or anywhere else: confirm the signatures and APIs it relies on by reading, `php -l` or grep; `implement` proves the plan\'s Expected lines (engine.md §What design proves).',
-            'The one exception: when the choice between approaches hinges on whether one of them works at all, answer that question with a throwaway probe (a few lines run on their own, never the plan\'s code, never the suite) and write the question and what the probe showed into the spec.',
-            'Plans and specs committed before 2026-09-14 are not exemplars for test or proof policy, and no plan\'s `Verified before writing` header is part of the format.',
+            $assumptions,
+            $reads,
+            $probe,
+            $exemplars,
             'Commit the spec, then the plan: two commits. Set `artifacts.spec` and `artifacts.plan`.',
+        ],
+        'design:spec' => [
+            'Invoke `superpowers:brainstorming` and stop at the spec: on the Architectural path, where brainstorming hands over to `superpowers:writing-plans`, the plan is the next step\'s, `design:plan`, so do not invoke `writing-plans` and commit no plan (engine.md §Design size).',
+            $assumptions,
+            $reads,
+            $probe,
+            $exemplars,
+            'Commit the spec; on the Bounded path, commit the plan as well, a second commit: a Bounded design has no plan step. Then, after your last commit and in one manifest write, set `artifacts.spec` and remove `artifacts.plan` (the plan step writes this spec\'s plan and sets it), or on the Bounded path set `artifacts.plan` to the plan: a halt before that write leaves the manifest calling for this step again.',
+        ],
+        'design:plan' => [
+            'Read the committed spec (`artifacts.spec`) cold, and the code it points at, and invoke `superpowers:writing-plans` on it; do not re-design what the spec settles (engine.md §Design size).',
+            'Where the plan needs an answer the spec does not give, add the question and the answer you assumed to the spec\'s `## Assumptions` and commit that before the plan, so `/critique plan` audits it.',
+            $reads,
+            $exemplars,
+            'Commit the plan. Set `artifacts.plan`.',
         ],
         'review-plan:review' => [
             $autoflow ? $yourself('plan', 'the spec and the plan') : 'Invoke `/critique plan` on the spec and the plan.',
@@ -176,8 +195,12 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step): s
     $lines = pipeline_leg_overrides((string) $manifest['mode'])["{$leg}:{$step}"];
     $ledger = pipeline_ledger($manifest);
 
+    $plan = pipeline_plan_path((string) ($manifest['artifacts']['spec'] ?? ''));
+    if ($leg === 'design' && $step === 'plan' && $plan !== null) {
+        $lines[] = "The plan goes at `{$plan}`, beside the spec: when that file exists it is this design's plan, from an earlier pass or the Bounded plan this design grew from, so update it in place and write no second plan.";
+    }
     if ($leg === 'design' && pipeline_design_grows($ledger)) {
-        $lines[] = 'Grow form: the design escalated from Bounded (engine.md §Design size). Grow the spec and the plan; do not re-design them.';
+        $lines[] = pipeline_grow_form_line($step);
     }
     if ($leg === 'design' && pipeline_is_plan_gap(end($ledger) ?: [])) {
         $lines[] = 'Plan gap: extend the plan (and the spec where it must say more) to cover the entry\'s `reason`; describe what is already built as state, do not re-design it (engine.md §Design size). Leave that entry as it is, with no `actions`: what you did goes in the spec, the plan and the reason you return.';
@@ -246,6 +269,26 @@ function pipeline_design_grows(array $ledger): bool
     }
 
     return $grows;
+}
+
+/** What the grow form asks of each design step: `autoflow`'s spec step grows the spec, its plan step the plan (engine.md §Design size). */
+function pipeline_grow_form_line(string $step): string
+{
+    $escalated = 'Grow form: the design escalated from Bounded (engine.md §Design size).';
+
+    return $escalated . ' ' . match ($step) {
+        'spec' => 'Grow the spec: its header says `**Design size:** Architectural` and a `## Grown from Bounded` section says what changed, why it grew, what already exists and what remains; do not re-design it. The plan step adds the remaining steps to the plan.',
+        'plan' => 'Add the remaining steps to the plan, as the spec\'s `## Grown from Bounded` section names them; do not re-design it.',
+        default => 'Grow the spec and the plan; do not re-design them.',
+    };
+}
+
+/** The plan beside a spec, by the naming both follow (`…/specs/<date>-<slug>-design.md` → `…/plans/<date>-<slug>.md`); null for a spec named otherwise. */
+function pipeline_plan_path(string $spec): ?string
+{
+    $plan = preg_replace('#(^|/)specs/([^/]+)-design\.md$#', '$1plans/$2.md', $spec, 1, $count);
+
+    return $count === 1 ? $plan : null;
 }
 
 function pipeline_brief_return(string $leg, string $step, string $mode): string
