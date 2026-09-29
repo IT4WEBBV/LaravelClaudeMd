@@ -19,16 +19,23 @@ const COPIED = { design: { size: { type: 'string', enum: ['Bounded', 'Architectu
 const UNSATISFIABLE = { type: 'object', properties: { status: { type: 'string', enum: [] } }, required: ['status'] } // invalid: agent() throws before starting an agent — the smoke run's thrown error
 
 function complete(tables) {
-  const { legs, steps, loopTarget, allowed, bound } = tables ?? {}
+  const { legs, steps, loopTarget, allowed, bound, bounded } = tables ?? {}
   const filled = list => Array.isArray(list) && list.length > 0
   return filled(legs)
     && legs.every(leg => filled(steps?.[leg]) && steps[leg].every(step => filled(allowed?.[`${leg}:${step}`])))
     && typeof loopTarget === 'object' && loopTarget !== null && Object.entries(loopTarget).every(([from, to]) => legs.includes(from) && legs.includes(to))
+    && typeof bounded === 'object' && bounded !== null && Object.entries(bounded).every(([leg, list]) => legs.includes(leg) && filled(list) && list.every(step => steps[leg].includes(step)))
     && Number.isInteger(bound)
 }
 
 function nextLeg(leg) {
   return legs.slice(legs.indexOf(leg) + 1).find(next => next !== 'verify-ui' || ui)
+}
+
+// A Bounded design runs fewer steps (tables.bounded): its spec step commits the plan too. Read after every
+// step, since the spec step's size decides whether the plan step runs.
+function stepsOf(leg) {
+  return (size === 'Bounded' && bounded[leg]) || steps[leg]
 }
 
 function halt(leg, reason) {
@@ -105,9 +112,8 @@ async function runStep(leg, step) {
 
 if (args.action !== 'start') return halt(args.startLeg ?? 'launch', 'args are not a launch start answer')
 if (!complete(args.tables)) return halt(args.startLeg ?? 'launch', 'args carry no complete tables: re-run launch from checks that have pipeline_routing_tables()')
-const { legs, steps, loopTarget, allowed, bound } = args.tables
+const { legs, steps, loopTarget, allowed, bound, bounded } = args.tables
 if (!legs.includes(args.startLeg) || !('review-plan' in loopTarget)) return halt(args.startLeg ?? 'launch', 'args are not a launch start answer') // a plan gap is charged to loops['review-plan']
-if (args.startStep && !steps[args.startLeg].includes(args.startStep)) return halt(args.startLeg, `${args.startLeg} has no ${args.startStep} step`)
 
 const loops = { ...Object.fromEntries(Object.keys(loopTarget).map(gate => [gate, 0])), ...args.loops }
 let ui = args.ui
@@ -117,19 +123,20 @@ let leg = args.startLeg
 let from = args.startStep
 let last
 while (leg) {
-  const all = steps[leg]
-  const remaining = from ? all.slice(all.indexOf(from)) : all
+  let index = from ? stepsOf(leg).indexOf(from) : 0
+  if (index < 0) return halt(leg, `${leg} has no ${from} step`)
   from = undefined
   let result
-  for (const step of remaining) {
+  for (; index < stepsOf(leg).length; index++) {
+    const step = stepsOf(leg)[index]
     result = await runStep(leg, step)
     last = { ...result, leg, step }
     log(`${leg}:${step} ${result.status}${result.reason ? `: ${result.reason}` : ''}`)
     if (result.status !== 'continued') break
+    if (leg === 'design') size = result.size
   }
   if (result.status === 'halted') return halt(leg, result.reason)
   if (leg === 'implement') ui = result.ui
-  if (leg === 'design') size = result.size
   if (result.status === 'continued') {
     leg = nextLeg(leg)
     continue
@@ -143,6 +150,7 @@ while (leg) {
   if (!counted) exempted = true
   const gate = gap ? 'review-plan' : leg
   if (counted && ++loops[gate] > bound) return halt(leg, `${gate}: loop-back bound exhausted`)
+  if (gap && size !== 'Bounded') from = 'plan' // a plan gap reruns only the plan step; a review loop-back and an escalation rerun the spec step first
   leg = target
 }
 return { action: 'done' }
