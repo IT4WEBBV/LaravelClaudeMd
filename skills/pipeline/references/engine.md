@@ -750,11 +750,16 @@ runs (#77), while `review-pr:review` reads the diff, not CI.
   `review-pr:review` runs while CI runs. `interactive` keeps `work-on`'s watch.
 - **One gate, in the session that runs `gh pr ready`:** the invoking session once `finish` prints `done`
   in `autoflow`, the finish step in `interactive`. `dispatch_cli.php ci <manifest> --poll <n>`
-  (`../checks/ci.php`) reads the PR's head commit and its checks once
-  (`gh pr view <pr> --json headRefOid,statusCheckRollup`), writes nothing, and prints one JSON line:
+  (`../checks/ci.php`) reads the worktree's `HEAD` (`git rev-parse HEAD`; a git error halts at once), then
+  the PR's head commit and its checks once (`gh pr view <pr> --json headRefOid,statusCheckRollup`), writes
+  nothing, and prints one JSON line. GitHub's head has to be the worktree's `HEAD` before its checks count
+  (#99): a push that failed or was skipped leaves an older head whose CI can be green, and the PR would go
+  ready without the last fix. That comparison comes first, so neither a green nor a red on an older
+  commit counts:
 
 | Verdict on the head commit | Answer |
 |---|---|
+| `mismatch`: GitHub's head is not the worktree's `HEAD` | `wait`; `halt` at the third read, naming both shas: a push GitHub shows within seconds, and one it does not show by then did not land |
 | `green`: every check finished `SUCCESS`, `NEUTRAL` or `SKIPPED` | `ready` |
 | `none`: no check at all | `ready`; with `.github/workflows/*.yml` or `*.yaml` in the worktree only from the third read, since GitHub registers a push's checks seconds after it |
 | `pending` | `wait`; `halt` at the 120th read (an hour at 30 s) |
@@ -780,9 +785,10 @@ poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll
   `finish` records the halt there. The PR stays draft, and §Failure policy's duties after `handoff`
   follow. A red after the round halts: a decision that starts `CI red on the PR's head commit` is the
   round spent, once per run, so a resumed run halts on its next red too. An empty answer (a usage error)
-  is a halt as well. After a halt on the hour nothing needs re-reviewing: run the loop again by hand on
-  the halted manifest (`ci` is read-only and refuses only a retired mode or a missing PR) rather than
-  `launch`, which would re-run `review-pr:review`.
+  is a halt as well. After a halt on the hour, or on a `mismatch` once the heads match, nothing needs
+  re-reviewing: run the loop again by hand on the halted manifest (`ci` is read-only and refuses only a
+  retired mode, a missing PR or a worktree whose `HEAD` git cannot read) rather than `launch`, which would
+  re-run `review-pr:review`.
 - **In `interactive`** the finish step runs the same loop, `gh pr ready` on `ready`, and shows any other
   answer to the human; there is no automatic round.
 - **The merge watch stays on `state`** (§After the merge): once the PR is ready, CI on its head has
@@ -1118,7 +1124,8 @@ Under `autoflow` these are the only stops. **No finding stops a run.**
 - **An `autoflow` step the run cannot accept** — a status the step may not return fails the step's
   schema, and `brief` halts a step the ledger does not support (`resolve` with no open review,
   `review` with one already open) → **halt**.
-- **CI on the PR's head commit red after the fix round, or not settled in an hour** (§The CI gate) →
+- **CI on the PR's head commit red after the fix round, or not settled in an hour, or GitHub's head still
+  not the worktree's `HEAD` at the third read** (§The CI gate) →
   **halt**, the PR still draft: `finish` records the gate's answer on `review-pr`, and the duties after
   `handoff` under *Bound exhaustion* apply.
 - **A stopped `autoflow` workflow** — `TaskStop`, a dead session, a workflow error: `finish` with
