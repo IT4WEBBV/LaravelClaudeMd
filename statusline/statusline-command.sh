@@ -132,5 +132,23 @@ limit_seg = f" | {' '.join(windows)}" if windows else ""
 # Get current time
 time_str = datetime.now().strftime('%H:%M:%S')
 
+# One row per unfinished autoflow run of this repo (README §Status line). realpath follows the
+# ~/.claude/statusline-command.sh symlink into the repo; any failure leaves the first row alone.
+RUNS_CLI = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'skills', 'pipeline', 'checks', 'statusline_cli.php')
+
+
+def autoflow_runs(cwd):
+    if not cwd or not os.path.isfile(RUNS_CLI):
+        return ''
+    try:
+        result = subprocess.run(['php', RUNS_CLI, cwd], capture_output=True, text=True, timeout=2)
+    except (OSError, subprocess.TimeoutExpired):
+        return ''
+    return result.stdout.rstrip('\n') if result.returncode == 0 else ''
+
+
+runs = autoflow_runs(cwd)
+runs_seg = f"\n{runs}" if runs else ""
+
 # Output the status line
-print(f"{writable}{short_dir}{git_info}{model_seg} | {ctx_seg}{limit_seg} | {time_str}", end='')
+print(f"{writable}{short_dir}{git_info}{model_seg} | {ctx_seg}{limit_seg} | {time_str}{runs_seg}", end='')
