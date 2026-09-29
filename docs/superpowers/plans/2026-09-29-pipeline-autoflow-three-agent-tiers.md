@@ -535,7 +535,7 @@ function pipeline_agent_table(array $override): array
 {
     $table = PIPELINE_AGENTS;
     foreach ($override as $step => $fields) {
-        foreach ([...array_map(fn (AgentTier $tier) => $tier->value, AgentTier::cases()), 'loopedBack'] as $profile) {
+        foreach ([...array_column(AgentTier::cases(), 'value'), 'loopedBack'] as $profile) {
 ```
 
 (the loop body and the rest of the function stay).
@@ -684,7 +684,7 @@ change.
 | `handoff:run` | sonnet low | sonnet low | sonnet low | Near-mechanical on every tier. Haiku 4.5 has no effort setting and writes `implement`'s prompt: rejected. |
 | `implement:run` | opus high | opus high | sonnet high | Medium keeps high: TDD and the escalation check after every commit happen here, and its time goes to CI and Pint, not the model. Light: a tiny change; a `verify-ui` or `review-pr` loop-back still reruns it on the loop-back entry. |
 | `verify-ui:run` | sonnet high | sonnet medium | sonnet medium | Mostly browser operation; full stays high because it is a gate that can send the run back to `implement`. Medium and light: few states to capture, and no lower, since it is a gate. |
-| `review-pr:review` | fable high | fable high | opus high | The last gate before a human merges: high on every tier. Light: Opus is independent of Sonnet's code, and spares Fable quota. |
+| `review-pr:review` | fable high | fable high | opus high | The last gate before a human merges: high on every tier. Light: on the first round Opus is independent of Sonnet's code, and it spares Fable quota. |
 | `review-pr:resolve` | opus high | opus medium | sonnet high | Full: nothing reviews it afterwards unless it loops back. Medium and light: targeted fixes on a small diff. |
 | `implement:run` after a loop-back | opus xhigh | opus xhigh | opus xhigh | A `verify-ui` or `review-pr` loop-back is the failure signal to rerun with more effort. |
 | a review that returned nothing, once | opus xhigh | opus xhigh | opus xhigh | Rare; it fires on `null`, not on a review with no findings, and compensates for reviewing with the author's model. |
@@ -714,8 +714,9 @@ halts on an override that is not an object of `autoflow` steps each naming a kno
 
 **Fable stays the reviewer on `full` and `medium`.** Reviews on Opus would be the largest token lever,
 but give up an independent reviewer. `light` takes that lever for a tiny change (owner decision): its
-PR review on Opus is still independent of Sonnet's code. `run_cost_cli.php` weighs each call by its
-model (§`autoflow`), so a model swap shows in the figure; effort shows mostly as turns and wall time.
+PR review on Opus is still independent of Sonnet's code on the first round. `run_cost_cli.php` weighs
+each call by its model (§`autoflow`), so a model swap shows in the figure; effort shows mostly as turns
+and wall time.
 
 ```
 
@@ -888,8 +889,8 @@ Expected: PASS (`StatuslineTest` loads `kickoff.php` too and never calls `pipeli
   `/pipeline [interactive|autoflow] [medium|light] <idea | number | spec-path>`. The word `medium` or
   `light` **permits** Bounded, and in `autoflow` names the agents tier (§Agents per step); no word means
   `full`. The permit matters only while `design` has not run; on a resume the size comes from the spec
-  and the word permits nothing more, with a note saying so (its tier still picks a Bounded design's
-  agents).
+  and the word permits nothing more, with a note saying so (the tier kickoff recorded still picks a
+  Bounded design's agents).
 
   | | with `medium` or `light` | with neither |
   ```

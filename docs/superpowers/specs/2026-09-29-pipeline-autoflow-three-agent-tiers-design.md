@@ -247,4 +247,4 @@ Added by the `design:plan` step, for questions the plan needed answered:
 16. *Does engine.md's "Fable stays the reviewer" paragraph still hold?* On `full` and `medium`. The spec's
     doc list does not name it, but with `light` running both reviews on Opus it would contradict the
     table, so it gains one sentence: `light` takes that lever for a tiny change (the issue's owner
-    decision), and its PR review on Opus stays independent of Sonnet's code.
+    decision), and its PR review on Opus stays independent of Sonnet's code on the first round.
