@@ -248,6 +248,99 @@ function pipeline_design_grows(array $ledger): bool
     return $grows;
 }
 
+/**
+ * The commit the newest completed review of the PR saw (`../references/engine.md` §Scoped re-review): the
+ * `reviewed_sha` of the newest `continued` `pr-review` entry that records one, newer than the latest
+ * escalation or plan gap. A halted, looped-back or open review is never a base.
+ */
+function pipeline_review_base(array $ledger): ?string
+{
+    $since = pipeline_reset_at($ledger);
+    $bases = array_filter($ledger, fn (array $entry) => ($entry['gate'] ?? null) === 'pr-review'
+        && ($entry['outcome'] ?? null) === 'continued'
+        && ($entry['at'] ?? '') > $since
+        && is_string($entry['reviewed_sha'] ?? null));
+
+    return $bases === [] ? null : end($bases)['reviewed_sha'];
+}
+
+/**
+ * What a review of the PR after a completed one reads (`../references/engine.md` §Scoped re-review), or null
+ * for the whole PR: no base, a base HEAD does not contain, a base ref that does not resolve, or any git call
+ * that fails. `$git` runs git in the worktree, as `pipeline_git_run()` does.
+ *
+ * @return array{since: string, base: string, commits: int, files: list<string>}|null
+ */
+function pipeline_review_scope(array $manifest, callable $git): ?array
+{
+    $since = pipeline_review_base(pipeline_ledger($manifest));
+    if ($since === null || $git(['merge-base', '--is-ancestor', $since, 'HEAD'])[0] !== 0) {
+        return null;
+    }
+    $base = isset($manifest['base'])
+        ? "origin/{$manifest['base']}"
+        : (pipeline_git_lines($git, ['symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD'])[0] ?? null);
+    if ($base === null) {
+        return null;
+    }
+    $range = ["{$since}..HEAD", "^{$base}"];
+    $commits = pipeline_git_lines($git, ['rev-list', '--no-merges', ...$range]);
+    $merges = pipeline_git_lines($git, ['rev-list', '--merges', ...$range]);
+    $files = $merges === null ? null : pipeline_meeting_files($merges, $git);
+
+    return $commits === null || $files === null ? null : ['since' => $since, 'base' => $base, 'commits' => count($commits), 'files' => $files];
+}
+
+/** The lines git printed, or null when it failed. */
+function pipeline_git_lines(callable $git, array $args): ?array
+{
+    [$code, $out] = $git($args);
+
+    return $code === 0 ? array_values(array_filter(explode("\n", $out), fn (string $line) => $line !== '')) : null;
+}
+
+/** The files where these merges met the branch's changes, sorted and unique, or null when git fails. */
+function pipeline_meeting_files(array $merges, callable $git): ?array
+{
+    $files = [];
+    foreach ($merges as $merge) {
+        $merged = pipeline_merge_files($merge, $git);
+        if ($merged === null) {
+            return null;
+        }
+        $files = [...$files, ...$merged];
+    }
+    $files = array_values(array_unique($files));
+    sort($files);
+
+    return $files;
+}
+
+/**
+ * One merge's meeting files: per parent after the first, what both sides changed since they last met
+ * (a conflict, a clean merge of a shared file, a resolution that took one side), and what the merge
+ * commit changed against every parent (an edit made in the merge itself).
+ */
+function pipeline_merge_files(string $merge, callable $git): ?array
+{
+    $parents = pipeline_git_lines($git, ['rev-parse', "{$merge}^@"]);
+    $files = pipeline_git_lines($git, ['diff-tree', '-c', '--no-commit-id', '--name-only', $merge]);
+    if ($parents === null || $files === null) {
+        return null;
+    }
+    $first = array_shift($parents);
+    foreach ($parents as $parent) {
+        $theirs = pipeline_git_lines($git, ['diff', '--name-only', '--no-renames', "{$first}...{$parent}"]);
+        $ours = pipeline_git_lines($git, ['diff', '--name-only', '--no-renames', "{$parent}...{$first}"]);
+        if ($theirs === null || $ours === null) {
+            return null;
+        }
+        $files = [...$files, ...array_intersect($theirs, $ours)];
+    }
+
+    return $files;
+}
+
 function pipeline_brief_return(string $leg, string $step, string $mode): string
 {
     $keys = implode(', ', array_map(fn (string $key) => "`{$key}`", pipeline_leg_writable_keys()));
