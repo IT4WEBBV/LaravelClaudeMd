@@ -13,9 +13,10 @@ export const meta = {
 }
 
 // The routing tables are launch's: `tables` in its start answer, built by pipeline_routing_tables() from
-// the functions interactive mode uses. So are the agents: `agents` (pipeline_agent_table()) and the
-// profile the run starts on (pipeline_start_profile()), so the script names no model or effort
-// (engine.md §Agents per step). meta.phases repeats the legs as labels only (meta must be a pure
+// the functions interactive mode uses. So are the agents: `agents` (pipeline_agent_table()), the
+// profile the run starts on (pipeline_start_profile()) and `tier`, the tier its invocation named, so
+// the script names no model or effort, and no tier but `full` (engine.md §Agents per step).
+// meta.phases repeats the legs as labels only (meta must be a pure
 // literal). AutoflowScriptTest replays this script on launch's answer with agent() faked.
 const COPIED = { design: { size: { type: 'string', enum: ['Bounded', 'Architectural'] } }, implement: { ui: { type: 'boolean' } } }
 const UNSATISFIABLE = { type: 'object', properties: { status: { type: 'string', enum: [] } }, required: ['status'] } // invalid: agent() throws before starting an agent — the smoke run's thrown error
@@ -34,16 +35,17 @@ function isSetting(entry) {
   return typeof entry?.model === 'string' && entry.model !== '' && typeof entry?.effort === 'string' && entry.effort !== ''
 }
 
-// Both profiles cover every step of the tables, a loop-back entry names one of those steps, and the
-// retry and smoke entries and the profile to start on are there.
-function completeAgents(agents, profile, steps) {
+// `full` and the run's tier each cover every step of the tables, a loop-back entry names one of those
+// steps, the retry and smoke entries are there, and the run starts on `full` or its tier: the only
+// profiles it can reach.
+function completeAgents(agents, profile, tier, steps) {
   const keys = Object.entries(steps).flatMap(([leg, list]) => list.map(step => `${leg}:${step}`))
-  const { full, light, loopedBack, retry, smoke } = agents ?? {}
+  const { full, loopedBack, retry, smoke } = agents ?? {}
   const covers = table => typeof table === 'object' && table !== null && keys.every(key => isSetting(table[key]))
-  return covers(full) && covers(light)
+  return covers(full) && covers(agents?.[tier])
     && typeof loopedBack === 'object' && loopedBack !== null && Object.entries(loopedBack).every(([key, entry]) => keys.includes(key) && isSetting(entry))
     && isSetting(retry) && isSetting(smoke)
-    && ['full', 'light'].includes(profile)
+    && ['full', tier].includes(profile)
 }
 
 function setting({ model, effort }) {
@@ -142,8 +144,9 @@ if (args.action !== 'start') return halt(args.startLeg ?? 'launch', 'args are no
 if (!complete(args.tables)) return halt(args.startLeg ?? 'launch', 'args carry no complete tables: re-run launch from checks that have pipeline_routing_tables()')
 const { legs, steps, loopTarget, allowed, bound, bounded } = args.tables
 if (!legs.includes(args.startLeg) || !('review-plan' in loopTarget)) return halt(args.startLeg ?? 'launch', 'args are not a launch start answer') // a plan gap is charged to loops['review-plan']
-if (!completeAgents(args.agents, args.profile, steps)) return halt(args.startLeg, 'args carry no complete agents table: re-run launch from checks that have pipeline_agent_table()')
+if (!completeAgents(args.agents, args.profile, args.tier, steps)) return halt(args.startLeg, 'args carry no complete agents table: re-run launch from checks that have pipeline_agent_table()')
 const agents = args.agents
+const tier = args.tier
 
 const loops = { ...Object.fromEntries(Object.keys(loopTarget).map(gate => [gate, 0])), ...args.loops }
 let ui = args.ui
@@ -166,7 +169,7 @@ while (leg) {
     if (result.status !== 'continued') break
     if (leg === 'design') {
       size = result.size
-      profile = size === 'Bounded' && !exempted ? 'light' : 'full' // escalation is one way, in the run as on a resume
+      profile = size === 'Bounded' && !exempted ? tier : 'full' // up, never down: escalation is one way, in the run as on a resume
     }
   }
   if (result.status === 'halted') return halt(leg, result.reason)

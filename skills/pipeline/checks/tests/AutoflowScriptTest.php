@@ -16,11 +16,11 @@ function autoflow_replay(array $args, array $returns, bool $steps = false): arra
     return json_decode($stdout, true);
 }
 
-/** `launch`'s start answer for an autoflow run whose cursor is on `$leg`; `$spec` is the committed spec's text, `$plan` the plan's recorded path, `$light` the manifest's `light` flag. */
-function autoflow_start(string $leg, array $ledger = [], ?string $spec = null, ?string $plan = null, bool $light = false): array
+/** `launch`'s start answer for an autoflow run whose cursor is on `$leg`; `$spec` is the committed spec's text, `$plan` the plan's recorded path, `$tier` the manifest's `tier`. */
+function autoflow_start(string $leg, array $ledger = [], ?string $spec = null, ?string $plan = null, ?string $tier = null): array
 {
     $artifacts = ['spec' => $spec === null ? null : 'spec.md', 'plan' => $plan, 'pr' => null, 'issue' => null];
-    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => $leg, 'status' => 'pending'], 'gate_ledger' => $ledger, 'artifacts' => $artifacts, ...($light ? ['light' => true] : [])]);
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => $leg, 'status' => 'pending'], 'gate_ledger' => $ledger, 'artifacts' => $artifacts, ...($tier === null ? [] : ['tier' => $tier])]);
     if ($spec !== null) {
         file_put_contents($fixture['dir'] . '/spec.md', $spec);
     }
@@ -283,7 +283,7 @@ it('reruns the spec step and then the plan step on a review loop-back, whose bri
     ],
 ]);
 
-it('runs every step on its full entry without light, and implement on xhigh once verify-ui or review-pr looped back', function () {
+it('runs every step on its full entry without a word, and implement on xhigh once verify-ui or review-pr looped back', function () {
     $design = [...AUTOFLOW_C, 'size' => 'Architectural'];
     $replay = autoflow_replay(autoflow_start('design'), [
         'design:spec' => [$design, $design], 'design:plan' => [$design, $design],
@@ -304,8 +304,8 @@ it('runs every step on its full entry without light, and implement on xhigh once
     expect($replay['result'])->toBe(['action' => 'done']);
 });
 
-it('runs a light run\'s Bounded design and every step after it on light, where implement and review-pr\'s review keep full\'s setting', function () {
-    $replay = autoflow_replay(autoflow_start('design', light: true), [
+it('runs a medium run\'s Bounded design and every step after it on medium, where implement and review-pr\'s review keep full\'s setting', function () {
+    $replay = autoflow_replay(autoflow_start('design', tier: 'medium'), [
         'design:spec' => [[...AUTOFLOW_C, 'size' => 'Bounded']],
         'review-plan:review' => [AUTOFLOW_C], 'review-plan:resolve' => [AUTOFLOW_C],
         'handoff:run' => [AUTOFLOW_C],
@@ -319,8 +319,39 @@ it('runs a light run\'s Bounded design and every step after it on light, where i
     expect($replay['result'])->toBe(['action' => 'done']);
 });
 
+it('runs a light run\'s Bounded design and every step after it on light, and implement on xhigh after a review-pr loop-back', function () {
+    $replay = autoflow_replay(autoflow_start('design', tier: 'light'), [
+        'design:spec' => [[...AUTOFLOW_C, 'size' => 'Bounded']],
+        'review-plan:review' => [AUTOFLOW_C], 'review-plan:resolve' => [AUTOFLOW_C],
+        'handoff:run' => [AUTOFLOW_C],
+        'implement:run' => [[...AUTOFLOW_C, 'ui' => true], [...AUTOFLOW_C, 'ui' => false]],
+        'verify-ui:run' => [AUTOFLOW_C],
+        'review-pr:review' => [AUTOFLOW_C, AUTOFLOW_C], 'review-pr:resolve' => [AUTOFLOW_LB, AUTOFLOW_C],
+    ]);
+
+    expect($replay['labels'])->toBe([
+        'design:spec', 'review-plan:review', 'review-plan:resolve', 'handoff:run', 'implement:run', 'verify-ui:run',
+        'review-pr:review', 'review-pr:resolve', 'implement:run', 'review-pr:review', 'review-pr:resolve',
+    ]);
+    expect($replay['settings'])->toBe([
+        'opus medium', 'opus medium', 'sonnet medium', 'sonnet low', 'sonnet high', 'sonnet medium',
+        'opus high', 'sonnet high', 'opus xhigh', 'opus high', 'sonnet high',
+    ]);
+    expect($replay['result'])->toBe(['action' => 'done']);
+});
+
+it('keeps a run with no word on full when its spec step returns Bounded', function () {
+    $replay = autoflow_replay(autoflow_start('design'), [
+        'design:spec' => [[...AUTOFLOW_C, 'size' => 'Bounded']],
+        'review-plan:review' => [AUTOFLOW_STOP],
+    ]);
+
+    expect($replay['labels'])->toBe(['design:spec', 'review-plan:review']);
+    expect($replay['settings'])->toBe(['opus high', 'fable high']);
+});
+
 it('moves a light run to full when its design turns out Architectural, and on a Bounded escalation', function (string $leg, ?string $spec, array $returns, array $labels, array $settings) {
-    $replay = autoflow_replay(autoflow_start($leg, spec: $spec, light: true), $returns);
+    $replay = autoflow_replay(autoflow_start($leg, spec: $spec, tier: 'light'), $returns);
 
     expect($replay['labels'])->toBe($labels);
     expect($replay['settings'])->toBe($settings);
@@ -335,11 +366,11 @@ it('moves a light run to full when its design turns out Architectural, and on a 
         'review-plan:review' => [AUTOFLOW_PI, AUTOFLOW_STOP],
         'design:spec' => [[...AUTOFLOW_C, 'size' => 'Architectural']],
         'design:plan' => [[...AUTOFLOW_C, 'size' => 'Architectural']],
-    ], ['review-plan:review', 'design:spec', 'design:plan', 'review-plan:review'], ['fable medium', 'opus high', 'opus high', 'fable high']],
+    ], ['review-plan:review', 'design:spec', 'design:plan', 'review-plan:review'], ['opus medium', 'opus high', 'opus high', 'fable high']],
     'a Bounded escalation whose grown spec still says Bounded' => ['review-plan', "# x — design\n\n**Design size:** Bounded\n", [
         'review-plan:review' => [AUTOFLOW_PI, AUTOFLOW_STOP],
         'design:spec' => [[...AUTOFLOW_C, 'size' => 'Bounded']],
-    ], ['review-plan:review', 'design:spec', 'review-plan:review'], ['fable medium', 'opus high', 'fable high']],
+    ], ['review-plan:review', 'design:spec', 'review-plan:review'], ['opus medium', 'opus high', 'fable high']],
 ]);
 
 it('starts implement on its loop-back entry when the ledger already counts a verify-ui or review-pr loop-back, and not after a plan gap', function (array $entry, string $setting) {
@@ -381,19 +412,22 @@ it('runs a smoke run\'s stub steps on the smoke entry and never retries one', fu
     expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'review-plan', 'reason' => 'the agent returned nothing']);
 });
 
-it('halts before any agent when launch\'s agents or profile are missing or incomplete', function (callable $break) {
+it('halts before any agent when launch\'s agents, profile or tier are missing or incomplete', function (callable $break) {
     $replay = autoflow_replay($break(autoflow_start('handoff')), []);
 
     expect($replay['labels'])->toBe([]);
     expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'handoff', 'reason' => 'args carry no complete agents table: re-run launch from checks that have pipeline_agent_table()']);
 })->with([
     'no agents' => [function (array $start) { unset($start['agents']); return $start; }],
-    'a step missing from light' => [function (array $start) { unset($start['agents']['light']['design:plan']); return $start; }],
+    'a step missing from the tier\'s table' => [function (array $start) { $start['tier'] = 'medium'; unset($start['agents']['medium']['design:plan']); return $start; }],
     'an entry without an effort' => [function (array $start) { unset($start['agents']['full']['handoff:run']['effort']); return $start; }],
     'an empty model' => [function (array $start) { $start['agents']['full']['implement:run']['model'] = ''; return $start; }],
     'no retry entry' => [function (array $start) { unset($start['agents']['retry']); return $start; }],
     'no smoke entry' => [function (array $start) { unset($start['agents']['smoke']); return $start; }],
     'a loop-back entry for a step the run does not have' => [function (array $start) { $start['agents']['loopedBack']['design:run'] = ['model' => 'opus', 'effort' => 'high']; return $start; }],
     'no profile' => [function (array $start) { unset($start['profile']); return $start; }],
-    'a profile that is neither full nor light' => [function (array $start) { $start['profile'] = 'medium'; return $start; }],
+    'no tier' => [function (array $start) { unset($start['tier']); return $start; }],
+    'a tier that is not a table' => [function (array $start) { $start['tier'] = 'heavy'; return $start; }],
+    'a tier that names the retry entry' => [function (array $start) { $start['tier'] = 'retry'; return $start; }],
+    'a profile that is neither full nor the tier' => [function (array $start) { $start['tier'] = 'medium'; $start['profile'] = 'light'; return $start; }],
 ]);

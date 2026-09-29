@@ -222,6 +222,7 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
         'checks' => __DIR__,
         'tables' => pipeline_routing_tables(),
         'profile' => pipeline_start_profile($manifest, $size),
+        'tier' => AgentTier::fromManifest($manifest)->value,
         'agents' => pipeline_agent_table($manifest['agents'] ?? []),
     ];
 }

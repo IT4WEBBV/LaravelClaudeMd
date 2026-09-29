@@ -46,7 +46,7 @@ enum AgentTier: string
     }
 }
 
-/** `full` and `light` hold every step; `loopedBack` replaces a step's entry once a gate looped back to its leg; `retry` reruns a review that returned nothing; `smoke` runs a smoke run's stubs. */
+/** `full`, `medium` and `light` are the tiers (`AgentTier`) and hold every step; `loopedBack` replaces a step's entry once a gate looped back to its leg; `retry` reruns a review that returned nothing; `smoke` runs a smoke run's stubs. */
 const PIPELINE_AGENTS = [
     'full' => [
         'design:spec' => ['model' => 'opus', 'effort' => 'high'],
@@ -59,7 +59,7 @@ const PIPELINE_AGENTS = [
         'review-pr:review' => ['model' => 'fable', 'effort' => 'high'],
         'review-pr:resolve' => ['model' => 'opus', 'effort' => 'high'],
     ],
-    'light' => [
+    'medium' => [
         'design:spec' => ['model' => 'opus', 'effort' => 'medium'],
         'design:plan' => ['model' => 'opus', 'effort' => 'medium'],
         'review-plan:review' => ['model' => 'fable', 'effort' => 'medium'],
@@ -69,6 +69,17 @@ const PIPELINE_AGENTS = [
         'verify-ui:run' => ['model' => 'sonnet', 'effort' => 'medium'],
         'review-pr:review' => ['model' => 'fable', 'effort' => 'high'],
         'review-pr:resolve' => ['model' => 'opus', 'effort' => 'medium'],
+    ],
+    'light' => [
+        'design:spec' => ['model' => 'opus', 'effort' => 'medium'],
+        'design:plan' => ['model' => 'opus', 'effort' => 'medium'],
+        'review-plan:review' => ['model' => 'opus', 'effort' => 'medium'],
+        'review-plan:resolve' => ['model' => 'sonnet', 'effort' => 'medium'],
+        'handoff:run' => ['model' => 'sonnet', 'effort' => 'low'],
+        'implement:run' => ['model' => 'sonnet', 'effort' => 'high'],
+        'verify-ui:run' => ['model' => 'sonnet', 'effort' => 'medium'],
+        'review-pr:review' => ['model' => 'opus', 'effort' => 'high'],
+        'review-pr:resolve' => ['model' => 'sonnet', 'effort' => 'high'],
     ],
     'loopedBack' => [
         'implement:run' => ['model' => 'opus', 'effort' => 'xhigh'],
@@ -86,12 +97,12 @@ function pipeline_agent_steps(): array
     ));
 }
 
-/** The script's `agents`: the table, with each step the manifest's override names laid over its entry in both profiles and its loop-back entry. */
+/** The script's `agents`: the table, with each step the manifest's override names laid over its entry in every tier and its loop-back entry. */
 function pipeline_agent_table(array $override): array
 {
     $table = PIPELINE_AGENTS;
     foreach ($override as $step => $fields) {
-        foreach (['full', 'light', 'loopedBack'] as $profile) {
+        foreach ([...array_column(AgentTier::cases(), 'value'), 'loopedBack'] as $profile) {
             if (isset($table[$profile][$step])) {
                 $table[$profile][$step] = [...$table[$profile][$step], ...$fields];
             }
@@ -137,14 +148,17 @@ function pipeline_agent_entry_problem(string $step, mixed $entry): ?string
 
 /**
  * The profile a run starts on, which the script keeps current from there: `full` once the ledger records
- * an escalation (one way, once per run); else the spec's size once a spec exists; else the `light` flag.
- * `$size` is `dispatch_cli_design_size($manifest)`, which answers Architectural for no spec as well.
+ * an escalation (one way, once per run); else the named tier moved up by the spec's size once a spec
+ * exists (`AgentTier::forDesign()`); else the named tier. `$size` is `dispatch_cli_design_size($manifest)`,
+ * which answers Architectural for no spec as well.
  */
 function pipeline_start_profile(array $manifest, DesignSize $size): string
 {
+    $tier = AgentTier::fromManifest($manifest);
+
     return match (true) {
-        in_array('escalated', array_column(pipeline_ledger($manifest), 'outcome'), true) => 'full',
-        ! empty($manifest['artifacts']['spec']) => $size->profile(),
-        default => empty($manifest['light']) ? 'full' : 'light',
+        in_array('escalated', array_column(pipeline_ledger($manifest), 'outcome'), true) => AgentTier::Full->value,
+        ! empty($manifest['artifacts']['spec']) => $tier->forDesign($size)->value,
+        default => $tier->value,
     };
 }

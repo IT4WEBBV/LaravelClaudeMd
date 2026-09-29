@@ -83,7 +83,7 @@ php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [-
 # → {"action":"ready","manifest":…,"worktree":…,"branch":…,"notes":[…]} | {"action":"halt","reason":…}
 git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
 PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>] [--decision "<verbatim>"]…
-# → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"noOpen":…,"checks":…,"tables":{…},"profile":…,"agents":{…}}
+# → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"noOpen":…,"checks":…,"tables":{…},"profile":…,"tier":…,"agents":{…}}
 #   | {"action":"done"} | {"action":"halt","reason":…}
 # start: the workflow pipeline-autoflow with that JSON as args, in the background; wait for its completion notice
 php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
@@ -109,9 +109,9 @@ launched the run, with its reason.
   `tables` is what the script routes by, `pipeline_routing_tables()`: the legs in order, each leg's
   steps, the loop-back targets, the statuses per `<leg>:<step>` and the bound, built from the
   functions `interactive` routes by, so the script keeps no copy of them.
-  `agents` and `profile` are the step agents' models and efforts and the profile the run starts on
-  (§Agents per step); an invalid `agents` override in the manifest halts `launch` with the other
-  manifest checks, before anything is written.
+  `agents`, `profile` and `tier` are the step agents' models and efforts, the profile the run starts
+  on and the tier its invocation named (§Agents per step); an invalid `agents` override in the
+  manifest halts `launch` with the other manifest checks, before anything is written.
 - **The script** gives each step a schema whose `status` allows only what that step may return
   (`tables.allowed`, from `LegStatus::allowedFor()`), continues, loops back or returns on that status,
   counts each loop-back against `tables.bound`, 2 per gate (`gates.md` §Loop-backs), and returns `{action: done}` or
@@ -123,7 +123,7 @@ launched the run, with its reason.
   or whose `tables.loopTarget` has no `review-plan`, the gate every `plan-insufficient` is charged to; `tables`
   missing or incomplete halts with a reason that names them. `AutoflowScriptTest` replays the script
   on `launch`'s answer. Every step runs on the model and effort `agents` gives it (§Agents per step),
-  and `agents` or `profile` missing or incomplete halts before any agent; a review step that returns
+  and `agents`, `profile` or `tier` missing or incomplete halts before any agent; a review step that returns
   nothing runs once more on the retry entry; a step that throws or returns nothing halts the run.
 - **A step** first runs `dispatch_cli.php brief <manifest> <leg> <step>`, followed on every step but
   the run's first by what the step before it returned: `--after <leg>:<step> --status <status>`, plus
@@ -205,46 +205,56 @@ Every `autoflow` step's agent runs on a model and an effort from one table, `PIP
 `../checks/agents.php`; no step inherits the session's `~/.claude/settings.json`, which differs per
 machine and changes silently. `launch` hands the table to the script as `agents` in its `start` answer
 (`pipeline_agent_table()`, the manifest's override laid over it) with `profile`, the profile the run
-starts on (`pipeline_start_profile()`); the script names no model or effort, and a missing or
-incomplete `agents` or `profile` halts it before any agent. Models are `agent()`'s aliases, efforts its
+starts on (`pipeline_start_profile()`), and `tier`, the tier its invocation named
+(`AgentTier::fromManifest()`); the script names no model or effort, and a missing or incomplete
+`agents`, `profile` or `tier` halts it before any agent. Models are `agent()`'s aliases, efforts its
 levels. The owner's constraints are tokens (plan limits), quality and speed, not price.
 
-| Step | `full` | `light` | Why |
-|---|---|---|---|
-| `design:spec` | opus high | opus medium | Full: a mistake surfaces only at `review-plan` and costs a loop (design, review, resolve). Light: a ~25-line design, and escalation is the safety net. |
-| `design:plan` | opus high | opus medium | As `design:spec`. The plan step runs only on an Architectural design, so on `full`; the `light` entry keeps every step in both profiles. |
-| `review-plan:review` | fable high | fable medium | Full: independent of the author, Fable's documented starting point; xhigh added nothing measurable in two runs, and `low` answers from memory more. Light: a short spec is flatter work. |
-| `review-plan:resolve` | opus high | opus medium | Full: it decides which findings to reject. Light: few findings on a short plan. |
-| `handoff:run` | sonnet low | sonnet low | Near-mechanical. Haiku 4.5 has no effort setting and writes `implement`'s prompt: rejected. |
-| `implement:run` | opus high | opus high | Light keeps high: TDD and the escalation check after every commit happen here, and its time goes to CI and Pint, not the model. |
-| `verify-ui:run` | sonnet high | sonnet medium | Mostly browser operation; full stays high because it is a gate that can send the run back to `implement`. Light: few states to capture. |
-| `review-pr:review` | fable high | fable high | The last gate before a human merges, on either size. |
-| `review-pr:resolve` | opus high | opus medium | Full: nothing reviews it afterwards unless it loops back. Light: targeted fixes on a small diff. |
-| `implement:run` after a loop-back | opus xhigh | opus xhigh | A `verify-ui` or `review-pr` loop-back is the failure signal to rerun with more effort. |
-| a review that returned nothing, once | opus xhigh | opus xhigh | Rare; it fires on `null`, not on a review with no findings, and compensates for reviewing with the author's model. |
-| a smoke run's stub step | sonnet low | sonnet low | A stub does no real work. |
+Three tiers, picked by the invocation's word: `full` with no word, `medium`, and `light` for a tiny
+change.
 
-**Which profile.** `launch` starts the run on `full` once the ledger records an `escalated` entry; else,
-once a spec exists, on `light` when it says Bounded and `full` otherwise; else on `light` when the
-manifest says `light`, the only signal before `design` runs. The script then sets the profile after
-every `continued` design step from the size it returned (`light` for Bounded, unless the run has
-escalated), and to `full` on a Bounded escalation, so the grow-form design and every step after it run
-on `full`: escalation is one way, in the run as on a resume. Every step, `design`
-included, runs on the current profile.
+| Step | `full` | `medium` | `light` | Why |
+|---|---|---|---|---|
+| `design:spec` | opus high | opus medium | opus medium | Full: a mistake surfaces only at `review-plan` and costs a loop (design, review, resolve). Medium: a ~25-line design, and escalation is the safety net. Light: a ~15-line Bounded spec; `review-plan` catches a mistake. |
+| `design:plan` | opus high | opus medium | opus medium | As `design:spec`. The plan step runs only on an Architectural design, so on `full`; the `medium` and `light` entries keep every step in every tier. |
+| `review-plan:review` | fable high | fable medium | opus medium | Full: independent of the author, Fable's documented starting point; xhigh added nothing measurable in two runs, and `low` answers from memory more. Medium: a short spec is flatter work. Light: spares Fable quota; the same model as the author, accepted on a ~15-line spec (owner decision), and the PR review stays independent. |
+| `review-plan:resolve` | opus high | opus medium | sonnet medium | Full: it decides which findings to reject. Medium and light: few findings on a short spec. |
+| `handoff:run` | sonnet low | sonnet low | sonnet low | Near-mechanical on every tier. Haiku 4.5 has no effort setting and writes `implement`'s prompt: rejected. |
+| `implement:run` | opus high | opus high | sonnet high | Medium keeps high: TDD and the escalation check after every commit happen here, and its time goes to CI and Pint, not the model. Light: a tiny change; a `verify-ui` or `review-pr` loop-back still reruns it on the loop-back entry. |
+| `verify-ui:run` | sonnet high | sonnet medium | sonnet medium | Mostly browser operation; full stays high because it is a gate that can send the run back to `implement`. Medium and light: few states to capture, and no lower, since it is a gate. |
+| `review-pr:review` | fable high | fable high | opus high | The last gate before a human merges: high on every tier. Light: on the first round Opus is independent of Sonnet's code, and it spares Fable quota. |
+| `review-pr:resolve` | opus high | opus medium | sonnet high | Full: nothing reviews it afterwards unless it loops back. Medium and light: targeted fixes on a small diff. |
+| `implement:run` after a loop-back | opus xhigh | opus xhigh | opus xhigh | A `verify-ui` or `review-pr` loop-back is the failure signal to rerun with more effort. |
+| a review that returned nothing, once | opus xhigh | opus xhigh | opus xhigh | Rare; it fires on `null`, not on a review with no findings, and compensates for reviewing with the author's model. |
+| a smoke run's stub step | sonnet low | sonnet low | sonnet low | A stub does no real work. |
+
+**Which profile.** The word names the tier (`AgentTier::fromManifest()`): the manifest's `tier`,
+`medium` for a legacy `light: true`, else `full`; a `tier` that is not one of the three reads as `full`.
+The design size moves a run up, never down (`AgentTier::forDesign()`): an Architectural design runs on
+`full`, a Bounded one on the named tier, so a Bounded design with no word stays on `full`. `launch`
+starts the run on `full` once the ledger records an `escalated` entry; else, once a spec exists, on the
+tier `forDesign()` gives for its size; else on the named tier, the only signal before `design` runs.
+The script then sets the profile after every `continued` design step from the size it returned (the
+tier for Bounded, unless the run has escalated; `full` otherwise), and to `full` on a Bounded
+escalation, so the grow-form design and every step after it run on `full`: escalation is one way, in
+the run as on a resume. Every step, `design` included, runs on the current profile. The script checks
+`full` and the run's tier, the only tables it can reach, and halts on a tier whose table misses a step.
 
 **The loop-back entry.** A step whose leg a gate has looped back to in this run — `loops` counts on from
 the ledger's, so a resume keeps it — takes its `loopedBack` entry when it has one: `implement:run` after
-a `verify-ui` or `review-pr` loop-back. A plan gap loops back to `design`, which has none.
+a `verify-ui` or `review-pr` loop-back, on every tier. A plan gap loops back to `design`, which has none.
 
 **The override.** A manifest may set `agents: {"<leg>:<step>": {"model": …, "effort": …}}` by hand for a
 one-off experiment; either field may be left out and keeps the table's. It replaces that step's entry
-in both profiles and its loop-back entry; the retry and smoke entries are not overridable. `launch`
+in every tier and its loop-back entry; the retry and smoke entries are not overridable. `launch`
 halts on an override that is not an object of `autoflow` steps each naming a known model or effort
 (*the manifest's agents override is invalid: …*), and a leg that writes `agents` halts at the next brief.
 
-**Fable stays the reviewer.** Reviews on Opus would be the largest token lever, but give up an
-independent reviewer. `run_cost_cli.php` weighs each call by its model (§`autoflow`), so a model swap
-shows in the figure; effort shows mostly as turns and wall time.
+**Fable stays the reviewer on `full` and `medium`.** Reviews on Opus would be the largest token lever,
+but give up an independent reviewer. `light` takes that lever for a tiny change (owner decision): its
+PR review on Opus is still independent of Sonnet's code on the first round. `run_cost_cli.php` weighs
+each call by its model (§`autoflow`), so a model swap shows in the figure; effort shows mostly as turns
+and wall time.
 
 ## Interactive — the same loop, the human resolves
 
