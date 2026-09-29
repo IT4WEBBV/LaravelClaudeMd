@@ -115,7 +115,8 @@ launched the run, with its reason.
   continuing. The design size it goes by is the one `launch` read, then the one each `design` step
   copied from its spec. A Bounded escalation is not a loop-back, and escalation is one-way (§Design
   size), so the script exempts one per run; every other `plan-insufficient` counts toward
-  `review-plan`'s bound. A status it cannot route halts, and so do `args` that are not a `launch` `start` answer; `tables`
+  `review-plan`'s bound. A status it cannot route halts, and so do `args` that are not a `launch` `start` answer
+  or whose `tables.loopTarget` has no `review-plan`, the gate every `plan-insufficient` is charged to; `tables`
   missing or incomplete halts with a reason that names them. `AutoflowScriptTest` replays the script
   on `launch`'s answer. A review step runs on Fable, and once more on Opus when it returns nothing;
   `handoff` runs at low effort; a step that throws or returns nothing halts the run.
@@ -172,9 +173,12 @@ The transcript dir is `~/.claude/projects/<project>/<session>/subagents/workflow
 the Workflow result. `run_cost_cli.php` prints per step the weighted cost, the peak context, the wall
 time and the part of it spent waiting on tools, and on its `run:` line the total, the run's span in
 minutes and the largest step peak. `run_audit.php` prints whether `ui` over the final diff agrees with
-a `verify-ui` entry, and whether each gate's newest ledger entries agree with what the steps reported.
-It stays as the after-run report: with the boundary check in place a `MISMATCH` means the check has a
-hole, never a halt.
+a `verify-ui` entry, whether each gate's newest ledger entries agree with what the steps reported, and
+(`bound:`) whether each gate the run looped back at holds no more `looped-back` ledger entries than
+`PIPELINE_LOOP_BOUND`, the loop-back the run halted on not counted: `tables.bound` and `loops` reach the
+script through the invoking session's copy of `launch`'s answer, and no boundary check counts
+loop-backs. It stays as the after-run report: with the boundary check in place a `MISMATCH` means a
+check has a hole or the script ran with another bound, never a halt.
 
 **Where a step works.** The worktree travels in the brief (*"Work only in `<worktree>`"*) and in
 absolute paths, never in the launch directory: `orchestrate` launches up to four runs from its primary
@@ -575,13 +579,18 @@ A step on an Architectural spec that needs files or behaviour the plan does not 
 of the plan approval**: the plan passed `review-plan` and turned out not to cover the change.
 
 1. The step appends `{gate: 'plan-approval', leg: <its leg>, cycle, at, reason, outcome: 'looped-back'}`
-   and returns `plan-insufficient`. A return without that entry halts.
+   and returns `plan-insufficient`. A return without that entry halts. The `reason` names what the plan
+   lacks. The size alone is never a gap: an Architectural plan needs no approval beyond `review-plan`'s
+   (#96: a `handoff` that read the brief's plan-gap line as a rule for every Architectural spec looped a
+   covered plan back for "the owner's plan approval").
 2. The run goes back to `design` through the same bound as a `review-plan` loop-back
    (`pipeline_loop_back()` in `interactive`, `tables.bound` in `autoflow`): the entry
    counts toward the 2 cycles, and the third halts — before
    `handoff` with no push, after it with the PR left draft (§Failure policy).
 3. `design` extends the plan, and the spec where it must say more, to cover the entry's `reason`;
-   what is already built is described as state, not re-designed. Then `review-plan`, `handoff pr`
+   what is already built is described as state, not re-designed. It leaves the entry unchanged, with
+   no `actions`: what it did goes in the spec, the plan and the reason it returns (#104: a design that
+   recorded its answer on the entry halted the run at the next brief). Then `review-plan`, `handoff pr`
    (updating the existing PR) and `implement` run again, as after an escalation.
 
 The entry resets `pipeline_done_legs()` like an escalation does, so the earlier plan approval cannot
@@ -741,11 +750,16 @@ runs (#77), while `review-pr:review` reads the diff, not CI.
   `review-pr:review` runs while CI runs. `interactive` keeps `work-on`'s watch.
 - **One gate, in the session that runs `gh pr ready`:** the invoking session once `finish` prints `done`
   in `autoflow`, the finish step in `interactive`. `dispatch_cli.php ci <manifest> --poll <n>`
-  (`../checks/ci.php`) reads the PR's head commit and its checks once
-  (`gh pr view <pr> --json headRefOid,statusCheckRollup`), writes nothing, and prints one JSON line:
+  (`../checks/ci.php`) reads the worktree's `HEAD` (`git rev-parse HEAD`; a git error halts at once), then
+  the PR's head commit and its checks once (`gh pr view <pr> --json headRefOid,statusCheckRollup`), writes
+  nothing, and prints one JSON line. GitHub's head has to be the worktree's `HEAD` before its checks count
+  (#99): a push that failed or was skipped leaves an older head whose CI can be green, and the PR would go
+  ready without the last fix. That comparison comes first, so neither a green nor a red on an older
+  commit counts:
 
 | Verdict on the head commit | Answer |
 |---|---|
+| `mismatch`: GitHub's head is not the worktree's `HEAD` | `wait`; `halt` at the third read, naming both shas: a push GitHub shows within seconds, and one it does not show by then did not land |
 | `green`: every check finished `SUCCESS`, `NEUTRAL` or `SKIPPED` | `ready` |
 | `none`: no check at all | `ready`; with `.github/workflows/*.yml` or `*.yaml` in the worktree only from the third read, since GitHub registers a push's checks seconds after it |
 | `pending` | `wait`; `halt` at the 120th read (an hour at 30 s) |
@@ -771,9 +785,10 @@ poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll
   `finish` records the halt there. The PR stays draft, and §Failure policy's duties after `handoff`
   follow. A red after the round halts: a decision that starts `CI red on the PR's head commit` is the
   round spent, once per run, so a resumed run halts on its next red too. An empty answer (a usage error)
-  is a halt as well. After a halt on the hour nothing needs re-reviewing: run the loop again by hand on
-  the halted manifest (`ci` is read-only and refuses only a retired mode or a missing PR) rather than
-  `launch`, which would re-run `review-pr:review`.
+  is a halt as well. After a halt on the hour, or on a `mismatch` once the heads match, nothing needs
+  re-reviewing: run the loop again by hand on the halted manifest (`ci` is read-only and refuses only a
+  retired mode, a missing PR or a worktree whose `HEAD` git cannot read) rather than `launch`, which would
+  re-run `review-pr:review`.
 - **In `interactive`** the finish step runs the same loop, `gh pr ready` on `ready`, and shows any other
   answer to the human; there is no automatic round.
 - **The merge watch stays on `state`** (§After the merge): once the PR is ready, CI on its head has
@@ -1048,8 +1063,10 @@ Under `autoflow` these are the only stops. **No finding stops a run.**
   (`cursor.status: halted`, `cursor.reason`); a human resumes. **No silent retry** beyond that one — a retry hides
   the failure and the machinery may be in an unknown state.
   - **A halted manifest is the one the check rejected.** When the reason names a key the leg was not
-    allowed to change, repair it from `<manifest stem>.before.json`, the snapshot taken at dispatch,
-    before the next `next` or `launch`; otherwise the run resumes with the leg's change in place.
+    allowed to change, or a ledger entry it rewrote (*design added actions to ledger entry 1 (plan
+    gap)*: the leg, what changed and the entry), repair it from `<manifest stem>.before.json`, the
+    snapshot taken at dispatch, before the next `next` or `launch`; otherwise the run resumes with the
+    leg's change in place.
   - **In `autoflow`** a review step that returns nothing runs once more, on Opus; a step that throws,
     any other step that returns nothing, or a station that would need an agent the step cannot start,
     halts at once. The halt reaches the invoking session as the workflow's return, and `finish` writes it to
@@ -1107,7 +1124,8 @@ Under `autoflow` these are the only stops. **No finding stops a run.**
 - **An `autoflow` step the run cannot accept** — a status the step may not return fails the step's
   schema, and `brief` halts a step the ledger does not support (`resolve` with no open review,
   `review` with one already open) → **halt**.
-- **CI on the PR's head commit red after the fix round, or not settled in an hour** (§The CI gate) →
+- **CI on the PR's head commit red after the fix round, or not settled in an hour, or GitHub's head still
+  not the worktree's `HEAD` at the third read** (§The CI gate) →
   **halt**, the PR still draft: `finish` records the gate's answer on `review-pr`, and the duties after
   `handoff` under *Bound exhaustion* apply.
 - **A stopped `autoflow` workflow** — `TaskStop`, a dead session, a workflow error: `finish` with

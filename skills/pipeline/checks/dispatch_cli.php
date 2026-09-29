@@ -389,8 +389,9 @@ function dispatch_cli_ui(string $diffPath): ?string
 }
 
 /**
- * The CI gate's read (`../references/engine.md` §The CI gate): the PR's head commit and its checks in one
- * gh call, and what the session does next. It never writes the manifest, so polling it changes nothing.
+ * The CI gate's reads (`../references/engine.md` §The CI gate): the worktree's `HEAD`, then the PR's head
+ * commit and its checks in one gh call, and what the session does next. It never writes the manifest, so
+ * polling it changes nothing.
  */
 function dispatch_cli_ci(string $manifestPath, int $poll): array
 {
@@ -407,10 +408,15 @@ function dispatch_cli_ci(string $manifestPath, int $poll): array
         return pipeline_halt('the CI gate needs a PR: artifacts.pr is not set');
     }
     $worktree = rtrim($manifest['worktree'], '/');
+    [$code, $head, $error] = pipeline_git_run($worktree, ['rev-parse', 'HEAD']);
+    if ($code !== 0) {
+        return pipeline_halt("the CI gate cannot read the worktree's HEAD at {$worktree}: {$error}");
+    }
 
     return pipeline_ci_answer(
         $manifest,
         dispatch_cli_pr_view($worktree, $pr, 'headRefOid,statusCheckRollup'),
+        $head,
         glob("{$worktree}/.github/workflows/*.y*ml") !== [],
         $poll,
     );
