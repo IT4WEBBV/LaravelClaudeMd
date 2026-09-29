@@ -100,16 +100,17 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    `'{"action":"halt","reason":"<the error>"}'` when the workflow errored. `finish` refuses a `done`
    whose cursor is not on `review-pr`, or whose last snapshot is not `review-pr`'s resolve step's with
    a return that holds: it records a halt and prints it instead.
-5. **`finish` printed `done`: the CI gate** on the PR's head commit (`references/engine.md` §The CI
-   gate), polled in one background Bash; wait for its completion notice:
+5. **`finish` printed `done`: the CI gate** on the PR's head commit, which must be the worktree's `HEAD`
+   (`references/engine.md` §The CI gate), polled in one background Bash; wait for its completion notice:
    `poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll); echo "$answer" | grep -q '"action":"wait"'; do sleep 30; poll=$((poll + 1)); done; echo "$answer"`.
    **`ready`:** `gh pr ready <pr>`. The manifest already says done; when `gh pr ready` is denied the
    PR stays draft and no halt is written: put the denial in the report, and the owner runs
    `gh pr ready` by hand. **`fix`:** the diff as in step 2, then
    `launch <manifest> "<manifest stem>.diff" --from review-pr --decision "<its decision>"`, and steps
-   3–5 again. **`halt`:** `finish <manifest> '<the answer>'`, then as any halt. **A halt after
-   `handoff`:** the reason into the PR body and the proof page opened once (`references/engine.md`
-   §Failure policy).
+   3–5 again. **`halt`:** `finish <manifest> '<the answer>'`, then as any halt; on a `mismatch` GitHub's
+   head and the worktree's `HEAD` differ: once they match (push the branch, or reconcile it when GitHub
+   is ahead), the loop runs again by hand. **A halt after `handoff`:** the reason into the PR body and
+   the proof page opened once (`references/engine.md` §Failure policy).
 6. **Report** the result with the two cost-per-run outputs above, and arm the merge watch
    (`references/engine.md` §After the merge).
 
