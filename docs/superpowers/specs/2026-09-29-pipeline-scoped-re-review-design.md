@@ -129,7 +129,8 @@ could prove.
   > contains, so your target is what changed since, not the whole PR: the branch's own commits since
   > (`<n>`), as patches, `git log -p --no-merges <since>..HEAD ^<base>`, plus `git diff HEAD` (Stage 0 runs
   > over both); and read whole at HEAD, the files where a merge since met this branch's changes: `a.php`,
-  > `b.php`. Read beyond the target only where a finding needs it.
+  > `b.php`; what the settled decisions above ask of the PR stays in your target wherever it lies. Read
+  > beyond the target only where a finding needs it.
 
   With no merge files the file clause reads *and no file more: no merge since met this branch's changes*.
   With 0 commits and no files the target clause reads *nothing was committed on this branch since

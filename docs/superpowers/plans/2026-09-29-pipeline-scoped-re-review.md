@@ -550,7 +550,8 @@ it('says when no merge met the branch, and when nothing was committed since the 
 
     expect(pipeline_review_scope_line(['since' => $sha, 'base' => 'origin/main', 'commits' => 2, 'files' => []]))
         ->toContain("the branch's own commits since (2)")
-        ->toContain("and no file more: no merge since met this branch's changes");
+        ->toContain("and no file more: no merge since met this branch's changes")
+        ->toContain('what the settled decisions above ask of the PR stays in your target wherever it lies');
     expect(pipeline_review_scope_line(['since' => $sha, 'base' => 'origin/main', 'commits' => 0, 'files' => []]))
         ->toContain("nothing was committed on this branch since `{$sha}`: review only what the settled decisions above ask of the PR, and say so")
         ->not->toContain('git log');
@@ -658,7 +659,7 @@ function pipeline_review_scope_line(array $scope): string
         : "read whole at HEAD, the files where a merge since met this branch's changes: " . implode(', ', array_map(fn (string $file) => "`{$file}`", $files));
     $target = $commits === 0 && $files === []
         ? "nothing was committed on this branch since `{$since}`: review only what the settled decisions above ask of the PR, and say so"
-        : "the branch's own commits since ({$commits}), as patches, `git log -p --no-merges {$since}..HEAD ^{$base}`, plus `git diff HEAD` (Stage 0 runs over both); and {$whole}";
+        : "the branch's own commits since ({$commits}), as patches, `git log -p --no-merges {$since}..HEAD ^{$base}`, plus `git diff HEAD` (Stage 0 runs over both); and {$whole}; what the settled decisions above ask of the PR stays in your target wherever it lies";
 
     return "Scoped re-review (engine.md §Scoped re-review): a review of this PR completed at `{$since}`, which HEAD contains, so your target is what changed since, not the whole PR: {$target}. Read beyond the target only where a finding needs it.";
 }
@@ -747,12 +748,21 @@ override line:
   file, a resolution that took one side), and the files the merge commit changed against every parent
   (an edit made in the merge itself).
 
-With nothing committed since the base the target is empty: the review checks what the settled decisions
-ask of the PR and says the branch did not move; it does not widen to the whole PR.
+What the settled decisions ask of the PR (an owner's request, the CI round's failure) stays in the
+target wherever it lies, also outside the delta. With nothing committed since the base the target is
+only that: the review checks what the settled decisions ask of the PR and says the branch did not move;
+it does not widen to the whole PR.
 
 **Otherwise the review is full, as before:** no `continued` entry with a sha, a sha HEAD does not contain
-(a rebase, a force-push), a base ref git cannot resolve, or any git call that fails. The scope is never
-narrower than git could prove.
+(a rebase, a force-push), a base ref git cannot resolve (with no manifest `base` and `origin/HEAD` unset,
+every re-review on that machine stays full; `git remote set-head origin --auto` sets it), or any git call
+that fails. The scope is never narrower than git could prove textually. It cannot see a semantic
+conflict: a merge that changes only files the branch did not touch lists none, even where the branch's
+code depends on them. The full review had that blind spot in practice too; the suite and CI cover it.
+
+**A run in flight when this lands halts once.** A `review-pr` review step briefed before `reviewed_sha`
+existed returns an entry without one, and the next boundary halts on it. The open entry stays; a relaunch
+goes on to its resolve step, and that cycle is simply never a base. It is not a bug.
 
 **The earlier review is not carried:** the brief names its commit, never its entry (§What a leg brief
 consists of). A chain of scoped reviews is as sound as the earliest full review in it; the base rule keeps
