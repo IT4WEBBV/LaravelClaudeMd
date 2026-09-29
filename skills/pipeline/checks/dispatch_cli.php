@@ -518,7 +518,7 @@ function dispatch_cli_brief_args(array $arguments): ?array
         $reported[$name] = (string) $value;
     }
     [$leg, $step] = explode(':', $reported['after'] ?? '', 2) + [1 => ''];
-    $after = isset($reported['after']) ? in_array($leg, pipeline_legs(), true) && in_array($step, pipeline_steps($leg), true) : $reported === [];
+    $after = isset($reported['after']) ? in_array($leg, pipeline_legs(), true) && in_array($step, pipeline_steps($leg, 'autoflow'), true) : $reported === [];
 
     return count($positional) === 3 && $after ? [...$positional, $reported] : null;
 }

@@ -32,7 +32,7 @@ it('completes the open entry before the finish step\'s last action', function ()
 it('has overrides for every leg and step, in autoflow and interactive', function () {
     foreach (['autoflow', 'interactive'] as $mode) {
         foreach (pipeline_legs() as $leg) {
-            foreach (in_array($leg, ['review-plan', 'review-pr'], true) ? ['review', 'resolve'] : ['run'] as $step) {
+            foreach (pipeline_steps($leg, $mode) as $step) {
                 expect(pipeline_leg_overrides($mode))->toHaveKey("{$leg}:{$step}");
             }
         }

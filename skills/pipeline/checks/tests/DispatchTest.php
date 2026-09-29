@@ -57,10 +57,14 @@ it('lets a leg write only its results', function () {
     expect(pipeline_leg_writable_keys())->toBe(['artifacts', 'last_sha', 'suite', 'gate_ledger', 'cursor.status', 'cursor.reason']);
 });
 
-it('lists each leg\'s steps', function () {
-    expect(pipeline_steps('review-plan'))->toBe(['review', 'resolve']);
-    expect(pipeline_steps('review-pr'))->toBe(['review', 'resolve']);
-    expect(pipeline_steps('implement'))->toBe(['run']);
+it('lists each leg\'s steps: autoflow designs in a spec step and a plan step, interactive in one', function () {
+    expect(pipeline_steps('review-plan', 'autoflow'))->toBe(['review', 'resolve']);
+    expect(pipeline_steps('review-pr', 'interactive'))->toBe(['review', 'resolve']);
+    expect(pipeline_steps('implement', 'autoflow'))->toBe(['run']);
+    expect(pipeline_steps('design', 'autoflow'))->toBe(['spec', 'plan']);
+    expect(pipeline_steps('design', 'interactive'))->toBe(['run']);
+    expect(pipeline_steps('design', 'mangled'))->toBe(['run']);
+    expect(PIPELINE_BOUNDED_STEPS)->toBe(['design' => ['spec']]);
 });
 
 it('counts the loop-backs so far per looping leg, and gives an unknown count the bound', function () {
@@ -100,4 +104,51 @@ it('refuses the removed auto mode by naming autoflow, and nothing else', functio
     expect(pipeline_retired_mode('autoflow'))->toBeNull();
     expect(pipeline_retired_mode('interactive'))->toBeNull();
     expect(pipeline_retired_mode('mangled'))->toBeNull();
+});
+
+function design_manifest(?string $spec, ?string $plan, array $ledger = [], string $mode = 'autoflow'): array
+{
+    return [...dispatch_manifest('design', $ledger), 'mode' => $mode, 'artifacts' => ['spec' => $spec, 'plan' => $plan]];
+}
+
+const DESIGN_REVIEW_LOOP = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-29T10:00:00Z', 'review' => 'r', 'outcome' => 'looped-back'];
+const DESIGN_GAP = ['gate' => 'plan-approval', 'leg' => 'implement', 'cycle' => 1, 'at' => '2026-09-29T11:00:00Z', 'reason' => 'needs a queue', 'outcome' => 'looped-back'];
+
+it('derives autoflow\'s next design step from the spec, the plan and the newest ledger entry', function () {
+    $approved = [...DESIGN_REVIEW_LOOP, 'outcome' => 'continued'];
+    $reviewGap = [...DESIGN_GAP, 'leg' => 'review-plan'];
+    $escalated = ['gate' => 'design-size', 'leg' => 'implement', 'at' => '2026-09-29T12:00:00Z', 'reason' => 'migration', 'outcome' => 'escalated'];
+
+    expect(pipeline_step(design_manifest(null, null), 'design'))->toBe('spec');
+    expect(pipeline_step(design_manifest('s.md', null), 'design'))->toBe('plan');
+    expect(pipeline_step(design_manifest('s.md', 'p.md', [$approved]), 'design'))->toBe('spec');
+    expect(pipeline_step(design_manifest('s.md', 'p.md', [DESIGN_REVIEW_LOOP]), 'design'))->toBe('spec');
+    expect(pipeline_step(design_manifest('s.md', 'p.md', [DESIGN_GAP]), 'design'))->toBe('plan');
+    expect(pipeline_step(design_manifest('s.md', 'p.md', [$reviewGap]), 'design'))->toBe('plan');
+    expect(pipeline_step(design_manifest('s.md', 'p.md', [DESIGN_GAP, $approved]), 'design'))->toBe('spec');
+    expect(pipeline_step(design_manifest('s.md', 'p.md', [$escalated]), 'design'))->toBe('spec');
+    expect(pipeline_step(design_manifest(null, null, [DESIGN_GAP]), 'design'))->toBe('spec');
+    expect(pipeline_step(design_manifest('s.md', null, [], 'interactive'), 'design'))->toBe('run');
+});
+
+it('reads a plan return as the entry of a plan-insufficient on an Architectural design, review-plan\'s included', function () {
+    expect(pipeline_is_plan_return(DESIGN_GAP))->toBeTrue();
+    expect(pipeline_is_plan_return([...DESIGN_GAP, 'leg' => 'review-plan']))->toBeTrue();
+    expect(pipeline_is_plan_return(DESIGN_REVIEW_LOOP))->toBeFalse();
+    expect(pipeline_is_plan_return([...DESIGN_GAP, 'outcome' => 'continued']))->toBeFalse();
+    expect(pipeline_is_plan_return([...DESIGN_GAP, 'gate' => 'design-size', 'outcome' => 'escalated']))->toBeFalse();
+    expect(pipeline_is_plan_return([]))->toBeFalse();
+});
+
+it('refuses the design step the manifest does not call for', function () {
+    $refusal = fn (string $next, string $step) => "the manifest calls for the design {$next} step, not {$step}: the plan step follows a spec step that set artifacts.spec and removed artifacts.plan, or a plan-insufficient on an Architectural design";
+
+    expect(pipeline_step_problem(design_manifest(null, null), 'design', 'spec'))->toBeNull();
+    expect(pipeline_step_problem(design_manifest('s.md', null), 'design', 'plan'))->toBeNull();
+    expect(pipeline_step_problem(design_manifest('s.md', 'p.md', [DESIGN_GAP]), 'design', 'plan'))->toBeNull();
+    expect(pipeline_step_problem(design_manifest(null, null), 'design', 'plan'))->toBe($refusal('spec', 'plan'));
+    expect(pipeline_step_problem(design_manifest('s.md', 'p.md', [DESIGN_REVIEW_LOOP]), 'design', 'plan'))->toBe($refusal('spec', 'plan'));
+    expect(pipeline_step_problem(design_manifest('s.md', null), 'design', 'spec'))->toBe($refusal('plan', 'spec'));
+    expect(pipeline_step_problem(design_manifest('s.md', null), 'design', 'run'))->toBe('design has no run step');
+    expect(pipeline_step_problem(design_manifest('s.md', null, [], 'interactive'), 'design', 'run'))->toBeNull();
 });
