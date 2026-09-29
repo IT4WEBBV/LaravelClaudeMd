@@ -1,6 +1,6 @@
 <?php
 
-/** The autoflow script run on `$args` with agent() faked (`autoflow_replay.mjs`): `{labels, prompts, result}`; with `$steps` each agent is a stub step against the real `brief`. */
+/** The autoflow script run on `$args` with agent() faked (`autoflow_replay.mjs`): `{labels, prompts, settings, result}`; with `$steps` each agent is a stub step against the real `brief`. */
 function autoflow_replay(array $args, array $returns, bool $steps = false): array
 {
     $process = proc_open(['node', __DIR__ . '/autoflow_replay.mjs'], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
@@ -16,11 +16,11 @@ function autoflow_replay(array $args, array $returns, bool $steps = false): arra
     return json_decode($stdout, true);
 }
 
-/** `launch`'s start answer for an autoflow run whose cursor is on `$leg`; `$spec` is the committed spec's text, `$plan` the plan's recorded path. */
-function autoflow_start(string $leg, array $ledger = [], ?string $spec = null, ?string $plan = null): array
+/** `launch`'s start answer for an autoflow run whose cursor is on `$leg`; `$spec` is the committed spec's text, `$plan` the plan's recorded path, `$light` the manifest's `light` flag. */
+function autoflow_start(string $leg, array $ledger = [], ?string $spec = null, ?string $plan = null, bool $light = false): array
 {
     $artifacts = ['spec' => $spec === null ? null : 'spec.md', 'plan' => $plan, 'pr' => null, 'issue' => null];
-    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => $leg, 'status' => 'pending'], 'gate_ledger' => $ledger, 'artifacts' => $artifacts]);
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => $leg, 'status' => 'pending'], 'gate_ledger' => $ledger, 'artifacts' => $artifacts, ...($light ? ['light' => true] : [])]);
     if ($spec !== null) {
         file_put_contents($fixture['dir'] . '/spec.md', $spec);
     }
@@ -102,7 +102,7 @@ it('exempts one Bounded escalation and then counts on from the ledger\'s loop-ba
 it('halts a start step its leg does not have, before any agent', function () {
     $replay = autoflow_replay([...autoflow_start('handoff'), 'startStep' => 'resolve'], []);
 
-    expect($replay)->toBe(['labels' => [], 'prompts' => [], 'result' => ['action' => 'halt', 'leg' => 'handoff', 'reason' => 'handoff has no resolve step']]);
+    expect($replay)->toBe(['labels' => [], 'prompts' => [], 'settings' => [], 'result' => ['action' => 'halt', 'leg' => 'handoff', 'reason' => 'handoff has no resolve step']]);
 });
 
 it('halts before any agent when launch\'s tables are missing or incomplete', function (callable $break) {
@@ -125,7 +125,7 @@ it('halts before any agent when launch\'s tables have no review-plan loop-back, 
     $start = autoflow_start('implement');
     unset($start['tables']['loopTarget']['review-plan']);
 
-    expect(autoflow_replay($start, []))->toBe(['labels' => [], 'prompts' => [], 'result' => ['action' => 'halt', 'leg' => 'implement', 'reason' => 'args are not a launch start answer']]);
+    expect(autoflow_replay($start, []))->toBe(['labels' => [], 'prompts' => [], 'settings' => [], 'result' => ['action' => 'halt', 'leg' => 'implement', 'reason' => 'args are not a launch start answer']]);
 });
 
 /** The brief command in each prompt, after the manifest path. */
@@ -281,4 +281,119 @@ it('reruns the spec step and then the plan step on a review loop-back, whose bri
         ['review-plan:review', 'review-plan:resolve', 'design:spec', 'design:plan'],
         ['action' => 'halt', 'leg' => 'design', 'reason' => 'the manifest calls for the design spec step, not plan: the plan step follows a spec step that set artifacts.spec and removed artifacts.plan, or a plan-insufficient on an Architectural design'],
     ],
+]);
+
+it('runs every step on its full entry without light, and implement on xhigh once verify-ui or review-pr looped back', function () {
+    $design = [...AUTOFLOW_C, 'size' => 'Architectural'];
+    $replay = autoflow_replay(autoflow_start('design'), [
+        'design:spec' => [$design, $design], 'design:plan' => [$design, $design],
+        'review-plan:review' => [AUTOFLOW_C, AUTOFLOW_C],
+        'review-plan:resolve' => [AUTOFLOW_LB, AUTOFLOW_C],
+        'handoff:run' => [AUTOFLOW_C],
+        'implement:run' => [[...AUTOFLOW_C, 'ui' => true], [...AUTOFLOW_C, 'ui' => true], [...AUTOFLOW_C, 'ui' => false]],
+        'verify-ui:run' => [AUTOFLOW_LB, AUTOFLOW_C],
+        'review-pr:review' => [AUTOFLOW_C, AUTOFLOW_C],
+        'review-pr:resolve' => [AUTOFLOW_LB, AUTOFLOW_C],
+    ]);
+
+    expect($replay['settings'])->toBe([
+        'opus high', 'opus high', 'fable high', 'opus high', 'opus high', 'opus high', 'fable high', 'opus high',
+        'sonnet low', 'opus high', 'sonnet high', 'opus xhigh', 'sonnet high',
+        'fable high', 'opus high', 'opus xhigh', 'fable high', 'opus high',
+    ]);
+    expect($replay['result'])->toBe(['action' => 'done']);
+});
+
+it('runs a light run\'s Bounded design and every step after it on light, where implement and review-pr\'s review keep full\'s setting', function () {
+    $replay = autoflow_replay(autoflow_start('design', light: true), [
+        'design:spec' => [[...AUTOFLOW_C, 'size' => 'Bounded']],
+        'review-plan:review' => [AUTOFLOW_C], 'review-plan:resolve' => [AUTOFLOW_C],
+        'handoff:run' => [AUTOFLOW_C],
+        'implement:run' => [[...AUTOFLOW_C, 'ui' => true]],
+        'verify-ui:run' => [AUTOFLOW_C],
+        'review-pr:review' => [AUTOFLOW_C], 'review-pr:resolve' => [AUTOFLOW_C],
+    ]);
+
+    expect($replay['labels'])->toBe(['design:spec', 'review-plan:review', 'review-plan:resolve', 'handoff:run', 'implement:run', 'verify-ui:run', 'review-pr:review', 'review-pr:resolve']);
+    expect($replay['settings'])->toBe(['opus medium', 'fable medium', 'opus medium', 'sonnet low', 'opus high', 'sonnet medium', 'fable high', 'opus medium']);
+    expect($replay['result'])->toBe(['action' => 'done']);
+});
+
+it('moves a light run to full when its design turns out Architectural, and on a Bounded escalation', function (string $leg, ?string $spec, array $returns, array $labels, array $settings) {
+    $replay = autoflow_replay(autoflow_start($leg, spec: $spec, light: true), $returns);
+
+    expect($replay['labels'])->toBe($labels);
+    expect($replay['settings'])->toBe($settings);
+    expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'review-plan', 'reason' => 'stub stop']);
+})->with([
+    'a spec step that writes an Architectural design' => ['design', null, [
+        'design:spec' => [[...AUTOFLOW_C, 'size' => 'Architectural']],
+        'design:plan' => [[...AUTOFLOW_C, 'size' => 'Architectural']],
+        'review-plan:review' => [AUTOFLOW_STOP],
+    ], ['design:spec', 'design:plan', 'review-plan:review'], ['opus medium', 'opus high', 'fable high']],
+    'a Bounded escalation' => ['review-plan', "# x — design\n\n**Design size:** Bounded\n", [
+        'review-plan:review' => [AUTOFLOW_PI, AUTOFLOW_STOP],
+        'design:spec' => [[...AUTOFLOW_C, 'size' => 'Architectural']],
+        'design:plan' => [[...AUTOFLOW_C, 'size' => 'Architectural']],
+    ], ['review-plan:review', 'design:spec', 'design:plan', 'review-plan:review'], ['fable medium', 'opus high', 'opus high', 'fable high']],
+    'a Bounded escalation whose grown spec still says Bounded' => ['review-plan', "# x — design\n\n**Design size:** Bounded\n", [
+        'review-plan:review' => [AUTOFLOW_PI, AUTOFLOW_STOP],
+        'design:spec' => [[...AUTOFLOW_C, 'size' => 'Bounded']],
+    ], ['review-plan:review', 'design:spec', 'review-plan:review'], ['fable medium', 'opus high', 'fable high']],
+]);
+
+it('starts implement on its loop-back entry when the ledger already counts a verify-ui or review-pr loop-back, and not after a plan gap', function (array $entry, string $setting) {
+    $replay = autoflow_replay(autoflow_start('implement', [$entry]), ['implement:run' => [[...AUTOFLOW_STOP, 'ui' => false]]]);
+
+    expect($replay['settings'])->toBe([$setting]);
+})->with([
+    'a review-pr loop-back' => [['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-29T10:00:00Z', 'review' => 'r', 'outcome' => 'looped-back'], 'opus xhigh'],
+    'a verify-ui loop-back' => [['gate' => 'verify-ui', 'leg' => 'verify-ui', 'cycle' => 1, 'at' => '2026-09-29T10:00:00Z', 'outcome' => 'looped-back'], 'opus xhigh'],
+    'a plan gap' => [['gate' => 'plan-approval', 'leg' => 'implement', 'cycle' => 1, 'at' => '2026-09-29T10:00:00Z', 'reason' => 'needs a queue', 'outcome' => 'looped-back'], 'opus high'],
+]);
+
+it('reruns a review that returned nothing once, on the retry entry, and no other step', function () {
+    $review = autoflow_replay(autoflow_start('review-plan'), ['review-plan:review' => [null, AUTOFLOW_STOP]]);
+
+    expect($review['labels'])->toBe(['review-plan:review', 'review-plan:review']);
+    expect($review['settings'])->toBe(['fable high', 'opus xhigh']);
+    expect($review['result'])->toBe(['action' => 'halt', 'leg' => 'review-plan', 'reason' => 'stub stop']);
+
+    $handoff = autoflow_replay(autoflow_start('handoff'), ['handoff:run' => [null]]);
+
+    expect($handoff['labels'])->toBe(['handoff:run']);
+    expect($handoff['result'])->toBe(['action' => 'halt', 'leg' => 'handoff', 'reason' => 'the agent returned nothing']);
+});
+
+it('follows whatever agents launch hands it, and retries a review that runs on another model', function () {
+    $start = autoflow_start('review-plan');
+    $start['agents']['full']['review-plan:review'] = ['model' => 'opus', 'effort' => 'max'];
+    $start['agents']['retry'] = ['model' => 'sonnet', 'effort' => 'medium'];
+
+    expect(autoflow_replay($start, ['review-plan:review' => [null, AUTOFLOW_STOP]])['settings'])->toBe(['opus max', 'sonnet medium']);
+});
+
+it('runs a smoke run\'s stub steps on the smoke entry and never retries one', function () {
+    $start = [...autoflow_start('review-plan'), 'stub' => ['prompt' => 'Return it.', 'steps' => ['review-plan:review' => [AUTOFLOW_C]]]];
+    $replay = autoflow_replay($start, ['review-plan:review' => [null]]);
+
+    expect($replay['settings'])->toBe(['sonnet low']);
+    expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'review-plan', 'reason' => 'the agent returned nothing']);
+});
+
+it('halts before any agent when launch\'s agents or profile are missing or incomplete', function (callable $break) {
+    $replay = autoflow_replay($break(autoflow_start('handoff')), []);
+
+    expect($replay['labels'])->toBe([]);
+    expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'handoff', 'reason' => 'args carry no complete agents table: re-run launch from checks that have pipeline_agent_table()']);
+})->with([
+    'no agents' => [function (array $start) { unset($start['agents']); return $start; }],
+    'a step missing from light' => [function (array $start) { unset($start['agents']['light']['design:plan']); return $start; }],
+    'an entry without an effort' => [function (array $start) { unset($start['agents']['full']['handoff:run']['effort']); return $start; }],
+    'an empty model' => [function (array $start) { $start['agents']['full']['implement:run']['model'] = ''; return $start; }],
+    'no retry entry' => [function (array $start) { unset($start['agents']['retry']); return $start; }],
+    'no smoke entry' => [function (array $start) { unset($start['agents']['smoke']); return $start; }],
+    'a loop-back entry for a step the run does not have' => [function (array $start) { $start['agents']['loopedBack']['design:run'] = ['model' => 'opus', 'effort' => 'high']; return $start; }],
+    'no profile' => [function (array $start) { unset($start['profile']); return $start; }],
+    'a profile that is neither full nor light' => [function (array $start) { $start['profile'] = 'medium'; return $start; }],
 ]);

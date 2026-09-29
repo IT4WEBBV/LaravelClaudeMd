@@ -47,3 +47,31 @@ it('keeps every engine.md section a brief names', function () {
         expect(array_filter($headings[1], fn (string $heading) => str_starts_with($name, $heading)))->not->toBeEmpty("engine.md has no section '{$name}'");
     }
 });
+
+it('keeps every model and effort out of the autoflow script, which takes them from launch', function () {
+    $script = (string) file_get_contents(__DIR__ . '/../../workflow/pipeline-autoflow.js');
+
+    foreach ([...PIPELINE_AGENT_MODELS, 'haiku', ...PIPELINE_AGENT_EFFORTS] as $name) {
+        expect(preg_match("/(['\"`]){$name}\\1/", $script))->toBe(0, "the autoflow script names '{$name}'");
+    }
+});
+
+it('keeps engine.md\'s agents table in lock-step with pipeline_agent_table()', function () {
+    $section = lockstep_section('engine.md', 'Agents per step');
+    $table = pipeline_agent_table([]);
+    $cell = fn (array $entry) => "{$entry['model']} {$entry['effort']}";
+    $rows = [];
+    foreach ($table['full'] as $step => $entry) {
+        $rows[] = "| `{$step}` | {$cell($entry)} | {$cell($table['light'][$step])} |";
+    }
+    foreach ($table['loopedBack'] as $step => $entry) {
+        $rows[] = "| `{$step}` after a loop-back | {$cell($entry)} | {$cell($entry)} |";
+    }
+    $rows[] = "| a review that returned nothing, once | {$cell($table['retry'])} | {$cell($table['retry'])} |";
+    $rows[] = "| a smoke run's stub step | {$cell($table['smoke'])} | {$cell($table['smoke'])} |";
+
+    expect($rows)->toHaveCount(12);
+    foreach ($rows as $row) {
+        expect($section)->toContain($row);
+    }
+});

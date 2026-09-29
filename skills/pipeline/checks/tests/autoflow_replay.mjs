@@ -4,8 +4,8 @@
 // null is an agent that returns nothing. With `steps`, each call is a stub step against the real checks:
 // it runs the brief command from its prompt and returns a halt it prints; otherwise it merges the
 // return's `write` into the manifest (`cursor` one level down), writes its `diff` to the run's diff file,
-// and returns the rest. Prints {labels, prompts, result}: the agent labels and prompts in call order and
-// what the script returned.
+// and returns the rest. Prints {labels, prompts, settings, result}: the agent labels, prompts and
+// `<model> <effort>` in call order and what the script returned.
 import { execSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 
@@ -14,6 +14,7 @@ const body = readFileSync(input.script, 'utf8').replace(/^export const meta\b/m,
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 const labels = []
 const prompts = []
+const settings = []
 
 function brief(prompt) {
   const answer = execSync(prompt.match(/`(php \S+\/dispatch_cli\.php brief [^`]+)`/)[1], { encoding: 'utf8' })
@@ -32,6 +33,7 @@ function play({ write = {}, diff, ...returns }) {
 async function agent(prompt, opts) {
   labels.push(opts.label)
   prompts.push(prompt)
+  settings.push(`${opts.model} ${opts.effort}`)
   const statuses = opts.schema.properties.status.enum
   if (statuses.length === 0) throw new Error('the schema is unsatisfiable')
   const returns = input.returns[opts.label]?.shift()
@@ -44,4 +46,4 @@ async function agent(prompt, opts) {
 }
 
 const result = await new AsyncFunction('args', 'agent', 'log', body)(input.args, agent, () => {})
-process.stdout.write(JSON.stringify({ labels, prompts, result }) + '\n')
+process.stdout.write(JSON.stringify({ labels, prompts, settings, result }) + '\n')

@@ -25,6 +25,7 @@ require_once __DIR__ . '/pipeline.php';
 require_once __DIR__ . '/manifest.php';
 require_once __DIR__ . '/design_size.php';
 require_once __DIR__ . '/dispatch.php';
+require_once __DIR__ . '/agents.php';
 require_once __DIR__ . '/brief.php';
 require_once __DIR__ . '/suite.php';
 require_once __DIR__ . '/kickoff.php';
@@ -112,6 +113,14 @@ function dispatch_cli_mode_problem(string $refusal, array $manifest): ?string
     return pipeline_retired_mode($mode) ?? ($mode === 'autoflow' ? null : "{$refusal}; this run's mode is {$mode} (resume it with /pipeline, which uses next)");
 }
 
+/** A hand-set `agents` override `launch` cannot hand to the script (`../references/engine.md` §Agents per step), or null. */
+function dispatch_cli_agents_problem(array $manifest): ?string
+{
+    $problem = pipeline_agent_override_problem($manifest['agents'] ?? []);
+
+    return $problem === null ? null : "the manifest's agents override is invalid: {$problem}";
+}
+
 function dispatch_cli_returned(string $manifestPath, string $diffPath): array
 {
     $before = manifest_read(dispatch_cli_files($manifestPath)['before']);
@@ -162,7 +171,9 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
     if ($manifest === null || ! is_file($diffPath)) {
         return pipeline_halt("cannot launch: the manifest {$manifestPath} or the diff file {$diffPath} is missing");
     }
-    $problem = dispatch_cli_invalid($manifest) ?? dispatch_cli_mode_problem('launch starts autoflow runs', $manifest);
+    $problem = dispatch_cli_invalid($manifest)
+        ?? dispatch_cli_mode_problem('launch starts autoflow runs', $manifest)
+        ?? dispatch_cli_agents_problem($manifest);
     if ($problem !== null) {
         return pipeline_halt($problem);
     }
@@ -196,6 +207,7 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
     if (is_file($snapshot)) {
         unlink($snapshot);
     }
+    $size = dispatch_cli_design_size($manifest);
 
     return [
         'action' => 'start',
@@ -203,12 +215,14 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
         'startStep' => pipeline_step($manifest, $leg),
         'loops' => pipeline_loop_counts(pipeline_ledger($manifest)),
         'ui' => $triggers['ui'],
-        'size' => dispatch_cli_design_size($manifest)->value,
+        'size' => $size->value,
         'manifest' => $manifestPath,
         'worktree' => $manifest['worktree'],
         'noOpen' => ! in_array((string) getenv('PIPELINE_NO_OPEN'), ['', '0'], true),
         'checks' => __DIR__,
         'tables' => pipeline_routing_tables(),
+        'profile' => pipeline_start_profile($manifest, $size),
+        'agents' => pipeline_agent_table($manifest['agents'] ?? []),
     ];
 }
 
