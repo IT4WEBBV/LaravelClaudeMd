@@ -203,9 +203,12 @@ status it may return. For `handoff:run` in `autoflow`:
 > - `… --status plan-insufficient --reason "<what the plan lacks>"`
 > - `… --status halted --reason "<why>"`
 >
-> It prints `{"action":"recorded",…}`, or `{"action":"refused","reason":…}` with exit 1 and the manifest
-> untouched: fix what it names and run it again. Return the `status` it printed as your structured
-> `{status, reason}`. When it refuses a `halted`, return `halted` with its reason all the same.
+> Write a `--reason` without double quotes. It prints `{"action":"recorded",…}`, or
+> `{"action":"refused","reason":…}` with exit 1 and the manifest untouched: fix what it names and run it
+> again. A `record` run again in the same step replaces the earlier one, and its `replaced` then names
+> what that one wrote (`last_sha`, `cursor.status`): that is expected. Return the `status` it printed as
+> your structured `{status, reason}`. When it refuses a `halted`, return `halted` with its reason all
+> the same.
 
 `interactive` ends on *"and reply with one line naming it"* as today. The sentence listing the writable
 keys goes: the commands are the contract.
@@ -245,7 +248,10 @@ step reads it.
 ### When a fact cannot be read
 
 A `record` that needs `HEAD`, the diff for `annotations`, or a path at `HEAD`, and cannot get it, refuses
-and names the git call. It never writes an entry with a fact left out. `--status halted` needs none of
+and names the git call. It never writes an entry with a fact left out. The base of that diff is
+`pipeline_base_ref()`, and where the checkout has no `origin/HEAD`, origin's default branch as origin
+itself names it (Assumption 31): a review step must not lose its review to a missing local
+ref. `--status halted` needs none of
 them, so a step can always record its halt; and when even that is refused (no snapshot), the step returns
 `halted` to the script with `record`'s reason, and `finish` writes the cursor as it does today.
 
@@ -289,7 +295,9 @@ Test-first, in `implement`.
   or `next` run first): `record` prints `recorded`, exits 0, and the next `brief --after` / `returned`
   accepts the manifest; a refusal exits 1 and leaves the file byte-identical; the snapshot's path is
   refused by name; no snapshot, and a snapshot of another step, are refused; a review file older than
-  the snapshot is refused; `--status halted` records outside a git repository; `suite` writes the tree
+  the snapshot is refused; a review in a checkout without `origin/HEAD` is recorded against origin's own
+  default branch, and refused only where origin gives none; `--status halted` records outside a git
+  repository; `suite` writes the tree
   key of the worktree and nothing else, and refuses `green` with failures.
 - **`BriefTest.php`**: `## Return` carries the literal `record` command with the manifest's full path on
   every step of both modes, one line per allowed status; it names `.before.json`; no override line says
@@ -409,3 +417,16 @@ Added by the plan step, where the plan needed an answer the design above does no
     before it writes. `manifest_write()` would otherwise replace the manifest with an empty line.
 30. **What is `entry` in the answer?** The index of the ledger entry this record appended or completed;
     `null` when it touched none.
+
+Added by `review-plan`'s resolve step, from the plan review:
+
+31. **Is a review step refused when the checkout has no `origin/HEAD`?** No. The reviewer may write one
+    file and cannot repair the ref, so the refusal would be a halt after the whole review was written, and
+    a resume redoes the review. `record` resolves the base as kickoff does
+    (`pipeline_kickoff_default_branch()`: `ls-remote --symref origin HEAD`, then a fetch of that branch)
+    before it refuses. This narrows Assumption 21's last sentence to a repo whose origin gives no default
+    branch either, and is the one network call `record` makes (Assumption 11 is about `gh`); it happens
+    only on that fallback. The annotations stay facts read from git, never hand-written.
+32. **Does a step read `replaced` after a second `record` as a failure?** The `## Return` paragraph says it
+    is expected, and tells the step to write a `--reason` without double quotes: the reason is the one
+    free text that goes through the shell (Assumption 8 covers the review and the actions).

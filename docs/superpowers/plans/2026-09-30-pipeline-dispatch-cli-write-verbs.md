@@ -67,6 +67,10 @@ that owns the code.
    single action. Expected: a refusal that names the list shape, not a PHP warning. (Task 2)
 5. **`suite` where the tree key cannot be computed** (the worktree is gone or is no repository).
    Expected: a refusal that says to run the suite, and no `suite` written. (Task 4)
+6. **A review step in a checkout without `refs/remotes/origin/HEAD`** (a `git init` plus
+   `git remote add` repo, or a stale clone). Expected: the base is origin's own default branch, as
+   kickoff reads it, and the review is recorded; only where origin does not answer either, a refusal, with
+   the halt still recordable. (Task 3)
 
 ---
 
@@ -874,10 +878,13 @@ git commit -m "feat(pipeline): record.php builds the manifest a step leaves, fro
   `pipeline_annotations()`, `PIPELINE_RECORD_FLAGS` (Task 2); `manifest_files()`,
   `pipeline_relative_path()`, `dispatch_cli_exists_at()` (Task 1); the existing
   `dispatch_cli_snapshot_step()`, `dispatch_cli_design_size()`, `dispatch_cli_git()`,
-  `dispatch_cli_invalid()`, `pipeline_base_ref()`, `pipeline_triggers()`, `pipeline_return_problem()`.
+  `dispatch_cli_invalid()`, `pipeline_base_ref()`, `pipeline_kickoff_default_branch()`,
+  `pipeline_triggers()`, `pipeline_return_problem()`.
 - Produces:
   - `dispatch_cli_refuse(string $reason): array{action: 'refused', reason: string}`
   - `dispatch_cli_write_problem(string $manifestPath): ?string`
+  - `dispatch_cli_base_ref(array $manifest, callable $git): ?string` — `pipeline_base_ref()`, else origin's
+    own default branch, fetched (spec Assumption 21)
   - `dispatch_cli_write(string $manifestPath, array $manifest): ?array` — null when the write landed, else
     the refusal
   - `dispatch_cli_record(string $manifestPath, string $leg, string $step, array $given): array`
@@ -887,8 +894,8 @@ git commit -m "feat(pipeline): record.php builds the manifest a step leaves, fro
 - [ ] **Step 1: Write the failing tests**
 
 Create `skills/pipeline/checks/tests/RecordCliTest.php`. `rereview_repo()` and `rereview_commit()` come from
-`ReviewScopeTest.php`, `dispatch_fixture()`, `dispatch_cli()` and `boundary_brief()` from
-`DispatchCliTest.php`; Pest loads every test file, so they are in scope.
+`ReviewScopeTest.php`, `base_repo()` from `BaseStateTest.php`, `dispatch_fixture()`, `dispatch_cli()` and
+`boundary_brief()` from `DispatchCliTest.php`; Pest loads every test file, so they are in scope.
 
 ```php
 <?php
@@ -896,10 +903,11 @@ Create `skills/pipeline/checks/tests/RecordCliTest.php`. `rereview_repo()` and `
 /**
  * A throwaway repo on `feature` (with `origin/main` and `origin/HEAD`) that holds a committed spec and
  * plan, an autoflow manifest on `$leg`, and that step's `brief` already run, so its snapshot exists.
+ * `$dir` is another repo to build it in: `base_repo()` (`BaseStateTest.php`) has a real `origin`.
  */
-function record_fixture(string $leg, string $step, array $manifest = [], string $size = 'Architectural'): array
+function record_fixture(string $leg, string $step, array $manifest = [], string $size = 'Architectural', ?string $dir = null): array
 {
-    $dir = rereview_repo();
+    $dir ??= rereview_repo();
     rereview_commit($dir, ['spec.md' => "# x — design\n\n**Design size:** {$size}\n", 'plan.md' => "# x Implementation Plan\n"]);
     $fixture = dispatch_fixture([
         'mode' => 'autoflow', 'worktree' => $dir, 'cursor' => ['leg' => $leg, 'status' => 'pending'],
@@ -980,6 +988,35 @@ it('appends a review from its file, stamped with the HEAD it reviewed and the tr
     expect($entry['at'])->toMatch('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/');
     expect($entry)->not->toHaveKey('outcome');
     expect(boundary_brief($fixture, 'review-pr', 'resolve', 'review-pr:review', ['--status', 'continued'])['stdout'])->toContain('`review-pr` leg, `resolve` step');
+});
+
+it('records a review in a checkout without origin/HEAD, against the default branch origin itself names', function () {
+    $dir = base_repo();
+    pipeline_git($dir, ['symbolic-ref', '-d', 'refs/remotes/origin/HEAD']);
+    $fixture = record_fixture('review-pr', 'review', dir: $dir);
+    mkdir($dir . '/database/migrations', 0777, true);
+    rereview_commit($dir, ['database/migrations/2026_09_30_000000_add_x.php' => "<?php\n"]);
+    file_put_contents($fixture['review'], 'The migration has no down().');
+
+    $result = record_cli($fixture, 'review-pr', 'review', ['--status', 'continued', '--review-file', $fixture['review']]);
+
+    expect($result['json'])->toMatchArray(['action' => 'recorded', 'entry' => 0]);
+    expect(manifest_read($fixture['manifest'])['gate_ledger'][0]['annotations'])->toBe(['migration']);
+});
+
+it('refuses a review where neither origin/HEAD nor origin gives a base, and still records the halt', function () {
+    $fixture = record_fixture('review-plan', 'review');
+    pipeline_git($fixture['repo'], ['symbolic-ref', '-d', 'refs/remotes/origin/HEAD']);
+    $bytes = file_get_contents($fixture['manifest']);
+    file_put_contents($fixture['review'], 'Step 4 drops the link.');
+
+    $result = record_cli($fixture, 'review-plan', 'review', ['--status', 'continued', '--review-file', $fixture['review']]);
+
+    expect($result['code'])->toBe(1);
+    expect($result['json'])->toBe(['action' => 'refused', 'reason' => 'record needs the branch\'s diff for the entry\'s annotations, and `git diff <base>...HEAD` failed']);
+    expect(file_get_contents($fixture['manifest']))->toBe($bytes);
+    expect(record_cli($fixture, 'review-plan', 'review', ['--status', 'halted', '--reason', 'the base does not resolve'])['json'])
+        ->toMatchArray(['action' => 'recorded', 'status' => 'halted']);
 });
 
 it('refuses a review or actions file that is missing or older than the step\'s snapshot', function () {
@@ -1197,10 +1234,31 @@ function dispatch_cli_record_files(string $snapshotPath, array $given): array|st
     return isset($given['proof']) && ! is_file($given['proof']) ? "--proof {$given['proof']} is not a file" : $given;
 }
 
+/**
+ * The base to diff against: `pipeline_base_ref()`, else origin's default branch as origin itself names
+ * it, fetched, as kickoff resolves it; null when neither gives one. A checkout without `origin/HEAD`
+ * must not cost a review step its review.
+ */
+function dispatch_cli_base_ref(array $manifest, callable $git): ?string
+{
+    $base = pipeline_base_ref($manifest, $git);
+    if ($base !== null) {
+        return $base;
+    }
+    try {
+        $branch = pipeline_kickoff_default_branch(rtrim((string) $manifest['worktree'], '/'));
+    } catch (PipelineKickoffHalt) {
+        return null;
+    }
+    [$code] = $git(['fetch', '-q', 'origin', "+refs/heads/{$branch}:refs/remotes/origin/{$branch}"]);
+
+    return $code === 0 ? "origin/{$branch}" : null;
+}
+
 /** The content triggers that fired over the branch's diff against its base, by name; null when git cannot give the diff. */
 function dispatch_cli_annotations(array $manifest, callable $git): ?array
 {
-    $base = pipeline_base_ref($manifest, $git);
+    $base = dispatch_cli_base_ref($manifest, $git);
     [$code, $diff] = $base === null ? [1, ''] : $git(['diff', "{$base}...HEAD"]);
     if ($code !== 0) {
         return null;
@@ -1616,11 +1674,13 @@ it('prints the return of a handoff step as its commands, and tells an autoflow s
         . "- `{$command} --status continued --pr <number>`\n"
         . "- `… --status plan-insufficient --reason \"<what the plan lacks>\"`\n"
         . "- `… --status halted --reason \"<why>\"`\n\n"
+        . 'Write a `--reason` without double quotes. '
         . 'It prints `{"action":"recorded",…}`, or `{"action":"refused","reason":…}` with exit 1 and the manifest untouched: fix what it names and run it again. '
+        . 'A `record` run again in the same step replaces the earlier one, and its `replaced` then names what that one wrote (`last_sha`, `cursor.status`): that is expected. '
         . 'Return the `status` it printed as your structured `{status, reason}`. When it refuses a `halted`, return `halted` with its reason all the same.'
     );
     expect(pipeline_brief_return('handoff', 'run', 'interactive', '/tmp/m.json'))
-        ->toEndWith('fix what it names and run it again. Take the `status` it printed and reply with one line naming it.');
+        ->toEndWith('that is expected. Take the `status` it printed and reply with one line naming it.');
 });
 
 it('prints each step\'s flags from the record table: the two files by their path, an optional flag in brackets', function () {
@@ -1870,7 +1930,9 @@ function pipeline_brief_return(string $leg, string $step, string $mode, string $
     return "## Return\n\n"
         . "Your last act is one `record` command; only a read-only command your instructions name (`size`, `ui`, the proof page's `open`) comes after it. It is the only way you write the manifest: do not edit the file, and never find it by a glob (`{$snapshot}` beside it is the dispatcher's snapshot).\n\n"
         . "{$commands}\n\n"
+        . 'Write a `--reason` without double quotes. '
         . 'It prints `{"action":"recorded",…}`, or `{"action":"refused","reason":…}` with exit 1 and the manifest untouched: fix what it names and run it again. '
+        . 'A `record` run again in the same step replaces the earlier one, and its `replaced` then names what that one wrote (`last_sha`, `cursor.status`): that is expected. '
         . $reply;
 }
 ```
@@ -2053,7 +2115,7 @@ new paragraph. The status table and the lock-step sentence stay word for word.
 
 - [ ] **Step 2: `engine.md`**
 
-Six passages, each found by the phrase quoted:
+Eight passages, each found by the phrase quoted:
 
 1. §The loop, the `<manifest stem>` paragraph. *"the diff, the brief (`.brief.md`) and the dispatch
    snapshot (`.before.json`) sit next to the manifest"* becomes *"the diff, the brief (`.brief.md`), the
@@ -2089,7 +2151,10 @@ Six passages, each found by the phrase quoted:
    status the step may return, with the manifest's full path, printed from `pipeline_record_table()`
    (`../checks/record.php`); the snapshot beside the manifest is named so that no step mistakes it for
    the manifest;"*.
-7. §Suite reuse, the **Record** bullet, becomes:
+7. §What a leg brief consists of, the paragraph after that list. *"(`pipeline_leg_overrides('autoflow')`)"*
+   becomes *"(`pipeline_leg_overrides('autoflow', <manifest path>)`)"*: the function takes the manifest
+   path since Task 5.
+8. §Suite reuse, the **Record** bullet, becomes:
 
 ```markdown
 - **Record.** After every full run,
