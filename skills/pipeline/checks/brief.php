@@ -20,6 +20,7 @@ function pipeline_leg_overrides(string $mode): array
     $completeEntry = 'Complete the open entry: `actions`, then `outcome`, equal to the status you return.';
     $yourself = fn (string $procedure, string $subject) => "Apply `/critique`'s `{$procedure}` procedure to {$subject} yourself: Stage 0, Stage 1 and the rubric in `~/.claude/skills/critique/references/rubrics.md`. You are the reviewer; do not dispatch one, so `--verify` and `alternatives` are not available.";
     $checks = 'When the repo declares a `## Checks` block, run its checks first and state their result qualified by its scope (engine.md §Mechanical checks); a repo that declares none says nothing about checks.';
+    $notTheSkill = 'The leg\'s name is not a skill to invoke: do not invoke the `review-pr` skill (`/review-pr`), which posts its own review comment and changes the PR\'s draft state. This brief is the whole step (engine.md §Who takes the PR out of draft).';
     $assumptions = 'Where brainstorming would ask the human, write each question and the answer you assumed into the spec\'s `## Assumptions` section, so `/critique plan` audits exactly those.';
     $reads = 'Do not build or run the plan\'s code, in a scratch copy or anywhere else: confirm the signatures and APIs it relies on by reading, `php -l` or grep; `implement` proves the plan\'s Expected lines (engine.md §What design proves).';
     $probe = 'The one exception: when the choice between approaches hinges on whether one of them works at all, answer that question with a throwaway probe (a few lines run on their own, never the plan\'s code, never the suite) and write the question and what the probe showed into the spec.';
@@ -80,11 +81,13 @@ function pipeline_leg_overrides(string $mode): array
             'Append the thin `verify-ui` entry with outcome `continued`, or `looped-back` when the check fails.',
         ],
         'review-pr:review' => [
+            $notTheSkill,
             ($autoflow ? $yourself('pr', 'the PR') . ' State the suite line above.' : 'Invoke `/critique pr`, stating the suite line above.') . ' ' . $checks,
             'Append its review verbatim as a new `pr-review` ledger entry with `gate`, `leg`, `cycle`, `at`, `review`, `annotations` and `reviewed_sha` (the output of `git rev-parse HEAD` in the worktree: the commit you reviewed), and no `outcome`.',
             'Act on nothing. Read-only on the checkout; the manifest is the only file you write.',
         ],
         'review-pr:resolve' => [
+            $notTheSkill,
             'You are the finish step.',
             ...$actOnReview,
             $autoflow ? 'On a loop-back, stop there: no suite.' : 'On a loop-back, stop there: no suite, no `gh pr ready`.',
