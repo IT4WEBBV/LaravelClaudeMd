@@ -234,6 +234,7 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
         'tables' => pipeline_routing_tables(),
         'profile' => pipeline_start_profile($manifest, $size),
         'tier' => AgentTier::fromManifest($manifest)->value,
+        'escalated' => pipeline_escalated(pipeline_ledger($manifest)),
         'agents' => pipeline_agent_table($manifest['agents'] ?? []),
     ];
 }
