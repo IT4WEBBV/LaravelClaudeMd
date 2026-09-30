@@ -192,6 +192,8 @@ grep -rlE 'dispatch_cli\.php brief [^"]* review-pr (review|resolve)' --include='
 grep -rlE '"name":"Skill","input":\{[^}]*"skill":"(review-pr|[a-z-]+:review-pr)"' --include='*.jsonl' .
 ```
 
+The second pattern matches a `Skill` tool call; a manual read of the skill file is not counted.
+
 No step agent of a `review-pr` step was seen invoking the skill. The brief line is preventive: both `review-pr` briefs now open with it, in either mode.
 EOF
 )"
