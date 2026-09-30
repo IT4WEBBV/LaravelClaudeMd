@@ -51,8 +51,8 @@ The deterministic guardrails are tested PHP in `checks/` (run
 ## Invocation and navigation
 
 ```
-/pipeline [interactive|autoflow] [light] [base <branch>] <idea | number | spec-path>   # start a run (mode defaults to interactive; base <branch> becomes autoflow kickoff's --base, interactive does engine.md *A run on a base* by hand)
-/pipeline                                                                              # resume the current branch's run
+/pipeline [interactive|autoflow] [medium|light] [base <branch>] <idea | number | spec-path>   # start a run (mode defaults to interactive; base <branch> becomes autoflow kickoff's --base, interactive does engine.md *A run on a base* by hand)
+/pipeline                                                                                     # resume the current branch's run
 ```
 
 - **One entry point.** `/pipeline` starts a run, or — when a manifest (or reconstructable
@@ -63,11 +63,12 @@ The deterministic guardrails are tested PHP in `checks/` (run
 - **Mode defaults to `interactive`.** `autoflow` is the explicit opt-in for an unattended run; a
   fresh `/pipeline <idea>` never runs unattended by surprise. `auto`, the dispatcher engine, was
   removed (#87): `/pipeline auto` is refused, naming `autoflow`.
-- **`light` permits a small design.** A Bounded design is a ~15-line spec and a ~10-line plan
-  instead of a full design; every leg and both reviews still run. In `autoflow` a small change also
-  runs on lighter agents on the design, review-plan, verify-ui and resolve steps
-  (`references/engine.md` §Agents per step). Without `light`, `interactive`
-  asks when brainstorming finds the change small, and `autoflow` always writes the full design. A
+- **`medium` or `light` permits a small design.** A Bounded design is a ~15-line spec and a ~10-line
+  plan instead of a full design; every leg and both reviews still run. In `autoflow` the word also
+  names the agents tier: `medium` runs lighter agents on the design, review-plan, verify-ui and
+  resolve steps, and `light` also runs cheaper models on most steps (`references/engine.md` §Agents
+  per step); an Architectural design or an escalation runs on `full` whatever the word. With neither,
+  `interactive` asks when brainstorming finds the change small, and `autoflow` always writes the full design. A
   Bounded run that turns out bigger grows its design and is re-reviewed (`references/engine.md`
   §Design size).
 - **Navigation is natural language, not more commands.** Once loaded the engine holds the cursor,
@@ -87,7 +88,7 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
 (`references/engine.md` §`autoflow`):
 
 1. **Kickoff.** With `CHECKS="$HOME/.claude/skills/pipeline/checks"`:
-   `php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--light] [--base <branch>] [--decision "<verbatim>"]…`
+   `php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--medium|--light] [--base <branch>] [--decision "<verbatim>"]…`
    does §The work item and §Kickoff in one call (`references/engine.md` §Kickoff). `--base` cuts the
    run from that branch on origin instead of the default branch, records it as the manifest's `base`,
    and routes the PR into it (§Kickoff, *A run on a base*); the base's own PR into the default branch

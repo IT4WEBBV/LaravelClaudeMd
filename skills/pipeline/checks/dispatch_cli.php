@@ -5,7 +5,7 @@
  *
  *   interactive:  php dispatch_cli.php next <manifest>
  *                 php dispatch_cli.php returned <manifest> <diff-file>
- *   autoflow:     php dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--base <branch>] [--decision <text>]...
+ *   autoflow:     php dispatch_cli.php kickoff <repo-root> <number|idea> [--medium|--light] [--base <branch>] [--decision <text>]...
  *                 php dispatch_cli.php launch <manifest> <diff-file> [--from <leg>] [--decision <text>]...
  *                 php dispatch_cli.php brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]]
  *                 php dispatch_cli.php finish <manifest> <decision-json>
@@ -121,6 +121,16 @@ function dispatch_cli_agents_problem(array $manifest): ?string
     return $problem === null ? null : "the manifest's agents override is invalid: {$problem}";
 }
 
+/** A `tier` kickoff cannot have written (`../references/manifest.md`): present, and not `medium` or `light`; or null. */
+function dispatch_cli_tier_problem(array $manifest): ?string
+{
+    if (! array_key_exists('tier', $manifest) || in_array($manifest['tier'], [AgentTier::Medium->value, AgentTier::Light->value], true)) {
+        return null;
+    }
+
+    return "the manifest's tier is invalid: " . json_encode($manifest['tier']) . ' is not medium or light';
+}
+
 function dispatch_cli_returned(string $manifestPath, string $diffPath): array
 {
     $before = manifest_read(dispatch_cli_files($manifestPath)['before']);
@@ -173,7 +183,8 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
     }
     $problem = dispatch_cli_invalid($manifest)
         ?? dispatch_cli_mode_problem('launch starts autoflow runs', $manifest)
-        ?? dispatch_cli_agents_problem($manifest);
+        ?? dispatch_cli_agents_problem($manifest)
+        ?? dispatch_cli_tier_problem($manifest);
     if ($problem !== null) {
         return pipeline_halt($problem);
     }
@@ -222,6 +233,7 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
         'checks' => __DIR__,
         'tables' => pipeline_routing_tables(),
         'profile' => pipeline_start_profile($manifest, $size),
+        'tier' => AgentTier::fromManifest($manifest)->value,
         'agents' => pipeline_agent_table($manifest['agents'] ?? []),
     ];
 }
@@ -457,20 +469,24 @@ function dispatch_cli_ci_command(array $arguments): ?array
 }
 
 /**
- * `kickoff <repo-root> <number|idea> [--light] [--base <branch>] [--decision <text>]...`; null is a usage
- * error. `--mode autoflow` is accepted and changes nothing; `--mode auto` parses, so that
- * `dispatch_cli_kickoff()` can halt it by name. `interactive` keeps its session-driven kickoff.
+ * `kickoff <repo-root> <number|idea> [--medium|--light] [--base <branch>] [--decision <text>]...`; null
+ * is a usage error, and so is a second tier flag. `--mode autoflow` is accepted and changes nothing;
+ * `--mode auto` parses, so that `dispatch_cli_kickoff()` can halt it by name. `interactive` keeps its
+ * session-driven kickoff.
  *
- * @return array{repoRoot: string, item: string, mode: string, light: bool, base: ?string, decisions: list<string>}|null
+ * @return array{repoRoot: string, item: string, mode: string, tier: AgentTier, base: ?string, decisions: list<string>}|null
  */
 function dispatch_cli_kickoff_args(array $arguments): ?array
 {
-    $options = ['mode' => 'autoflow', 'light' => false, 'base' => null, 'decisions' => []];
+    $options = ['mode' => 'autoflow', 'tier' => AgentTier::Full, 'base' => null, 'decisions' => []];
     $positional = [];
     while ($arguments !== []) {
         $argument = (string) array_shift($arguments);
-        if ($argument === '--light') {
-            $options['light'] = true;
+        if (in_array($argument, ['--medium', '--light'], true)) {
+            if ($options['tier'] !== AgentTier::Full) {
+                return null;
+            }
+            $options['tier'] = AgentTier::from(substr($argument, 2));
 
             continue;
         }
@@ -599,7 +615,7 @@ $result = match ($argv[1] ?? '') {
 };
 
 if ($result === null) {
-    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--light] [--base <branch>] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] [--decision <text>]... | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> | ci <manifest> [--poll <n>] (size needs a readable manifest, ui an existing diff file)\n");
+    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--medium|--light] [--base <branch>] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] [--decision <text>]... | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> | ci <manifest> [--poll <n>] (size needs a readable manifest, ui an existing diff file)\n");
     exit(1);
 }
 

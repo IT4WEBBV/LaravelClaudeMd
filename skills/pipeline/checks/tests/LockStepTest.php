@@ -60,16 +60,18 @@ it('keeps engine.md\'s agents table in lock-step with pipeline_agent_table()', f
     $section = lockstep_section('engine.md', 'Agents per step');
     $table = pipeline_agent_table([]);
     $cell = fn (array $entry) => "{$entry['model']} {$entry['effort']}";
+    $same = fn (array $entry) => implode(' | ', array_fill(0, count(AgentTier::cases()), $cell($entry)));
     $rows = [];
-    foreach ($table['full'] as $step => $entry) {
-        $rows[] = "| `{$step}` | {$cell($entry)} | {$cell($table['light'][$step])} |";
+    foreach (pipeline_agent_steps() as $step) {
+        $rows[] = "| `{$step}` | " . implode(' | ', array_map(fn (AgentTier $tier) => $cell($table[$tier->value][$step]), AgentTier::cases())) . ' |';
     }
     foreach ($table['loopedBack'] as $step => $entry) {
-        $rows[] = "| `{$step}` after a loop-back | {$cell($entry)} | {$cell($entry)} |";
+        $rows[] = "| `{$step}` after a loop-back | {$same($entry)} |";
     }
-    $rows[] = "| a review that returned nothing, once | {$cell($table['retry'])} | {$cell($table['retry'])} |";
-    $rows[] = "| a smoke run's stub step | {$cell($table['smoke'])} | {$cell($table['smoke'])} |";
+    $rows[] = "| a review that returned nothing, once | {$same($table['retry'])} |";
+    $rows[] = "| a smoke run's stub step | {$same($table['smoke'])} |";
 
+    expect($section)->toContain('| Step | `full` | `medium` | `light` | Why |');
     expect($rows)->toHaveCount(12);
     foreach ($rows as $row) {
         expect($section)->toContain($row);

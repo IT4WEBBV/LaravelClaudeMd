@@ -62,10 +62,14 @@ it('carries the pointers, the settled decisions and the suite line', function ()
         ->toContain('Never move `cursor.leg`');
 });
 
-it('permits the design size the invocation allowed', function () {
-    expect(pipeline_brief(brief_manifest('design'), 'design', '/tmp/wt/.claude/pipeline/feature-x.json'))->toContain('the Architectural path is required');
-    expect(pipeline_brief(brief_manifest('design', ['light' => true]), 'design', '/tmp/wt/.claude/pipeline/feature-x.json'))->toContain('the Bounded path is permitted');
-});
+it('permits the design size the invocation allowed, naming the word', function (array $extra, string $line) {
+    expect(pipeline_brief(brief_manifest('design', $extra), 'design', '/tmp/wt/.claude/pipeline/feature-x.json'))->toContain($line);
+})->with([
+    'no word' => [[], '- design size: the Architectural path is required (no `medium` or `light`)'],
+    'medium' => [['tier' => 'medium'], '- design size: the Bounded path is permitted (`medium`)'],
+    'light' => [['tier' => 'light'], '- design size: the Bounded path is permitted (`light`)'],
+    'a legacy light: true' => [['light' => true], '- design size: the Bounded path is permitted (`medium`)'],
+]);
 
 it('tells design to confirm by reading, probe only to choose, and leave the Expected lines to implement', function () {
     foreach ([['autoflow', 'spec'], ['interactive', 'run']] as [$mode, $step]) {

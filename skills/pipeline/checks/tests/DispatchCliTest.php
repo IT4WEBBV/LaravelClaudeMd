@@ -164,7 +164,7 @@ it('refuses a manifest it cannot read, and a bad command', function () {
 it('launches from the cursor with the ledger\'s loop-backs, the design size and ui', function () {
     $looped = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r', 'outcome' => 'looped-back'];
     $open = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 2, 'at' => '2026-09-22T11:00:00Z', 'review' => 'r'];
-    $fixture = dispatch_fixture(['mode' => 'autoflow', 'gate_ledger' => [$looped, $open], 'artifacts' => ['spec' => 'spec.md', 'plan' => null, 'pr' => null, 'issue' => null]]);
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'tier' => 'medium', 'gate_ledger' => [$looped, $open], 'artifacts' => ['spec' => 'spec.md', 'plan' => null, 'pr' => null, 'issue' => null]]);
     file_put_contents($fixture['dir'] . '/spec.md', "# x — design\n\n**Design size:** Bounded\n");
     file_put_contents($fixture['diff'], dispatch_ui_diff());
 
@@ -180,7 +180,8 @@ it('launches from the cursor with the ledger\'s loop-backs, the design size and 
         'noOpen' => false,
         'checks' => realpath(__DIR__ . '/..'),
         'tables' => pipeline_routing_tables(),
-        'profile' => 'light',
+        'profile' => 'medium',
+        'tier' => 'medium',
         'agents' => pipeline_agent_table([]),
     ]);
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-plan', 'status' => 'pending']);
@@ -211,25 +212,38 @@ it('hands the autoflow script its routing tables, from the functions interactive
     expect(array_keys($tables['allowed']))->toBe($pairs);
 });
 
-it('hands the script its agents with the manifest\'s override laid over them, and the profile to start on', function () {
+it('hands the script its agents with the manifest\'s override laid over them, the profile to start on and the tier', function () {
     $override = ['review-plan:review' => ['model' => 'opus', 'effort' => 'xhigh']];
-    $fixture = dispatch_fixture(['mode' => 'autoflow', 'light' => true, 'agents' => $override]);
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'tier' => 'light', 'agents' => $override]);
     $start = dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json'];
 
     expect($start['agents'])->toBe(pipeline_agent_table($override));
     expect($start['agents']['full']['review-plan:review'])->toBe(['model' => 'opus', 'effort' => 'xhigh']);
+    expect($start['agents']['light']['review-plan:review'])->toBe(['model' => 'opus', 'effort' => 'xhigh']);
     expect($start['profile'])->toBe('light');
+    expect($start['tier'])->toBe('light');
 });
 
-it('starts a run on full once its ledger records an escalation, whatever the spec and the light flag say', function () {
+it('starts a run on full once its ledger records an escalation, whatever the spec and the tier say', function () {
     $escalated = ['gate' => 'design-size', 'leg' => 'handoff', 'at' => '2026-09-29T10:00:00Z', 'reason' => 'migration', 'outcome' => 'escalated'];
-    $fixture = dispatch_fixture(['mode' => 'autoflow', 'light' => true, 'cursor' => ['leg' => 'design', 'status' => 'pending'], 'gate_ledger' => [$escalated], 'artifacts' => ['spec' => 'spec.md', 'plan' => 'plan.md', 'pr' => null, 'issue' => null]]);
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'tier' => 'light', 'cursor' => ['leg' => 'design', 'status' => 'pending'], 'gate_ledger' => [$escalated], 'artifacts' => ['spec' => 'spec.md', 'plan' => 'plan.md', 'pr' => null, 'issue' => null]]);
     file_put_contents($fixture['dir'] . '/spec.md', "# x — design\n\n**Design size:** Bounded\n");
 
     $start = dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json'];
 
     expect($start['size'])->toBe('Bounded');
     expect($start['profile'])->toBe('full');
+    expect($start['tier'])->toBe('light');
+});
+
+it('starts a legacy light: true manifest with a Bounded spec on medium, the former light agents, and names medium as its tier', function () {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'light' => true, 'artifacts' => ['spec' => 'spec.md', 'plan' => null, 'pr' => null, 'issue' => null]]);
+    file_put_contents($fixture['dir'] . '/spec.md', "# x — design\n\n**Design size:** Bounded\n");
+
+    $start = dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json'];
+
+    expect($start['profile'])->toBe('medium');
+    expect($start['tier'])->toBe('medium');
 });
 
 it('halts a launch whose agents override is invalid, and leaves the manifest as it was', function (array $manifest, mixed $agents, string $what) {
@@ -243,6 +257,34 @@ it('halts a launch whose agents override is invalid, and leaves the manifest as 
     'a step autoflow does not have' => [[], ['design:run' => ['effort' => 'low']], '`design:run` is not an autoflow step'],
     'a model outside the three' => [[], ['handoff:run' => ['model' => 'haiku']], '`handoff:run` names model "haiku", not one of opus, sonnet, fable'],
     'a list, on a finished run' => [['cursor' => ['leg' => 'review-pr', 'status' => 'done']], [['model' => 'opus']], 'it is not an object'],
+]);
+
+it('halts a launch whose tier is not medium or light, and leaves the manifest as it was', function (mixed $tier, string $what) {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'tier' => $tier, 'light' => true]);
+    $before = file_get_contents($fixture['manifest']);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff'], '--decision', 'Keep the guard'])['json'])
+        ->toBe(['action' => 'halt', 'reason' => "the manifest's tier is invalid: {$what} is not medium or light"]);
+    expect(file_get_contents($fixture['manifest']))->toBe($before);
+})->with([
+    'an unknown word' => ['lite', '"lite"'],
+    'full, written by hand' => ['full', '"full"'],
+    'another table entry' => ['loopedBack', '"loopedBack"'],
+    'a boolean' => [true, 'true'],
+    'a number' => [3, '3'],
+    'a list' => [['light'], '["light"]'],
+    'null' => [null, 'null'],
+]);
+
+it('launches a manifest whose tier is medium, light or absent', function (array $manifest, string $tier) {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', ...$manifest]);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json']['tier'])->toBe($tier);
+})->with([
+    'medium' => [['tier' => 'medium'], 'medium'],
+    'light' => [['tier' => 'light'], 'light'],
+    'no tier' => [[], 'full'],
+    'a legacy light: true' => [['light' => true], 'medium'],
 ]);
 
 it('launches a design at the step the manifest calls for', function (?string $spec, string $step) {
@@ -905,17 +947,23 @@ it('kicks off an issue: the declared create, no upstream, the manifest excluded 
     expect(kickoff_calls($fixture))->toBe(['api repos/acme/app/issues/69', 'api /repos/acme/app/issues/69/dependencies/blocked_by']);
 });
 
-it('writes the mode, light and the decisions verbatim into the first manifest', function () {
+it('writes the mode, the tier and the decisions verbatim into the first manifest', function (array $arguments, string $tier) {
     $fixture = kickoff_fixture();
 
-    $ready = kickoff($fixture, ['#69', '--light', '--mode', 'autoflow', '--decision', 'Fold in #53: add pipeline_ledger()', '--decision', 'Keep the guard'])['json'];
+    $ready = kickoff($fixture, [...$arguments, '--mode', 'autoflow', '--decision', 'Fold in #53: add pipeline_ledger()', '--decision', 'Keep the guard'])['json'];
+    $manifest = manifest_read($ready['manifest']);
 
-    expect(manifest_read($ready['manifest']))->toMatchArray([
+    expect($manifest)->toMatchArray([
         'mode' => 'autoflow',
-        'light' => true,
+        'tier' => $tier,
         'decisions' => ['Fold in #53: add pipeline_ledger()', 'Keep the guard'],
     ]);
-});
+    expect($manifest)->not->toHaveKey('light');
+})->with([
+    'medium' => [['#69', '--medium'], 'medium'],
+    'light' => [['#69', '--light'], 'light'],
+    'light, before the item' => [['--light', '#69'], 'light'],
+]);
 
 it('halts a kickoff for the removed auto mode before anything is created, naming autoflow', function () {
     $fixture = kickoff_fixture();
@@ -1039,6 +1087,8 @@ it('refuses a kickoff it cannot parse', function (array $arguments) {
     'a flag without its value' => [['69', '--decision']],
     'a base without its value' => [['69', '--base']],
     'two items' => [['69', '70']],
+    'two tier flags' => [['69', '--medium', '--light']],
+    'a tier flag twice' => [['69', '--light', '--light']],
 ]);
 
 /**
