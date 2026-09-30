@@ -294,3 +294,11 @@ Questions the brainstorm would have asked the owner, with the answer assumed.
 15. **Sibling runs may change `brief.php`, `BriefTest.php` or engine.md too.** A later step merges the base
     when its brief says so (engine.md §Catching up with the base); this design edits the `implement:run`
     entry and adds two sections, so a conflict there is resolved keeping both sides.
+16. **Can the *names work-on in no brief* test fail on a checkout's path?** Not by design: the `suite`
+    line in the brief carries the absolute path of `skills/pipeline/checks`, and a worktree named after a
+    branch that holds `work-on` would put it there. The test replaces that directory with `<checks>`
+    before it looks. (Added by the `design:plan` step.)
+17. **Does `board.php`'s *"the untouched scaffold `work-on` copies into a fresh repo"* go?** No. It
+    states where a placeholder section comes from, a fact about the shared file, not a procedure; only
+    the two docblock references to `work-on.config.template.md` change. (Added by the `design:plan`
+    step.)
