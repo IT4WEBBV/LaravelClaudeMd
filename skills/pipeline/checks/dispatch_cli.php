@@ -14,11 +14,12 @@
  *                 php dispatch_cli.php ci <manifest> [--poll <n>]
  *   both:         php dispatch_cli.php record <manifest> <leg> <step> --status <status> [flags]
  *                 php dispatch_cli.php suite <manifest> --outcome green|red --passed <n> --failed <n>
+ *                 php dispatch_cli.php handoff <manifest>
  *
  * `brief` prints the brief as Markdown; `size` and `ui` print a bare value for a step to copy
  * (`Bounded` / `Architectural`, `true` / `false`); every other answer, and a `brief` that halts, is
- * one JSON line. Exits 0 on every decision, a halt included; `record` and `suite` exit 1 on a
- * refusal, which is no decision about the run and leaves the manifest untouched, so a failed write cannot
+ * one JSON line. Exits 0 on every decision, a halt included; `record`, `suite` and `handoff` exit 1 on
+ * a refusal, which is no decision about the run and leaves the manifest untouched, so a failed write cannot
  * be missed in an `&&` chain. Exits 1 on a usage error (a `kickoff`, a `launch`, a `brief` or a `ci` it
  * cannot parse included), and when `size` has no readable manifest or `ui` no diff file.
  */
@@ -33,6 +34,8 @@ require_once __DIR__ . '/brief.php';
 require_once __DIR__ . '/record.php';
 require_once __DIR__ . '/suite.php';
 require_once __DIR__ . '/kickoff.php';
+require_once __DIR__ . '/gh.php';
+require_once __DIR__ . '/handoff.php';
 require_once __DIR__ . '/ci.php';
 
 /** git in the run's worktree, for the scope of a re-review of the PR (`pipeline_review_scope()`). */
@@ -732,6 +735,23 @@ function dispatch_cli_record_facts(array $before, array $given): array
     ];
 }
 
+/** Why `$leg` `$step` may not write at `$manifestPath`, or null: `dispatch_cli_write_problem()`, and the snapshot beside it is this step's. */
+function dispatch_cli_step_problem(string $manifestPath, string $leg, string $step): ?string
+{
+    $problem = dispatch_cli_write_problem($manifestPath);
+    if ($problem !== null) {
+        return $problem;
+    }
+    $snapshotPath = manifest_files($manifestPath)['before'];
+    $snapshot = dispatch_cli_snapshot_step(manifest_read($snapshotPath));
+
+    return match (true) {
+        $snapshot === "{$leg}:{$step}" => null,
+        $snapshot === null => "no snapshot at {$snapshotPath}: record follows this step's brief (next in interactive)",
+        default => 'the snapshot is of the ' . str_replace(':', ' ', $snapshot) . " step, not {$leg} {$step}",
+    };
+}
+
 /**
  * A step's one manifest write (`../references/manifest.md` §What a leg writes): the snapshot of the step
  * `brief` or `next` ran for, plus what the flags add, checked by the next boundary's own
@@ -739,18 +759,12 @@ function dispatch_cli_record_facts(array $before, array $given): array
  */
 function dispatch_cli_record(string $manifestPath, string $leg, string $step, array $given): array
 {
-    $problem = dispatch_cli_write_problem($manifestPath);
+    $problem = dispatch_cli_step_problem($manifestPath, $leg, $step);
     if ($problem !== null) {
         return dispatch_cli_refuse($problem);
     }
     $snapshotPath = manifest_files($manifestPath)['before'];
-    $before = manifest_read($snapshotPath);
-    $snapshot = dispatch_cli_snapshot_step($before);
-    if ($snapshot !== "{$leg}:{$step}") {
-        return dispatch_cli_refuse($snapshot === null
-            ? "no snapshot at {$snapshotPath}: record follows this step's brief (next in interactive)"
-            : 'the snapshot is of the ' . str_replace(':', ' ', $snapshot) . " step, not {$leg} {$step}");
-    }
+    $before = (array) manifest_read($snapshotPath);
     $given = dispatch_cli_record_files($snapshotPath, $given);
     if (is_string($given)) {
         return dispatch_cli_refuse($given);
@@ -866,6 +880,49 @@ function dispatch_cli_suite_command(array $arguments): ?array
     return $valid ? dispatch_cli_suite((string) $manifestPath, $options['--outcome'], (int) $options['--passed'], (int) $options['--failed']) : null;
 }
 
+/**
+ * The whole `handoff` step (`../references/engine.md` §Stations): `record`'s checks before anything
+ * leaves the machine, then `pipeline_handoff()` over the snapshot `record` builds on, then the step's one
+ * write through `dispatch_cli_record()`, for a halt as for the PR. A record refused once the PR is open
+ * names the PR: the next run adopts it (#118).
+ */
+function dispatch_cli_handoff(string $manifestPath): array
+{
+    $problem = dispatch_cli_step_problem($manifestPath, 'handoff', 'run');
+    if ($problem !== null) {
+        return dispatch_cli_refuse($problem);
+    }
+    $manifest = (array) manifest_read(manifest_files($manifestPath)['before']);
+    $retired = pipeline_retired_mode((string) $manifest['mode']);
+    if ($retired !== null) {
+        return dispatch_cli_refuse($retired);
+    }
+    $worktree = rtrim((string) $manifest['worktree'], '/');
+    $record = fn (array $given): array => dispatch_cli_record($manifestPath, 'handoff', 'run', $given);
+
+    try {
+        $done = pipeline_handoff($manifest, dispatch_cli_git($manifest), fn (array $args): array => pipeline_gh_run($worktree, $args));
+    } catch (PipelineHandoffHalt $halt) {
+        $reason = $halt->getMessage();
+        $recorded = $record(['status' => LegStatus::Halted->value, 'reason' => $reason]);
+
+        return $recorded['action'] === 'recorded'
+            ? [...$recorded, 'reason' => $reason]
+            : dispatch_cli_refuse("{$recorded['reason']}; the step halted on: {$reason}");
+    }
+    $recorded = $record(['status' => LegStatus::Continued->value, 'pr' => (string) $done['pr']]);
+
+    return $recorded['action'] === 'recorded'
+        ? [...$recorded, ...$done]
+        : dispatch_cli_refuse("{$recorded['reason']}; PR #{$done['pr']} is open and the next run of this step adopts it");
+}
+
+/** `handoff <manifest>`; null is a usage error. */
+function dispatch_cli_handoff_command(array $arguments): ?array
+{
+    return count($arguments) === 1 ? dispatch_cli_handoff((string) $arguments[0]) : null;
+}
+
 $result = match ($argv[1] ?? '') {
     'kickoff' => dispatch_cli_kickoff(array_slice($argv, 2)),
     'next' => dispatch_cli_next((string) ($argv[2] ?? '')),
@@ -878,11 +935,12 @@ $result = match ($argv[1] ?? '') {
     'ci' => dispatch_cli_ci_command(array_slice($argv, 2)),
     'record' => dispatch_cli_record_command(array_slice($argv, 2)),
     'suite' => dispatch_cli_suite_command(array_slice($argv, 2)),
+    'handoff' => dispatch_cli_handoff_command(array_slice($argv, 2)),
     default => null,
 };
 
 if ($result === null) {
-    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--medium|--light] [--base <branch>] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] [--decision <text>]... | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> | ci <manifest> [--poll <n>] | record <manifest> <leg> <step> --status <status> [--spec <path>] [--plan <path>] [--pr <number>] [--proof <path>] [--review-file <path>] [--actions-file <path>] [--issue-link <n>=<outcome>]... [--reason <text>] | suite <manifest> --outcome green|red --passed <n> --failed <n> (size needs a readable manifest, ui an existing diff file)\n");
+    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--medium|--light] [--base <branch>] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] [--decision <text>]... | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> | ci <manifest> [--poll <n>] | record <manifest> <leg> <step> --status <status> [--spec <path>] [--plan <path>] [--pr <number>] [--proof <path>] [--review-file <path>] [--actions-file <path>] [--issue-link <n>=<outcome>]... [--reason <text>] | suite <manifest> --outcome green|red --passed <n> --failed <n> | handoff <manifest> (size needs a readable manifest, ui an existing diff file)\n");
     exit(1);
 }
 

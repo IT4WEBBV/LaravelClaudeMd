@@ -98,3 +98,195 @@ function pipeline_handoff_choice(array $prs): array|string|null
 
     return pipeline_pr_problem($prs[0]['number'], $prs[0]) ?? $prs[0];
 }
+
+/**
+ * The step, in the order that pushes nothing a halt would leave behind: the preflight and the PR lookup
+ * read only, then the push, then the PR, then the Component. `$git` and `$gh` run git in the worktree and
+ * gh from it, each `array $args → [code, out, err]`. Every outward act is idempotent, so the step can run
+ * again after any failure.
+ *
+ * @return array{pr: int, url: string, created: bool, notes: list<string>}
+ *
+ * @throws PipelineHandoffHalt
+ */
+function pipeline_handoff(array $manifest, callable $git, callable $gh): array
+{
+    $branch = (string) $manifest['branch'];
+    [$spec, $plan] = pipeline_handoff_design($manifest, $git);
+    pipeline_handoff_on_branch($branch, $git);
+    $board = pipeline_handoff_board($manifest);
+    $existing = pipeline_handoff_find($manifest, $gh);
+    pipeline_handoff_push($branch, $git);
+
+    $issue = isset($manifest['artifacts']['issue']) ? (int) $manifest['artifacts']['issue'] : null;
+    $base = $manifest['base'] ?? null;
+    $title = pipeline_handoff_title($git(['show', "HEAD:{$spec}"])[1], $branch, $issue);
+    $pr = $existing ?? pipeline_handoff_create($branch, $base, $title, pipeline_handoff_body($spec, $plan, $issue), $gh);
+    $aligned = $existing === null ? [] : pipeline_handoff_align($existing, $base, $spec, $plan, $issue, $gh);
+
+    return [
+        'pr' => (int) $pr['number'],
+        'url' => (string) $pr['url'],
+        'created' => $existing === null,
+        'notes' => [...$aligned, ...pipeline_handoff_component_notes($board, $pr, $gh)],
+    ];
+}
+
+/** @return array{0: string, 1: string} the spec and the plan as git names them: both set, both at `HEAD` */
+function pipeline_handoff_design(array $manifest, callable $git): array
+{
+    $paths = [];
+    foreach (['spec', 'plan'] as $name) {
+        $path = $manifest['artifacts'][$name] ?? null;
+        if (! is_string($path) || $path === '') {
+            throw new PipelineHandoffHalt("artifacts.{$name} is not set: handoff names the spec and the plan in the PR");
+        }
+        $path = pipeline_relative_path((string) $manifest['worktree'], $path);
+        if ($git(['cat-file', '-e', "HEAD:{$path}"])[0] !== 0) {
+            throw new PipelineHandoffHalt("the {$name} {$path} does not exist at HEAD: commit it first");
+        }
+        $paths[] = $path;
+    }
+
+    return $paths;
+}
+
+function pipeline_handoff_on_branch(string $branch, callable $git): void
+{
+    [$code, $head, $err] = $git(['rev-parse', '--abbrev-ref', 'HEAD']);
+    if ($code !== 0) {
+        throw new PipelineHandoffHalt("the worktree's branch cannot be read: " . pipeline_handoff_words($err, $code));
+    }
+    if ($head !== $branch) {
+        throw new PipelineHandoffHalt("the worktree is on {$head}, not on the run's branch {$branch}");
+    }
+}
+
+/** `pipeline_repo_board()` over the worktree's config; a repo without the file has no board, and an `invalid` section halts as it does at kickoff. */
+function pipeline_handoff_board(array $manifest): array
+{
+    $config = rtrim((string) $manifest['worktree'], '/') . '/.claude/work-on.config.md';
+    $board = pipeline_repo_board(is_file($config) ? (string) file_get_contents($config) : '');
+    if ($board['state'] === 'invalid') {
+        throw new PipelineHandoffHalt("the ## Board section is invalid: {$board['error']}");
+    }
+
+    return $board;
+}
+
+/**
+ * The run's PR when it has one, or null when one is to be created: the recorded PR, which must be an open
+ * draft on this branch, else the one open PR of the branch (#118), which must be a draft.
+ */
+function pipeline_handoff_find(array $manifest, callable $gh): ?array
+{
+    $branch = (string) $manifest['branch'];
+    $known = $manifest['artifacts']['pr'] ?? null;
+    if ($known === null) {
+        $choice = pipeline_handoff_choice(pipeline_handoff_open_prs($branch, $gh));
+
+        return is_string($choice) ? throw new PipelineHandoffHalt($choice) : $choice;
+    }
+    [$code, $out] = $gh(['pr', 'view', (string) $known, '--json', PIPELINE_HANDOFF_PR_FIELDS]);
+    $view = $code === 0 ? json_decode($out, true) : null;
+    $view = is_array($view) ? $view : null;
+    $problem = pipeline_pr_problem($known, $view);
+    if ($problem !== null) {
+        throw new PipelineHandoffHalt($problem);
+    }
+    $head = (string) ($view['headRefName'] ?? '');
+    if ($head !== $branch) {
+        throw new PipelineHandoffHalt("PR #{$known} is for the branch {$head}, not the run's branch {$branch}");
+    }
+
+    return $view;
+}
+
+/** The open PRs whose head is the branch. A gh that cannot list halts: a run that cannot tell whether a PR exists never creates one. */
+function pipeline_handoff_open_prs(string $branch, callable $gh): array
+{
+    [$code, $out, $err] = $gh(['pr', 'list', '--head', $branch, '--state', 'open', '--json', PIPELINE_HANDOFF_PR_FIELDS]);
+    $prs = $code === 0 ? json_decode($out, true) : null;
+    if (! is_array($prs) || ! array_is_list($prs)) {
+        throw new PipelineHandoffHalt("gh could not list the open PRs of {$branch}: " . pipeline_handoff_words($err, $code));
+    }
+
+    return $prs;
+}
+
+/** The branch is named because kickoff leaves it without an upstream. Never forced. */
+function pipeline_handoff_push(string $branch, callable $git): void
+{
+    [$code, , $err] = $git(['push', '-u', 'origin', $branch]);
+    if ($code !== 0) {
+        throw new PipelineHandoffHalt("git refused the push of {$branch}: " . pipeline_handoff_words($err, $code));
+    }
+}
+
+/** Opens the draft PR and reads it back: its number, URL and base come from gh's listing, never from what `create` printed. */
+function pipeline_handoff_create(string $branch, ?string $base, string $title, string $body, callable $gh): array
+{
+    [$code, , $err] = $gh(['pr', 'create', '--draft', '--head', $branch, ...($base === null ? [] : ['--base', $base]), '--title', $title, '--body', $body]);
+    if ($code !== 0) {
+        throw new PipelineHandoffHalt('gh could not open the PR: ' . pipeline_handoff_words($err, $code) . '; the branch is pushed, and the next run of this step opens or adopts it');
+    }
+    $pr = pipeline_handoff_choice(pipeline_handoff_open_prs($branch, $gh));
+
+    return match (true) {
+        is_array($pr) => $pr,
+        $pr === null => throw new PipelineHandoffHalt("gh opened a PR for {$branch} but does not list it yet; the next run of this step adopts it"),
+        default => throw new PipelineHandoffHalt($pr),
+    };
+}
+
+/**
+ * Brings an adopted or re-used PR in line: into the run's base, and naming the spec, the plan and the
+ * issue. Its title stays as it is.
+ *
+ * @return list<string> notes
+ */
+function pipeline_handoff_align(array $pr, ?string $base, string $spec, string $plan, ?int $issue, callable $gh): array
+{
+    $number = (string) $pr['number'];
+    $notes = [];
+    if ($base !== null && ($pr['baseRefName'] ?? null) !== $base) {
+        pipeline_handoff_edit($number, ['--base', $base], $gh);
+        $notes[] = "PR #{$number} retargeted to {$base}";
+    }
+    $body = pipeline_handoff_body_update((string) ($pr['body'] ?? ''), $spec, $plan, $issue);
+    if ($body !== null) {
+        pipeline_handoff_edit($number, ['--body', $body], $gh);
+    }
+
+    return $notes;
+}
+
+function pipeline_handoff_edit(string $number, array $change, callable $gh): void
+{
+    [$code, , $err] = $gh(['pr', 'edit', $number, ...$change]);
+    if ($code !== 0) {
+        throw new PipelineHandoffHalt("gh could not edit PR #{$number} ({$change[0]}): " . pipeline_handoff_words($err, $code));
+    }
+}
+
+/**
+ * The Component on the PR's board item. Whatever goes wrong is a note, never a halt, as kickoff's claim
+ * is: a PR without a Component is a finished handoff.
+ *
+ * @return list<string>
+ */
+function pipeline_handoff_component_notes(array $board, array $pr, callable $gh): array
+{
+    $target = pipeline_handoff_component($board);
+    if ($target === null) {
+        return [];
+    }
+    if (is_string($target)) {
+        return [$target];
+    }
+    $error = pipeline_board_set($gh, $board['board'], (string) $pr['url'], $target['field'], $target['option']);
+
+    return [$error === null
+        ? "Component {$target['name']} set on board {$board['board']['number']}"
+        : 'the Component was not set: ' . mb_scrub($error)];
+}
