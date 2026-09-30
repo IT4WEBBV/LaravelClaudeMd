@@ -469,3 +469,43 @@ it('halts before any agent when launch\'s answer carries no boolean escalated fl
     'a number' => [function (array $start) { $start['escalated'] = 1; return $start; }],
     'null' => [function (array $start) { $start['escalated'] = null; return $start; }],
 ]);
+
+it('walks from design:plan to done with every step writing through record (the replay smoke pass)', function () {
+    $dir = rereview_repo();
+    rereview_commit($dir, ['spec.md' => "# x — design\n\n**Design size:** Architectural\n", 'plan.md' => "# x Implementation Plan\n"]);
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'worktree' => $dir, 'cursor' => ['leg' => 'design', 'status' => 'pending'], 'artifacts' => ['spec' => 'spec.md', 'pr' => null, 'issue' => null]]);
+    $start = dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json'];
+    expect($start)->toMatchArray(['action' => 'start', 'startLeg' => 'design', 'startStep' => 'plan']);
+    $recorded = fn (array $flags = [], array $extra = []) => ['status' => 'continued', 'record' => $flags, ...$extra];
+
+    $replay = autoflow_replay($start, [
+        'design:plan' => [$recorded(['--plan', 'plan.md'], ['size' => 'Architectural'])],
+        'review-plan:review' => [$recorded(extra: ['review' => 'Step 2 names no test.'])],
+        'review-plan:resolve' => [$recorded(extra: ['actions' => [['claim' => 'step 2 names no test', 'disposition' => 'integrated', 'note' => 'added it']]])],
+        'handoff:run' => [$recorded(['--pr', '7'])],
+        'implement:run' => [$recorded(extra: ['diff' => '', 'ui' => false])],
+        'review-pr:review' => [$recorded(extra: ['review' => 'Nothing to change.'])],
+        'review-pr:resolve' => [$recorded(['--issue-link', '52=closes'], ['actions' => []])],
+    ], steps: true);
+
+    expect($replay['labels'])->toBe(['design:plan', 'review-plan:review', 'review-plan:resolve', 'handoff:run', 'implement:run', 'review-pr:review', 'review-pr:resolve']);
+    expect($replay['result'])->toBe(['action' => 'done']);
+    expect(dispatch_cli(['finish', $fixture['manifest'], '{"action":"done"}'])['json'])->toBe(['action' => 'done']);
+
+    $manifest = manifest_read($fixture['manifest']);
+    $head = pipeline_git($dir, ['rev-parse', 'HEAD']);
+    expect($manifest['artifacts'])->toMatchArray(['spec' => 'spec.md', 'plan' => 'plan.md', 'pr' => 7]);
+    expect($manifest['last_sha'])->toBe($head);
+    expect(array_column($manifest['gate_ledger'], 'outcome'))->toBe(['continued', 'continued']);
+    expect($manifest['gate_ledger'][1])->toMatchArray(['gate' => 'pr-review', 'reviewed_sha' => $head, 'issue_links' => [['issue' => 52, 'outcome' => 'closes']]]);
+});
+
+it('returns a halt with record\'s reason when a stub step\'s record is refused', function () {
+    $dir = rereview_repo();
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'worktree' => $dir, 'cursor' => ['leg' => 'handoff', 'status' => 'pending']]);
+    $start = dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json'];
+
+    $replay = autoflow_replay($start, ['handoff:run' => [['status' => 'continued', 'record' => []]]], steps: true);
+
+    expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'handoff', 'reason' => 'handoff run with --status continued needs --pr']);
+});
