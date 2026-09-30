@@ -1,7 +1,11 @@
 <?php
 
+/** The keys a `## Checks` block may declare (`../references/engine.md` §The repo config). */
+const PIPELINE_CHECK_KEYS = ['static-analysis', 'format'];
+
 /**
- * Parse the `## Checks` block out of a repo's `.claude/work-on.config.md`.
+ * Parse the `## Checks` block out of a repo's `.claude/work-on.config.md`; its keys are
+ * `PIPELINE_CHECK_KEYS` (`../references/engine.md` §The repo config).
  *
  * Tri-state by design (`../references/engine.md` §Mechanical checks): `absent` and
  * `invalid` must never collapse into one another. A typo'd heading or a mis-cased key
@@ -12,7 +16,6 @@
  */
 function pipeline_repo_checks(string $configMarkdown): array
 {
-    $known = ['static-analysis', 'format'];
     $keyLineRe = '/^\s*-\s*([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.*)$/';
 
     $lines = preg_split('/\R/', $configMarkdown);
@@ -29,7 +32,7 @@ function pipeline_repo_checks(string $configMarkdown): array
     // that is `invalid`, not `absent`.
     if ($start === null) {
         foreach ($lines as $line) {
-            if (preg_match($keyLineRe, $line, $m) && in_array(strtolower($m[1]), $known, true)) {
+            if (preg_match($keyLineRe, $line, $m) && in_array(strtolower($m[1]), PIPELINE_CHECK_KEYS, true)) {
                 return [
                     'state' => 'invalid',
                     'commands' => [],
@@ -58,7 +61,7 @@ function pipeline_repo_checks(string $configMarkdown): array
         $key = $m[1];
         $value = trim(preg_replace('/\s+#.*$/', '', $m[2]));
 
-        if (! in_array($key, $known, true)) {
+        if (! in_array($key, PIPELINE_CHECK_KEYS, true)) {
             return ['state' => 'invalid', 'commands' => [], 'error' => "unknown check key '{$key}'"];
         }
         if ($value === '') {
@@ -80,8 +83,8 @@ function pipeline_repo_checks(string $configMarkdown): array
  *
  * `<N>` is the run's slot *suffix*, not its number: an empty string on the primary
  * stack, `-2` / `-3` … in a slot. That is how the slot machinery names containers
- * (`scripts/slot-env.sh`: `SUFFIX="-${SLOT}"`), and it mirrors the `<N>` convention
- * `work-on.config.template.md` already uses for `slot-path` and `dev-url`.
+ * (`scripts/slot-env.sh`: `SUFFIX="-${SLOT}"`). `../references/engine.md` §The repo config
+ * lists the keys whose commands carry it.
  *
  * Without this, a hardcoded container name execs the primary stack, analyses the
  * primary checkout instead of the run's worktree, finds nothing, and passes green.

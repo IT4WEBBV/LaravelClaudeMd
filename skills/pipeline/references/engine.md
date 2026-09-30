@@ -274,6 +274,27 @@ the inline `design` step records its spec and plan, and runs `returned`. Every o
 to a fresh background agent. After each step the session stops and continues when the human says so
 (§Navigation), as `interactive` always has.
 
+## The repo config — what the pipeline reads from .claude/work-on.config.md
+
+A repo configures the pipeline in `.claude/work-on.config.md`, the file the `work-on` skill reads too. It
+is shared on purpose, so a run and a `/work-on` session on the same issue land on the same branch and the
+same board. This section lists every key the pipeline reads, and the pipeline reads nothing else in the
+file.
+
+| Section | Key | Read by | |
+|---|---|---|---|
+| `Repo` | `repo` | kickoff (the issue lookup, §The work item), the status line, `orchestrate` | required |
+| `Worktree` | `create` | kickoff (§Kickoff), with `<branch>` substituted | required |
+| `Worktree` | `remove` | the teardown after the merge (§After the merge), `orchestrate` | required to tear down |
+| `Branch convention` | `issue` | kickoff: the run's branch and the check that no branch of the issue exists | required for an issue |
+| `Board` | `org`, `number`, `project-id`, `status-field-id`, `in-progress-option-id` | kickoff's claim (§The work item) | all or none |
+| `Board` | `component-field-id`, `component-default` | `handoff` (the PR's Component) | optional |
+| `Board` | `component-alts`, `docs` | nothing: accepted so a `work-on` config parses | — |
+| `Checks` | `static-analysis`, `format` | `implement`, `review-pr` (§Mechanical checks); `<N>` expands to the slot suffix | optional, committed |
+
+`## Board` and `## Checks` are tri-state (`absent`, `valid`, `invalid`), as §The work item and
+§Mechanical checks say. A missing required key halts kickoff, naming the key.
+
 ## The work item — resolved before anything is created
 
 A run that carries a GitHub issue owes that issue three things `work-on` already does and the
@@ -315,7 +336,7 @@ nothing: no worktree, no branch, no PR exists yet, so there is nothing to leave 
 to clean up.
 
 **Then the board — claim the item before the slow steps.** Board identifiers are **not** in this
-skill; they live in the `## Board` section of the repo's `.claude/work-on.config.md`, the same
+skill; they live in the `## Board` section of the repo's `.claude/work-on.config.md` (§The repo config), the same
 single source `work-on` and the pipeline's `handoff` command read. Parse it with `pipeline_repo_board()`
 (`../checks/board.php`), which returns the same three states, for the same reason, as
 `pipeline_repo_checks()`:

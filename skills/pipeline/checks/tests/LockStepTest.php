@@ -80,3 +80,14 @@ it('keeps engine.md\'s agents table in lock-step with pipeline_agent_table()', f
         expect($section)->toContain($row);
     }
 });
+
+it('keeps engine.md\'s repo config section in lock-step with the keys the parsers read', function () {
+    $section = lockstep_section('engine.md', 'The repo config');
+
+    foreach ([...PIPELINE_CHECK_KEYS, ...PIPELINE_BOARD_KEYS, ...PIPELINE_BOARD_OPTIONAL_KEYS] as $key) {
+        expect($section)->toContain("`{$key}`");
+    }
+    foreach (['| `Repo` | `repo` |', '| `Worktree` | `create` |', '| `Worktree` | `remove` |', '| `Branch convention` | `issue` |'] as $row) {
+        expect($section)->toContain($row);
+    }
+});
