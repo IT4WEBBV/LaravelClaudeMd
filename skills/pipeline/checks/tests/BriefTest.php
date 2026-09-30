@@ -22,18 +22,18 @@ it('names the manifest where the dispatcher found it, not where the branch name 
         ->not->toContain('feature-x.json');
 });
 
-it('completes the open entry before the finish step\'s last action', function () {
+it('has the finish step write its actions before its last action', function () {
     $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
     $brief = pipeline_brief(brief_manifest('review-pr', ['gate_ledger' => [$open]]), 'review-pr', '/tmp/m.json');
 
-    expect(strpos($brief, 'Complete the open entry'))->toBeLessThan(strpos($brief, 'The last action is `proof_cli.php open`'));
+    expect(strpos($brief, 'm.actions.json'))->toBeLessThan(strpos($brief, 'After `record`, the last action is `proof_cli.php open`'));
 });
 
 it('has overrides for every leg and step, in autoflow and interactive', function () {
     foreach (['autoflow', 'interactive'] as $mode) {
         foreach (pipeline_legs() as $leg) {
             foreach (pipeline_steps($leg, $mode) as $step) {
-                expect(pipeline_leg_overrides($mode))->toHaveKey("{$leg}:{$step}");
+                expect(pipeline_leg_overrides($mode, '/tmp/m.json'))->toHaveKey("{$leg}:{$step}");
             }
         }
     }
@@ -59,7 +59,7 @@ it('carries the pointers, the settled decisions and the suite line', function ()
         ->toContain('full suite green over tree `t1` at `abc1234`: 104 passed, 0 failed')
         ->toContain('Leave the PR draft; this overrides any mark-ready instruction')
         ->toContain('`plan-insufficient`')
-        ->toContain('Never move `cursor.leg`');
+        ->toContain('dispatch_cli.php record /tmp/wt/.claude/pipeline/feature-x.json implement run --status continued`');
 });
 
 it('permits the design size the invocation allowed, naming the word', function (array $extra, string $line) {
@@ -94,7 +94,7 @@ it('splits autoflow\'s design into a spec step that stops at the spec and a plan
         ->toContain('`design` leg, `spec` step')
         ->toContain('- Invoke `superpowers:brainstorming` and stop at the spec: on the Architectural path, where brainstorming hands over to `superpowers:writing-plans`, the plan is the next step\'s, `design:plan`, so do not invoke `writing-plans` and commit no plan (engine.md §Design size).')
         ->toContain('write each question and the answer you assumed into the spec\'s `## Assumptions` section')
-        ->toContain('- Commit the spec; on the Bounded path, commit the plan as well, a second commit, at `docs/superpowers/plans/<date>-<slug>.md` beside the spec `docs/superpowers/specs/<date>-<slug>-design.md` (`pipeline_plan_path()`): a Bounded design has no plan step, and a grown design\'s plan step extends the plan it finds there. Then, after your last commit and in one manifest write, set `artifacts.spec` and remove `artifacts.plan` (the plan step writes this spec\'s plan and sets it), or on the Bounded path set `artifacts.plan` to the plan: a halt before that write leaves the manifest calling for this step again.')
+        ->toContain('- Commit the spec; on the Bounded path, commit the plan as well, a second commit, at `docs/superpowers/plans/<date>-<slug>.md` beside the spec `docs/superpowers/specs/<date>-<slug>-design.md` (`pipeline_plan_path()`): a Bounded design has no plan step, and a grown design\'s plan step extends the plan it finds there. After your last commit the paths go to `record`: `--spec`, and `--plan` on the Bounded path only; it sets `artifacts.spec` and removes or sets `artifacts.plan` as the spec\'s size calls for. A halt before that leaves the manifest calling for this step again.')
         ->not->toContain('Commit the spec, then the plan: two commits.')
         ->not->toContain('The plan goes at');
     expect($plan)
@@ -106,11 +106,11 @@ it('splits autoflow\'s design into a spec step that stops at the spec and a plan
             . '- An exception, to check a claim: when the spec or the plan relies on what existing code does, which reading cannot show, answer that one yes/no question with one throwaway command (a `php -r` or tinker one-liner, or one existing test by filter; never the suite, never the plan\'s code, no new file), bringing the dev stack up first when the command needs it (engine.md §Dev-stack readiness), and write `Probed: <claim>: <what it showed> (<command>)` on one line beside the task that relies on it, or beside the claim in the spec when this step writes no plan.' . "\n"
             . '- Plans and specs committed before 2026-09-14 are not exemplars'
         )
-        ->toContain('- Commit the plan. Set `artifacts.plan`.')
+        ->toContain('- Commit the plan; its path goes to `record` as `--plan`.')
         ->not->toContain('to choose an approach')
         ->not->toContain('Invoke `superpowers:brainstorming`');
     expect(pipeline_brief(brief_manifest('design'), 'design', '/tmp/m.json', 'run'))
-        ->toContain('- Commit the spec, then the plan: two commits. Set `artifacts.spec` and `artifacts.plan`.');
+        ->toContain('- Commit the spec, then the plan: two commits; their paths go to `record` as `--spec` and `--plan`.');
 });
 
 it('asks for grow form only after an escalation no plan approval has answered, split over autoflow\'s two design steps', function () {
@@ -191,7 +191,7 @@ it('gives the reviewer crafted context: no earlier review, no earlier actions', 
     expect($brief)
         ->toContain('`review` step')
         ->toContain('/critique plan')
-        ->toContain('this review\'s `cycle`: `2`')
+        ->not->toContain('`cycle`')
         ->toContain('The engine never edits.')
         ->not->toContain('OLD REVIEW TEXT')
         ->not->toContain('OLD ACTION')
@@ -296,14 +296,14 @@ it('leaves the PR draft at the autoflow finish step for the session that launche
         ->toContain('Push your commits and leave the PR draft; the session that launched the run marks it ready after the CI gate (engine.md §The CI gate).')
         ->toContain('On a loop-back, stop there: no suite.')
         ->not->toContain('gh pr ready');
-    expect(strpos($brief, 'Complete the open entry'))->toBeLessThan(strpos($brief, 'The last action is `proof_cli.php open`'));
+    expect(strpos($brief, 'm.actions.json'))->toBeLessThan(strpos($brief, 'After `record`, the last action is `proof_cli.php open`'));
 });
 
 it('has the interactive finish step run the CI gate before gh pr ready', function () {
     $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
 
     expect(pipeline_brief(brief_manifest('review-pr', ['gate_ledger' => [$open]]), 'review-pr', '/tmp/m.json'))
-        ->toContain('Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`; show any other answer to the human. The last action is `proof_cli.php open`');
+        ->toContain('Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`; show any other answer to the human. After `record`, the last action is `proof_cli.php open`');
 });
 
 it('makes a recorded red CI a finding of review-pr\'s review and resolve steps, and only then', function () {
@@ -327,7 +327,7 @@ it('tells every autoflow step where to work, that the run is authorised, and to 
             expect($autoflow)
                 ->toContain('Run every command from `cd /tmp/wt`')
                 ->toContain('The owner authorised this run, including pushing the branch and opening the draft PR; the pipeline never merges.')
-                ->toContain('then return `{status, reason}` as your structured result');
+                ->toContain('Return the `status` it printed as your structured `{status, reason}`.');
             expect($interactive)
                 ->not->toContain('The owner authorised this run')
                 ->not->toContain('`cd /tmp/wt`')
@@ -340,19 +340,19 @@ it('tells a resolve step to loop back on a plan gap, and a review step to leave 
     $open = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
 
     expect(pipeline_brief(brief_manifest('review-plan', ['gate_ledger' => [$open]]), 'review-plan', '/tmp/m.json'))
-        ->toContain('A plan gap or a Bounded escalation found while resolving is a loop-back: return `looped-back`')
+        ->toContain('A plan gap or a Bounded escalation found while resolving is a loop-back: return `looped-back` and name it in your actions')
         ->not->toContain('`plan-insufficient`');
     expect(pipeline_brief(brief_manifest('review-plan'), 'review-plan', '/tmp/m.json'))
-        ->toContain('When you return `plan-insufficient`, append no review entry.');
+        ->toContain('When you return `plan-insufficient`, write no review file: `record` adds no review entry.');
     expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))
         ->toContain('run the escalation check first')
-        ->not->toContain('append no review entry');
+        ->not->toContain('write no review file');
 });
 
 it('runs format once per implement step, before the last suite run and the push, in both modes', function () {
     foreach (['autoflow', 'interactive'] as $mode) {
         expect(pipeline_brief(brief_manifest('implement', ['mode' => $mode]), 'implement', '/tmp/m.json'))
-            ->toContain('Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, its changes committed, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). Record `suite` after every full run.')
+            ->toContain('Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, its changes committed, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). After every full run, record it: `php ' . realpath(__DIR__ . '/..') . '/dispatch_cli.php suite /tmp/m.json --outcome <green|red> --passed <n> --failed <n>`.')
             ->not->toContain('after each step the suite and the mechanical checks');
     }
 });
@@ -369,16 +369,16 @@ it('says nothing about a base on a run without one', function () {
 
 it('makes handoff on a run on a base check that the PR opened into it', function () {
     expect(pipeline_brief(brief_manifest('handoff', ['base' => 'feature/integration']), 'handoff', '/tmp/m.json'))
-        ->toContain('- The PR must open into `feature/integration`: after `handoff pr`, `gh pr view <pr> --json baseRefName --jq .baseRefName` prints `feature/integration`; otherwise `gh pr edit <pr> --base feature/integration` before setting `artifacts.pr` (engine.md §Kickoff).');
+        ->toContain('- The PR must open into `feature/integration`: after `handoff pr`, `gh pr view <pr> --json baseRefName --jq .baseRefName` prints `feature/integration`; otherwise `gh pr edit <pr> --base feature/integration` before you record the PR (engine.md §Kickoff).');
     expect(pipeline_brief(brief_manifest('handoff'), 'handoff', '/tmp/m.json'))->not->toContain('The PR must open into');
 });
 
 it('tells a later step to report a plan gap only once it has found one, on either size', function (string $leg, string $step) {
     foreach (['autoflow', 'interactive'] as $mode) {
         expect(pipeline_brief(brief_manifest($leg, ['mode' => $mode]), $leg, '/tmp/m.json', $step))
-            ->toContain('On a Bounded spec (its header says `**Design size:** Bounded`): run the escalation check first (engine.md §Design size), and only on escalation append the `design-size` entry and return `plan-insufficient`.')
-            ->toContain('On an Architectural spec: only when the plan falls short of what this step needs (files or behaviour it does not name), append a `plan-approval` entry with `leg`, `cycle`, `at`, a `reason` naming what the plan lacks, and outcome `looped-back`, then return `plan-insufficient`. The size alone is no gap: an Architectural plan needs no approval beyond `review-plan`\'s.')
-            ->not->toContain('On an Architectural spec, append a `plan-approval` entry');
+            ->toContain('On a Bounded spec (its header says `**Design size:** Bounded`): run the escalation check first (engine.md §Design size), and only on escalation return `plan-insufficient` with `--reason` naming why the design must grow.')
+            ->toContain('On an Architectural spec: only when the plan falls short of what this step needs (files or behaviour it does not name), return `plan-insufficient` with `--reason` naming what the plan lacks. The size alone is no gap: an Architectural plan needs no approval beyond `review-plan`\'s.')
+            ->not->toContain('append a `plan-approval` entry');
     }
 })->with([
     'handoff' => ['handoff', 'run'],
@@ -386,13 +386,6 @@ it('tells a later step to report a plan gap only once it has found one, on eithe
     'verify-ui' => ['verify-ui', 'run'],
     'review-pr' => ['review-pr', 'review'],
 ]);
-
-it('has the review-pr review step record the commit it reviewed, and the review-plan one not', function (string $mode) {
-    expect(pipeline_brief(brief_manifest('review-pr', ['mode' => $mode]), 'review-pr', '/tmp/m.json', 'review'))
-        ->toContain('`review`, `annotations` and `reviewed_sha` (the output of `git rev-parse HEAD` in the worktree: the commit you reviewed), and no `outcome`');
-    expect(pipeline_brief(brief_manifest('review-plan', ['mode' => $mode]), 'review-plan', '/tmp/m.json', 'review'))
-        ->not->toContain('reviewed_sha');
-})->with(['autoflow', 'interactive']);
 
 it('scopes review-pr\'s review step to what changed since the last completed review, naming its commit and not the review', function () {
     $dir = rereview_repo(['shared.php' => "a\nb\nc\nd\ne\nf\ng\n"]);
@@ -489,3 +482,98 @@ it('names the spec and the plan to handoff from the manifest, in both modes', fu
     expect(pipeline_brief(brief_manifest('handoff', ['mode' => $mode]), 'handoff', '/tmp/m.json', 'run'))
         ->toContain('- The spec and the plan are `artifacts.spec` and `artifacts.plan` (Pointers above): give `handoff pr` those two paths and skip its own detection from the last commits or the newest files, which a merge of the base empties or crowds (engine.md §Catching up with the base).');
 })->with(['autoflow', 'interactive']);
+
+/** @return list<array{0: string, 1: string, 2: string}> every step of both modes as `[mode, leg, step]` */
+function brief_steps(): array
+{
+    $steps = [];
+    foreach (['autoflow', 'interactive'] as $mode) {
+        foreach (pipeline_legs() as $leg) {
+            foreach (pipeline_steps($leg, $mode) as $step) {
+                $steps[] = [$mode, $leg, $step];
+            }
+        }
+    }
+
+    return $steps;
+}
+
+it('ends every brief of both modes on the literal record command, one line per status the step may return', function () {
+    $path = '/tmp/wt/.claude/pipeline/feature-x.json';
+    $command = 'php ' . realpath(__DIR__ . '/..') . "/dispatch_cli.php record {$path}";
+
+    foreach (brief_steps() as [$mode, $leg, $step]) {
+        $return = explode("## Return\n\n", pipeline_brief(brief_manifest($leg, ['mode' => $mode]), $leg, $path, $step))[1];
+
+        expect($return)
+            ->toContain("- `{$command} {$leg} {$step} --status continued")
+            ->toContain('- `… --status halted --reason "<why>"`')
+            ->toContain('`feature-x.before.json` beside it is the dispatcher\'s snapshot')
+            ->toContain('never find it by a glob')
+            ->not->toContain('Never move `cursor.leg`');
+        expect(substr_count($return, "\n- `"))->toBe(count(LegStatus::allowedFor($leg, $step)));
+        foreach (LegStatus::allowedFor($leg, $step) as $status) {
+            expect($return)->toContain("--status {$status->value}");
+        }
+    }
+});
+
+it('prints the return of a handoff step as its commands, and tells an autoflow step what to return', function () {
+    $command = 'php ' . realpath(__DIR__ . '/..') . '/dispatch_cli.php record /tmp/m.json handoff run';
+
+    expect(pipeline_brief_return('handoff', 'run', 'autoflow', '/tmp/m.json'))->toBe(
+        "## Return\n\n"
+        . "Your last act is one `record` command; only a read-only command your instructions name (`size`, `ui`, the proof page's `open`) comes after it. It is the only way you write the manifest: do not edit the file, and never find it by a glob (`m.before.json` beside it is the dispatcher's snapshot).\n\n"
+        . "- `{$command} --status continued --pr <number>`\n"
+        . "- `… --status plan-insufficient --reason \"<what the plan lacks>\"`\n"
+        . "- `… --status halted --reason \"<why>\"`\n\n"
+        . 'Write a `--reason` without double quotes. '
+        . 'It prints `{"action":"recorded",…}`, or `{"action":"refused","reason":…}` with exit 1 and the manifest untouched: fix what it names and run it again. '
+        . 'A `record` run again in the same step replaces the earlier one, and its `replaced` then names what that one wrote (`last_sha`, `cursor.status`): that is expected. '
+        . 'Return the `status` it printed as your structured `{status, reason}`. When it refuses a `halted`, return `halted` with its reason all the same.'
+    );
+    expect(pipeline_brief_return('handoff', 'run', 'interactive', '/tmp/m.json'))
+        ->toEndWith('that is expected. Take the `status` it printed and reply with one line naming it.');
+});
+
+it('prints each step\'s flags from the record table: the two files by their path, an optional flag in brackets', function () {
+    $commands = fn (string $leg, string $step) => pipeline_record_commands($leg, $step, '/tmp/m.json');
+
+    expect($commands('review-plan', 'review')[0])->toEndWith('review-plan review --status continued --review-file /tmp/m.review.md');
+    expect($commands('review-pr', 'resolve'))->toHaveCount(3);
+    expect($commands('review-pr', 'resolve')[1])->toBe('… --status looped-back --actions-file /tmp/m.actions.json [--issue-link <issue>=<closes|stays-open|dropped-but-closes>]…');
+    expect($commands('design', 'spec')[0])->toEndWith('design spec --status continued --spec <path> [--plan <path>]');
+    expect($commands('implement', 'run')[0])->toEndWith('implement run --status continued');
+    expect($commands('verify-ui', 'run')[1])->toBe('… --status looped-back [--proof <path>]');
+});
+
+it('says what each step passes to record, and describes no JSON', function () {
+    $path = '/tmp/wt/.claude/pipeline/feature-x.json';
+    $suite = 'php ' . realpath(__DIR__ . '/..') . "/dispatch_cli.php suite {$path} --outcome <green|red> --passed <n> --failed <n>";
+    $brief = fn (string $mode, string $leg, string $step) => pipeline_brief(brief_manifest($leg, ['mode' => $mode]), $leg, $path, $step);
+
+    foreach (brief_steps() as [$mode, $leg, $step]) {
+        expect($brief($mode, $leg, $step))
+            ->not->toContain('ledger entry with `gate`')
+            ->not->toContain('Set `artifacts')
+            ->not->toContain('set `artifacts.proof`')
+            ->not->toContain('`cycle`')
+            ->not->toContain('reviewed_sha')
+            ->not->toContain('Complete the open entry');
+    }
+    expect($brief('autoflow', 'review-plan', 'review'))
+        ->toContain('- Write its review verbatim to `/tmp/wt/.claude/pipeline/feature-x.review.md`; `record` appends it as the open `plan-approval` entry.')
+        ->toContain('- Act on nothing. Read-only on the checkout: that file is the only one you write.');
+    expect($brief('interactive', 'review-pr', 'review'))
+        ->toContain('`record` appends it as the open `pr-review` entry, with the commit you reviewed.');
+    expect($brief('autoflow', 'review-plan', 'resolve'))
+        ->toContain('- Write what you did with each point to `/tmp/wt/.claude/pipeline/feature-x.actions.json` as a JSON list of `{claim, disposition, note}`, `disposition` one of `integrated`, `recorded`, `open-question`, and `[]` when you acted on nothing; `record` completes the open entry from it.');
+    expect($brief('autoflow', 'review-pr', 'resolve'))
+        ->toContain("- Run the suite unless engine.md §Suite reuse finds this tree green, and record the run: `{$suite}`.")
+        ->toContain('- Reconcile the closing links (engine.md §Closing links): each related issue\'s outcome goes to `record` as an `--issue-link`.');
+    expect($brief('autoflow', 'handoff', 'run'))
+        ->toContain('- Invoke `handoff pr`. The PR opens draft and references the issue without a closing keyword (engine.md §Closing links). Its number goes to `record` as `--pr`.');
+    expect($brief('autoflow', 'verify-ui', 'run'))
+        ->toContain('- Write the proof page (engine.md §The proof store) and post the text-only record comment; the path `write` printed goes to `record` as `--proof`.')
+        ->toContain('- Return `continued`, or `looped-back` when the check fails.');
+});

@@ -9,15 +9,20 @@
  * @return array<string, list<string>> keyed `<leg>:<step>`. An `autoflow` step is a workflow agent: it
  * cannot start agents, so where a station would dispatch one it does that work itself.
  */
-function pipeline_leg_overrides(string $mode): array
+function pipeline_leg_overrides(string $mode, string $manifestPath): array
 {
     $autoflow = $mode === 'autoflow';
+    $files = manifest_files($manifestPath);
+    $suite = '`' . pipeline_cli('suite', $manifestPath) . ' --outcome <green|red> --passed <n> --failed <n>`';
+    $dispositions = implode(', ', array_map(fn (ActionDisposition $disposition) => "`{$disposition->value}`", ActionDisposition::cases()));
+    $writeActions = "Write what you did with each point to `{$files['actions']}` as a JSON list of `{claim, disposition, note}`, `disposition` one of {$dispositions}, and `[]` when you acted on nothing; `record` completes the open entry from it.";
+    $writeReview = fn (string $gate, string $stamped = '') => "Write its review verbatim to `{$files['review']}`; `record` appends it as the open `{$gate}` entry{$stamped}.";
+    $readOnly = 'Act on nothing. Read-only on the checkout: that file is the only one you write.';
     $actOnReview = [
         'Act on the open review with the edit/rework boundary (engine.md §Resolving a review): integrate and commit edits and small fixes; where the review says the work is fundamentally wrong, loop back.',
         'Change nothing the review did not name.',
         'Carry anything unresolved verbatim as an open question.',
     ];
-    $completeEntry = 'Complete the open entry: `actions`, then `outcome`, equal to the status you return.';
     $yourself = fn (string $procedure, string $subject) => "Apply `/critique`'s `{$procedure}` procedure to {$subject} yourself: Stage 0, Stage 1 and the rubric in `~/.claude/skills/critique/references/rubrics.md`. You are the reviewer; do not dispatch one, so `--verify` and `alternatives` are not available.";
     $checks = 'When the repo declares a `## Checks` block, run its checks first and state their result qualified by its scope (engine.md §Mechanical checks); a repo that declares none says nothing about checks.';
     $notTheSkill = 'The leg\'s name is not a skill to invoke: do not invoke the `review-pr` skill (`/review-pr`), which posts its own review comment and changes the PR\'s draft state. This brief is the whole step (engine.md §Who takes the PR out of draft).';
@@ -35,7 +40,7 @@ function pipeline_leg_overrides(string $mode): array
             $probe,
             $claim,
             $exemplars,
-            'Commit the spec, then the plan: two commits. Set `artifacts.spec` and `artifacts.plan`.',
+            'Commit the spec, then the plan: two commits; their paths go to `record` as `--spec` and `--plan`.',
         ],
         'design:spec' => [
             'Invoke `superpowers:brainstorming` and stop at the spec: on the Architectural path, where brainstorming hands over to `superpowers:writing-plans`, the plan is the next step\'s, `design:plan`, so do not invoke `writing-plans` and commit no plan (engine.md §Design size).',
@@ -44,7 +49,7 @@ function pipeline_leg_overrides(string $mode): array
             $probe,
             $claim,
             $exemplars,
-            'Commit the spec; on the Bounded path, commit the plan as well, a second commit, at `docs/superpowers/plans/<date>-<slug>.md` beside the spec `docs/superpowers/specs/<date>-<slug>-design.md` (`pipeline_plan_path()`): a Bounded design has no plan step, and a grown design\'s plan step extends the plan it finds there. Then, after your last commit and in one manifest write, set `artifacts.spec` and remove `artifacts.plan` (the plan step writes this spec\'s plan and sets it), or on the Bounded path set `artifacts.plan` to the plan: a halt before that write leaves the manifest calling for this step again.',
+            'Commit the spec; on the Bounded path, commit the plan as well, a second commit, at `docs/superpowers/plans/<date>-<slug>.md` beside the spec `docs/superpowers/specs/<date>-<slug>-design.md` (`pipeline_plan_path()`): a Bounded design has no plan step, and a grown design\'s plan step extends the plan it finds there. After your last commit the paths go to `record`: `--spec`, and `--plan` on the Bounded path only; it sets `artifacts.spec` and removes or sets `artifacts.plan` as the spec\'s size calls for. A halt before that leaves the manifest calling for this step again.',
         ],
         'design:plan' => [
             'Read the committed spec (`artifacts.spec`) cold, and the code it points at, and invoke `superpowers:writing-plans` on it; do not re-design what the spec settles (engine.md §Design size).',
@@ -52,26 +57,26 @@ function pipeline_leg_overrides(string $mode): array
             $reads,
             $claim,
             $exemplars,
-            'Commit the plan. Set `artifacts.plan`.',
+            'Commit the plan; its path goes to `record` as `--plan`.',
         ],
         'review-plan:review' => [
             $autoflow ? $yourself('plan', 'the spec and the plan') : 'Invoke `/critique plan` on the spec and the plan.',
-            'Append its review verbatim as a new `plan-approval` ledger entry with `gate`, `leg`, `cycle`, `at`, `review` and `annotations`, and no `outcome`.',
-            'Act on nothing. Read-only on the checkout; the manifest is the only file you write.',
+            $writeReview('plan-approval'),
+            $readOnly,
         ],
         'review-plan:resolve' => [
             ...$actOnReview,
             ...($autoflow ? [] : ['The independent read (engine.md §Resolving a review) is available.']),
-            $completeEntry,
+            $writeActions,
         ],
         'handoff:run' => [
-            'Invoke `handoff pr`. The PR opens draft and references the issue without a closing keyword (engine.md §Closing links). Set `artifacts.pr`.',
+            'Invoke `handoff pr`. The PR opens draft and references the issue without a closing keyword (engine.md §Closing links). Its number goes to `record` as `--pr`.',
             'The spec and the plan are `artifacts.spec` and `artifacts.plan` (Pointers above): give `handoff pr` those two paths and skip its own detection from the last commits or the newest files, which a merge of the base empties or crowds (engine.md §Catching up with the base).',
         ],
         'implement:run' => [
             'Bring the dev stack up first, without asking (engine.md §Dev-stack readiness).',
             'Follow `work-on`\'s logic in this worktree; claim no second slot.',
-            'Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, its changes committed, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). Record `suite` after every full run.',
+            'Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, its changes committed, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). After every full run, record it: ' . $suite . '.',
             'Leave the PR draft; this overrides any mark-ready instruction in the plan, the PR comment, or `work-on`\'s own logic.',
             $autoflow
                 ? 'Add the `ci` label (`gh pr edit <pr> --add-label ci`) before your first push, in a repo that has one, and do not wait on CI after it: this overrides `work-on`\'s CI watch; the CI gate reads the PR\'s head commit before the PR goes ready (engine.md §The CI gate).'
@@ -81,28 +86,28 @@ function pipeline_leg_overrides(string $mode): array
         ],
         'verify-ui:run' => [
             'Bring the dev stack up if it is down. Invoke `browser-verification`.',
-            'Write the proof page (engine.md §The proof store), set `artifacts.proof` to the path `write` printed, and post the text-only record comment.',
-            'Append the thin `verify-ui` entry with outcome `continued`, or `looped-back` when the check fails.',
+            'Write the proof page (engine.md §The proof store) and post the text-only record comment; the path `write` printed goes to `record` as `--proof`.',
+            'Return `continued`, or `looped-back` when the check fails.',
         ],
         'review-pr:review' => [
             $notTheSkill,
             ($autoflow ? $yourself('pr', 'the PR') . ' State the suite line above.' : 'Invoke `/critique pr`, stating the suite line above.') . ' ' . $checks,
-            'Append its review verbatim as a new `pr-review` ledger entry with `gate`, `leg`, `cycle`, `at`, `review`, `annotations` and `reviewed_sha` (the output of `git rev-parse HEAD` in the worktree: the commit you reviewed), and no `outcome`.',
-            'Act on nothing. Read-only on the checkout; the manifest is the only file you write.',
+            $writeReview('pr-review', ', with the commit you reviewed'),
+            $readOnly,
         ],
         'review-pr:resolve' => [
             $notTheSkill,
             'You are the finish step.',
             ...$actOnReview,
             $autoflow ? 'On a loop-back, stop there: no suite.' : 'On a loop-back, stop there: no suite, no `gh pr ready`.',
-            'Run the suite unless engine.md §Suite reuse finds this tree green; record `suite`.',
-            'Reconcile the closing links (engine.md §Closing links) and write `issue_links` on the entry.',
+            'Run the suite unless engine.md §Suite reuse finds this tree green, and record the run: ' . $suite . '.',
+            'Reconcile the closing links (engine.md §Closing links): each related issue\'s outcome goes to `record` as an `--issue-link`.',
             'When `artifacts.proof` is set, rewrite the proof page with the final open questions and ledger.',
-            $completeEntry,
+            $writeActions,
             ($autoflow
                 ? 'Push your commits and leave the PR draft; the session that launched the run marks it ready after the CI gate (engine.md §The CI gate).'
                 : 'Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`; show any other answer to the human.')
-            . ' The last action is `proof_cli.php open` on `artifacts.proof` (engine.md §The proof store).',
+            . ' After `record`, the last action is `proof_cli.php open` on `artifacts.proof` (engine.md §The proof store).',
         ],
     ];
 }
@@ -122,8 +127,8 @@ function pipeline_brief(array $manifest, string $leg, string $manifestPath, ?str
         pipeline_brief_role($manifest, $leg, $step),
         pipeline_brief_pointers($manifest, $manifestPath, $leg, $step),
         pipeline_brief_state($manifest, $leg),
-        pipeline_brief_overrides($manifest, $leg, $step, $scope, $catchUp),
-        pipeline_brief_return($leg, $step, (string) $manifest['mode']),
+        pipeline_brief_overrides($manifest, $manifestPath, $leg, $step, $scope, $catchUp),
+        pipeline_brief_return($leg, $step, (string) $manifest['mode'], $manifestPath),
     ]) . "\n";
 }
 
@@ -144,9 +149,6 @@ function pipeline_brief_pointers(array $manifest, string $manifestPath, string $
         if ($value !== null && $value !== '') {
             $lines[] = "- {$name}: `{$value}`";
         }
-    }
-    if ($step === 'review') {
-        $lines[] = '- this review\'s `cycle`: `' . pipeline_next_cycle($ledger, pipeline_gate_of($leg)) . '`';
     }
     if ($step === 'resolve') {
         $lines[] = '- the open review: `gate_ledger[' . pipeline_open_entry($ledger, pipeline_gate_of($leg)) . ']`';
@@ -205,11 +207,11 @@ function pipeline_brief_state(array $manifest, string $leg): string
     return "## Settled decisions and state\n\n" . implode("\n", $lines);
 }
 
-function pipeline_brief_overrides(array $manifest, string $leg, string $step, ?array $scope = null, ?array $catchUp = null): string
+function pipeline_brief_overrides(array $manifest, string $manifestPath, string $leg, string $step, ?array $scope = null, ?array $catchUp = null): string
 {
     $lines = [
         ...($catchUp === null ? [] : [pipeline_catch_up_line($manifest, $catchUp)]),
-        ...pipeline_leg_overrides((string) $manifest['mode'])["{$leg}:{$step}"],
+        ...pipeline_leg_overrides((string) $manifest['mode'], $manifestPath)["{$leg}:{$step}"],
     ];
     $ledger = pipeline_ledger($manifest);
 
@@ -231,7 +233,7 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step, ?a
     }
     $base = $manifest['base'] ?? null;
     if ($leg === 'handoff' && $base !== null) {
-        $lines[] = "The PR must open into `{$base}`: after `handoff pr`, `gh pr view <pr> --json baseRefName --jq .baseRefName` prints `{$base}`; otherwise `gh pr edit <pr> --base {$base}` before setting `artifacts.pr` (engine.md §Kickoff).";
+        $lines[] = "The PR must open into `{$base}`: after `handoff pr`, `gh pr view <pr> --json baseRefName --jq .baseRefName` prints `{$base}`; otherwise `gh pr edit <pr> --base {$base}` before you record the PR (engine.md §Kickoff).";
     }
     if ($leg !== 'design') {
         $lines = [...$lines, ...pipeline_plan_gap_lines($step)];
@@ -248,13 +250,13 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step, ?a
 function pipeline_plan_gap_lines(string $step): array
 {
     if ($step === 'resolve') {
-        return ['A plan gap or a Bounded escalation found while resolving is a loop-back: return `looped-back` and name it in the entry\'s `actions`; the leg the run goes back to handles it.'];
+        return ['A plan gap or a Bounded escalation found while resolving is a loop-back: return `looped-back` and name it in your actions; the leg the run goes back to handles it.'];
     }
 
     return [
-        'On a Bounded spec (its header says `**Design size:** Bounded`): run the escalation check first (engine.md §Design size), and only on escalation append the `design-size` entry and return `plan-insufficient`.',
-        'On an Architectural spec: only when the plan falls short of what this step needs (files or behaviour it does not name), append a `plan-approval` entry with `leg`, `cycle`, `at`, a `reason` naming what the plan lacks, and outcome `looped-back`, then return `plan-insufficient`. The size alone is no gap: an Architectural plan needs no approval beyond `review-plan`\'s.',
-        ...($step === 'review' ? ['When you return `plan-insufficient`, append no review entry.'] : []),
+        'On a Bounded spec (its header says `**Design size:** Bounded`): run the escalation check first (engine.md §Design size), and only on escalation return `plan-insufficient` with `--reason` naming why the design must grow.',
+        'On an Architectural spec: only when the plan falls short of what this step needs (files or behaviour it does not name), return `plan-insufficient` with `--reason` naming what the plan lacks. The size alone is no gap: an Architectural plan needs no approval beyond `review-plan`\'s.',
+        ...($step === 'review' ? ['When you return `plan-insufficient`, write no review file: `record` adds no review entry.'] : []),
     ];
 }
 
@@ -312,10 +314,9 @@ const PIPELINE_CATCH_UP_STEPS = ['design:run', 'design:spec', 'design:plan', 're
 /** The run's spec and plan as git names them: relative to the worktree. */
 function pipeline_design_files(array $manifest): array
 {
-    $worktree = rtrim((string) $manifest['worktree'], '/') . '/';
     $paths = array_filter([$manifest['artifacts']['spec'] ?? null, $manifest['artifacts']['plan'] ?? null]);
 
-    return array_map(fn (string $path) => str_starts_with($path, $worktree) ? substr($path, strlen($worktree)) : $path, array_values($paths));
+    return array_map(fn (string $path) => pipeline_relative_path((string) $manifest['worktree'], $path), array_values($paths));
 }
 
 /**
@@ -480,15 +481,58 @@ function pipeline_plan_path(string $spec): ?string
     return $count === 1 ? $plan : null;
 }
 
-function pipeline_brief_return(string $leg, string $step, string $mode): string
+/** A `dispatch_cli.php` command as a step copies it: the checks directory and the manifest by their full paths (#122). */
+function pipeline_cli(string $command, string $manifestPath): string
 {
-    $keys = implode(', ', array_map(fn (string $key) => "`{$key}`", pipeline_leg_writable_keys()));
-    $statuses = implode(', ', array_map(fn (LegStatus $status) => "`{$status->value}`", LegStatus::allowedFor($leg, $step)));
+    return 'php ' . __DIR__ . "/dispatch_cli.php {$command} {$manifestPath}";
+}
+
+/**
+ * The literal `record` command for each status the step may return, from `pipeline_record_table()`: the
+ * first in full, the others by what differs. A required flag is printed bare, an optional one in brackets.
+ *
+ * @return list<string>
+ */
+function pipeline_record_commands(string $leg, string $step, string $manifestPath): array
+{
+    $files = manifest_files($manifestPath);
+    $shown = [
+        'spec' => '--spec <path>',
+        'plan' => '--plan <path>',
+        'pr' => '--pr <number>',
+        'proof' => '--proof <path>',
+        'review-file' => "--review-file {$files['review']}",
+        'actions-file' => "--actions-file {$files['actions']}",
+        'issue-link' => '--issue-link <issue>=<' . implode('|', array_column(IssueLinkOutcome::cases(), 'value')) . '>',
+    ];
+    $reason = ['plan-insufficient' => '--reason "<what the plan lacks>"', 'halted' => '--reason "<why>"'];
+    $lines = [];
+    foreach (pipeline_record_table()["{$leg}:{$step}"] as $status => $row) {
+        $flags = [
+            ...array_map(fn (string $flag) => $flag === 'reason' ? $reason[$status] : $shown[$flag], $row['required']),
+            ...array_map(fn (string $flag) => "[{$shown[$flag]}]" . ($flag === 'issue-link' ? '…' : ''), $row['optional']),
+        ];
+        $lines[] = ($lines === [] ? pipeline_cli('record', $manifestPath) . " {$leg} {$step}" : '…')
+            . rtrim(" --status {$status} " . implode(' ', $flags));
+    }
+
+    return $lines;
+}
+
+/** The return contract is the commands (`../references/manifest.md` §What a leg writes): `record` writes, the step only passes what it made. */
+function pipeline_brief_return(string $leg, string $step, string $mode, string $manifestPath): string
+{
+    $snapshot = basename(manifest_files($manifestPath)['before']);
+    $commands = implode("\n", array_map(fn (string $command) => "- `{$command}`", pipeline_record_commands($leg, $step, $manifestPath)));
     $reply = $mode === 'autoflow'
-        ? 'then return `{status, reason}` as your structured result (with `reason` whenever you have one) instead of replying with a line'
-        : 'and reply with one line naming it';
+        ? 'Return the `status` it printed as your structured `{status, reason}`. When it refuses a `halted`, return `halted` with its reason all the same.'
+        : 'Take the `status` it printed and reply with one line naming it.';
 
     return "## Return\n\n"
-        . "Write your results into the manifest ({$keys}; `cursor.reason` only when you halt) and nothing else. Never move `cursor.leg`.\n"
-        . "Set `cursor.status` to one of {$statuses}, {$reply}.";
+        . "Your last act is one `record` command; only a read-only command your instructions name (`size`, `ui`, the proof page's `open`) comes after it. It is the only way you write the manifest: do not edit the file, and never find it by a glob (`{$snapshot}` beside it is the dispatcher's snapshot).\n\n"
+        . "{$commands}\n\n"
+        . 'Write a `--reason` without double quotes. '
+        . 'It prints `{"action":"recorded",…}`, or `{"action":"refused","reason":…}` with exit 1 and the manifest untouched: fix what it names and run it again. '
+        . 'A `record` run again in the same step replaces the earlier one, and its `replaced` then names what that one wrote (`last_sha`, `cursor.status`): that is expected. '
+        . $reply;
 }

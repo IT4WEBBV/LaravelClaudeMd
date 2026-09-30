@@ -4,9 +4,11 @@
 // null is an agent that returns nothing. With `steps`, each call is a stub step against the real checks:
 // it runs the brief command from its prompt and returns a halt it prints; otherwise it merges the
 // return's `write` into the manifest (`cursor` one level down), writes its `diff` to the run's diff file,
-// and returns the rest. Prints {labels, prompts, settings, result}: the agent labels, prompts and
+// and returns the rest. A return with `record` (a list of flags) writes through the real command instead:
+// its `review` and `actions` go to the run's two files and are passed by path, and a refusal comes back as a
+// halt. Prints {labels, prompts, settings, result}: the agent labels, prompts and
 // `<model> <effort>` in call order and what the script returned.
-import { execSync } from 'node:child_process'
+import { execFileSync, execSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 
 const input = JSON.parse(readFileSync(0, 'utf8'))
@@ -30,6 +32,29 @@ function play({ write = {}, diff, ...returns }) {
   return returns
 }
 
+function record(label, { record: flags, review, actions, diff, ...returns }) {
+  const path = input.args.manifest
+  const stem = path.replace(/\.json$/, '')
+  const files = []
+  if (review !== undefined) {
+    writeFileSync(`${stem}.review.md`, review)
+    files.push('--review-file', `${stem}.review.md`)
+  }
+  if (actions !== undefined) {
+    writeFileSync(`${stem}.actions.json`, JSON.stringify(actions))
+    files.push('--actions-file', `${stem}.actions.json`)
+  }
+  if (diff !== undefined) writeFileSync(`${stem}.diff`, diff)
+  const [leg, step] = label.split(':')
+  const reason = returns.reason ? ['--reason', returns.reason] : []
+  try {
+    execFileSync('php', [`${input.args.checks}/dispatch_cli.php`, 'record', path, leg, step, '--status', returns.status, ...reason, ...flags, ...files], { encoding: 'utf8' })
+  } catch (error) {
+    return { ...returns, status: 'halted', reason: JSON.parse(error.stdout).reason }
+  }
+  return returns
+}
+
 async function agent(prompt, opts) {
   labels.push(opts.label)
   prompts.push(prompt)
@@ -42,7 +67,8 @@ async function agent(prompt, opts) {
   if (halted) return halted
   if (returns === null) return null
   if (!statuses.includes(returns.status)) throw new Error(`${opts.label} may not return ${returns.status}`)
-  return input.steps ? play(returns) : returns
+  if (!input.steps) return returns
+  return returns.record ? record(opts.label, returns) : play(returns)
 }
 
 const result = await new AsyncFunction('args', 'agent', 'log', body)(input.args, agent, () => {})

@@ -14,10 +14,11 @@ memory. It is the *spine*, not better station logic — each station already own
 
 Core principle: **a loop that only loops; every step is a fresh agent.** In `autoflow` the loop is a
 program, the saved workflow `pipeline-autoflow` (`workflow/pipeline-autoflow.js`), whose steps each run
-`dispatch_cli.php brief`, do their leg, write the manifest and return a status; review fixes and
-finishing the PR belong to fresh resolve agents. `interactive` walks the same legs through
-`next` / `returned`, with the human resolving each review. No long-lived brain; a lost run reconstructs from
-git + gh. See the references before driving a run — the enforcement lives there, not in this summary:
+`dispatch_cli.php brief`, do their leg, record their result with `dispatch_cli.php record` and return a
+status; review fixes and finishing the PR belong to fresh resolve agents. `interactive` walks the same
+legs through `next` / `returned`, with the human resolving each review. No long-lived brain; a lost run
+reconstructs from git + gh. See the references before driving a run — the enforcement lives there, not in
+this summary:
 
 - **`references/engine.md`** — the loop, the work item, kickoff/worktree, dev-stack readiness, the
   per-station briefs, failure policy, navigation. **Read this first.**

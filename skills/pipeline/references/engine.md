@@ -35,8 +35,9 @@ git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
 php "$CHECKS/dispatch_cli.php" returned <manifest> "<manifest stem>.diff"   # after every return
 ```
 
-`<manifest stem>` is the manifest path without `.json`: the diff, the brief (`.brief.md`) and the
-dispatch snapshot (`.before.json`) sit next to the manifest, one set per run, so concurrent runs
+`<manifest stem>` is the manifest path without `.json`: the diff, the brief (`.brief.md`), the
+dispatch snapshot (`.before.json`), a review step's review (`.review.md`) and a resolve step's actions
+(`.actions.json`) sit next to the manifest (`manifest_files()`), one set per run, so concurrent runs
 never share a diff file, and `.claude/pipeline/` keeps them out of git and out of §Suite reuse's key.
 `<base>` is the manifest's `base` on a run kicked off with one (§Kickoff, *A run on a base*), and the
 repo's default branch otherwise: every `origin/<base>` in this skill and in `orchestrate` means that.
@@ -51,10 +52,10 @@ step runs.
 **Control rule — the whole model, and it fails closed:**
 
 - **Every step is a fresh agent** briefed by `pipeline_brief($manifest, $leg, $manifestPath, $step)`
-  (`../checks/brief.php`). It writes its results and a status into the manifest (`manifest.md`
-  §What a leg writes) and replies with one line. The session never reads that reply for content:
-  `returned` compares the manifest with the snapshot taken at dispatch and **halts** on anything it
-  cannot account for.
+  (`../checks/brief.php`). It records its results and a status with `dispatch_cli.php record`
+  (`manifest.md` §What a leg writes), which refuses a result the next check would halt on, and replies
+  with one line. The session never reads that reply for content: `returned` compares the manifest with
+  the snapshot taken at dispatch and **halts** on anything it cannot account for.
 - **Legs never pick the next leg and never write a brief.** `pipeline_returned()`
   (`../checks/dispatch.php`) routes: `continued` → the next step or leg (`pipeline_next_leg`),
   `looped-back` → `gates.md` §Loop-backs within the bound, `halted` → stop, `plan-insufficient` →
@@ -135,14 +136,14 @@ launched the run, with its reason.
   cursor still names the step that was running — and the snapshot `<manifest stem>.before.json`, and
   prints the brief. It prints a halt instead when the return does not hold, or when the ledger does not
   support the step (`resolve` with no open review, `review` with one already open, the design step the
-  manifest does not call for). The step writes its results into the manifest (`manifest.md` §What a
-  leg writes) and returns `{status, reason}`;
+  manifest does not call for). The step records its results with `dispatch_cli.php record`
+  (`manifest.md` §What a leg writes), then returns the status it recorded as `{status, reason}`;
   `implement` also returns `ui`, copied from `dispatch_cli.php ui <diff>` (`pipeline_triggers()` over
   its diff), and each `design` step returns `size`, copied from `dispatch_cli.php size <manifest>`
-  (`DesignSize::fromSpec()` over the committed spec). Both are required on every return of their
-  step and ignored on a halt; the script takes `ui` only from `implement` and `size` only from `design`,
-  after each design step: the spec step's size decides whether the plan step runs (§Design size,
-  *`autoflow`'s design*).
+  (`DesignSize::fromSpec()` over the committed spec). Both are read-only and run after `record`: `size`
+  reads the spec `record` just set. Both are required on every return of their step and ignored on a
+  halt; the script takes `ui` only from `implement` and `size` only from `design`, after each design
+  step: the spec step's size decides whether the plan step runs (§Design size, *`autoflow`'s design*).
 - **`finish`** records the return: `done` sets `cursor.status: done`, but only with the cursor on
   `review-pr` — anywhere else it records the halt "the workflow returned done at <leg>" — and only when
   the last snapshot is `review-pr`'s resolve step's and that step's return holds (§The check at the next
@@ -266,8 +267,9 @@ and wall time.
 `interactive` runs the same `next` / `returned` pair. `inline` is true for `design` (the human drives
 the brainstorm) and for every `resolve` step: the session shows the review from the open ledger entry,
 the human decides, the session carries that out — on `review-pr` including the finish work below —
-completes the entry with the human's `actions` and `outcome`, and runs `returned`. Every other step is
-dispatched to a fresh background agent. After each step the session stops and continues when the human says so
+records it with `dispatch_cli.php record` (the human's `actions` in `<manifest stem>.actions.json`), as
+the inline `design` step records its spec and plan, and runs `returned`. Every other step is dispatched
+to a fresh background agent. After each step the session stops and continues when the human says so
 (§Navigation), as `interactive` always has.
 
 ## The work item — resolved before anything is created
@@ -633,8 +635,9 @@ the code they name.
 - after every commit in `implement`, and
 - first thing in every later step, except a resolve step, which loops back instead (below).
 
-On escalation the step appends the `design-size` entry and returns `plan-insufficient`; the run goes
-back to `design` (`pipeline_returned()` in `interactive`, the workflow script in `autoflow`), whose brief asks for the grow form.
+On escalation the step returns `plan-insufficient` with `record --reason`, which appends the
+`design-size` entry; the run goes back to `design` (`pipeline_returned()` in `interactive`, the workflow
+script in `autoflow`), whose brief asks for the grow form.
 
 ```bash
 CHECKS="$HOME/.claude/skills/pipeline/checks"
@@ -660,7 +663,8 @@ php -r 'require $argv[1] . "/triggers.php"; require $argv[1] . "/design_size.php
     **"plan insufficient"** instead of improvising.
 
 **On escalation, grow the design; do not re-design it.**
-1. Append a ledger entry: `{gate: 'design-size', leg: <current leg>, at, reason, outcome: 'escalated'}`.
+1. `record --status plan-insufficient --reason <why>` appends the ledger entry:
+   `{gate: 'design-size', leg: <current leg>, at, reason, outcome: 'escalated'}`.
 2. The run goes back to `design`; backward navigation is always allowed. In grow form:
    - change the spec header to `**Design size:** Architectural`;
    - add a `## Grown from Bounded` section: what changed, why it grew, what already exists (described
@@ -691,9 +695,10 @@ A step on an Architectural spec that needs files or behaviour the plan does not 
 `plan-insufficient` too, and does not improvise. There is no size to grow, so this is a **loop-back
 of the plan approval**: the plan passed `review-plan` and turned out not to cover the change.
 
-1. The step appends `{gate: 'plan-approval', leg: <its leg>, cycle, at, reason, outcome: 'looped-back'}`
-   and returns `plan-insufficient`. A return without that entry halts. The `reason` names what the plan
-   lacks. The size alone is never a gap: an Architectural plan needs no approval beyond `review-plan`'s
+1. The step returns `plan-insufficient` with `record --reason`, which appends
+   `{gate: 'plan-approval', leg: <its leg>, cycle, at, reason, outcome: 'looped-back'}`. A return
+   without that entry halts. The `reason` names what the plan lacks.
+   The size alone is never a gap: an Architectural plan needs no approval beyond `review-plan`'s
    (#96: a `handoff` that read the brief's plan-gap line as a rule for every Architectural spec looped a
    covered plan back for "the owner's plan approval").
 2. The run goes back to `design` through the same bound as a `review-plan` loop-back
@@ -1046,16 +1051,19 @@ and the dispatch prompt is one line naming that file; in `autoflow` the step pri
   this file that holds each rule, e.g. *"leave the PR draft"* (§Who takes the PR out of draft); on a
   step that writes to the branch, first among them the order to merge the base when the branch fell
   behind it (§Catching up with the base);
-- **the return contract**: which keys the step may write and which statuses it may return;
+- **the return contract**: the literal `record` command for each status the step may return, with the
+  manifest's full path, printed from `pipeline_record_table()` (`../checks/record.php`); the snapshot
+  beside the manifest is named so that no step mistakes it for the manifest;
 - **nothing a station does not ask for.** No test policy, proof format or process of anyone's own
   invention.
 
-**An `autoflow` brief adds what a workflow agent needs** (`pipeline_leg_overrides('autoflow')`): a
-review step applies `/critique`'s procedure itself — Stage 0, Stage 1 and the rubric — because it
-cannot start the reviewer, so `--verify` and `alternatives` are unavailable; `review-plan`'s resolve
-step has no independent read; `implement` executes the plan inline, with no subagents, and does not wait on CI; the
-finish step pushes and leaves the PR draft; every step works from `cd <worktree>` and is told the owner authorised the run;
-and `## Return` asks for a structured `{status, reason}` instead of a line.
+**An `autoflow` brief adds what a workflow agent needs**
+(`pipeline_leg_overrides('autoflow', <manifest path>)`): a review step applies `/critique`'s procedure
+itself — Stage 0, Stage 1 and the rubric — because it cannot start the reviewer, so `--verify` and
+`alternatives` are unavailable; `review-plan`'s resolve step has no independent read; `implement` executes
+the plan inline, with no subagents, and does not wait on CI; the finish step pushes and leaves the PR
+draft; every step works from `cd <worktree>` and is told the owner authorised the run; and `## Return`
+asks for a structured `{status, reason}` instead of a line.
 
 **A review step's brief is crafted context** (`../../critique/SKILL.md` §Reviewer contract): pointers,
 decisions and overrides — never an earlier review, an earlier action, or another step's output. A
@@ -1167,8 +1175,10 @@ php -r 'require $argv[1] . "/suite.php";
 - **The key.** `pipeline_tree_key()` is the tree the working copy would commit right now, untracked
   non-ignored files included, built in a temporary index so the real one is untouched. Committing
   content that was already tested keeps the key, so a run before `git commit` counts for the commit.
-- **Record.** After every full run, write `suite: {tree, outcome, passed, failed, at}` to the
-  manifest. Only `green` is ever reused.
+- **Record.** After every full run,
+  `php "$CHECKS/dispatch_cli.php" suite "$MANIFEST" --outcome <green|red> --passed <n> --failed <n>`
+  writes `suite: {tree, outcome, passed, failed, at}` to the manifest, computing `tree` itself. It refuses
+  `green` with failures and a key it cannot compute. Only `green` is ever reused.
 - **The reviewer is told.** `pipeline_brief()` states, from the manifest, *"full suite green over tree `<tree>` at
   `<sha>`: N passed"*. Whether to re-run stays the reviewer's call.
 - **No baseline.** No suite runs before the change. A red full suite is a failing step, fixed and

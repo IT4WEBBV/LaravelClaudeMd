@@ -125,7 +125,18 @@ An `interactive` entry is the same shape with the human in the resolve step's pl
 
 A leg writes only its results: `artifacts`, `last_sha`, `suite`, its `gate_ledger` entry, and
 `cursor.status` — plus `cursor.reason` when it halts. It never moves `cursor.leg` and never writes a
-brief. In `interactive`, after every return `returned` compares the manifest with its
+brief. **It writes them with one command**, `dispatch_cli.php record <manifest> <leg> <step> --status
+<status> [flags]` (`../checks/record.php`): the result is the dispatch snapshot plus what the step
+passes, with `last_sha`, `cycle`, `at`, `reviewed_sha`, `annotations` and `outcome` stamped by code.
+`record` runs the check below over that result and writes only when it holds; a refusal exits 1 with the
+manifest untouched and names what is wrong. A review goes in as a file (`<manifest stem>.review.md`), a
+resolve step's actions as `<manifest stem>.actions.json`. `suite` is the one key a step writes earlier,
+with `dispatch_cli.php suite` (`engine.md` §Suite reuse). The brief's `## Return` prints the step's
+commands, and `pipeline_record_table()` holds what each step passes.
+
+The checks judge the manifest, however it was written: one repaired by hand that holds is accepted.
+
+In `interactive`, after every return `returned` compares the manifest with its
 snapshot (`pipeline_returned()`, `../checks/dispatch.php`) and **halts** when any other key changed,
 when an existing ledger entry was rewritten (the resolve step may only complete the open entry, leaving
 its `gate`, `leg`, `cycle`, `at`, `review`, `annotations` and `reviewed_sha` as they are), or

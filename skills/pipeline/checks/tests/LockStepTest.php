@@ -36,8 +36,8 @@ it('keeps gates.md in lock-step with the loop-back targets', function () {
 it('keeps every engine.md section a brief names', function () {
     preg_match_all('/^## (.+?)(?: — .*)?$/m', (string) file_get_contents(__DIR__ . '/../../references/engine.md'), $headings);
     $lines = array_merge(
-        ...array_values(pipeline_leg_overrides('autoflow')),
-        ...array_values(pipeline_leg_overrides('interactive')),
+        ...array_values(pipeline_leg_overrides('autoflow', '/tmp/m.json')),
+        ...array_values(pipeline_leg_overrides('interactive', '/tmp/m.json')),
         ...[[
             pipeline_review_scope_line(['since' => 'abc', 'base' => 'origin/main', 'commits' => 1, 'files' => []]),
             pipeline_catch_up_line(['worktree' => '/tmp/wt'], ['base' => 'origin/main', 'behind' => 1, 'shared' => []]),
