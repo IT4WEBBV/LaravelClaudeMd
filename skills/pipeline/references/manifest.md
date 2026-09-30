@@ -28,7 +28,7 @@ Read/written by the Phase A helpers in `../checks/manifest.php`:
 | `decisions` | optional | the settled decisions from the invocation, verbatim, as a list, and what `launch --decision` adds: an owner's request on a ready PR, or one of the CI gate's two records, a red CI or an unreviewed merge (`engine.md` §The CI gate). `orchestrate` adds its sibling note at kickoff, marked as a note and not an owner decision (`engine.md` §Catching up with the base). Every brief carries them (`engine.md` §What a leg brief consists of) |
 | `tier` | optional | the invocation's word: `"medium"` or `"light"`; absent means `full`. Both permit a Bounded design, read only while `design` has not run; in `autoflow` the tier also picks the agents (`AgentTier::fromManifest()`, `engine.md` §Agents per step). Written once by kickoff; a leg that changes it halts the run, and `launch` halts on any other value. A manifest with the legacy `light: true` and no `tier` reads as `medium`, the permit and agents `light` had before #116; nothing writes `light` any more |
 | `agents` | optional | `autoflow` only, set by hand for a one-off experiment: `{"<leg>:<step>": {"model"?, "effort"?}}`, laid over that step's entry in every tier and its loop-back entry. `launch` halts on an invalid one; a leg that changes it halts the run (`engine.md` §Agents per step) |
-| `base` | optional | the branch kickoff's `--base` cut the run from and its PR goes into (`engine.md` §Kickoff, *A run on a base*); absent means the default branch. Written once by kickoff; a leg that changes it halts the run. A reconstructed manifest recovers it from the PR's `baseRefName` once a PR exists, else from `git config branch.<branch>.gh-merge-base` (which disappears with the branch) |
+| `base` | optional | the branch kickoff's `--base` cut the run from and its PR goes into (`engine.md` §Kickoff, *A run on a base*); absent means the default branch. Written once by kickoff; a leg that changes it halts the run. A reconstructed manifest recovers it from the PR's `baseRefName` once a PR exists. Before that it is recoverable only from the worktree (`git merge-base` against the candidate branches) or from whoever kicked the run off: kickoff writes no git config for it, and a manifest rebuilt without `base` makes `handoff` open the PR into the default branch |
 
 `manifest_validate($data)` returns the list of **missing required keys** — `branch`,
 `worktree`, `mode`, `cursor`. An empty list means valid. Keep this table and that function
@@ -132,7 +132,9 @@ passes, with `last_sha`, `cycle`, `at`, `reviewed_sha`, `annotations` and `outco
 manifest untouched and names what is wrong. A review goes in as a file (`<manifest stem>.review.md`), a
 resolve step's actions as `<manifest stem>.actions.json`. `suite` is the one key a step writes earlier,
 with `dispatch_cli.php suite` (`engine.md` §Suite reuse). The brief's `## Return` prints the step's
-commands, and `pipeline_record_table()` holds what each step passes.
+commands, and `pipeline_record_table()` holds what each step passes. `handoff`'s write is made by its
+command, `dispatch_cli.php handoff` (`../checks/handoff.php`), through `record`'s own code: the same
+candidate, the same check, the same read-back.
 
 The checks judge the manifest, however it was written: one repaired by hand that holds is accepted.
 

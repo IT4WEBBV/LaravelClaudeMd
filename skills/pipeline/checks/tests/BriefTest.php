@@ -243,9 +243,9 @@ it('tells both review-pr steps the leg is not the review-pr skill, in either mod
     'interactive resolve' => ['interactive', 'resolve', 'You are the finish step.'],
 ]);
 
-it('says the leg is not a skill to no other step', function () {
+it('says the leg is not a skill to no step but handoff\'s and review-pr\'s', function () {
     foreach (['autoflow', 'interactive'] as $mode) {
-        foreach (array_diff(pipeline_legs(), ['review-pr']) as $leg) {
+        foreach (array_diff(pipeline_legs(), ['handoff', 'review-pr']) as $leg) {
             foreach (pipeline_steps($leg, $mode) as $step) {
                 expect(pipeline_brief(brief_manifest($leg, ['mode' => $mode]), $leg, '/tmp/m.json', $step))
                     ->not->toContain('not a skill to invoke');
@@ -367,10 +367,11 @@ it('says nothing about a base on a run without one', function () {
     expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))->not->toContain('- base:');
 });
 
-it('makes handoff on a run on a base check that the PR opened into it', function () {
+it('gives handoff no line about the base: its command opens the PR into it', function () {
     expect(pipeline_brief(brief_manifest('handoff', ['base' => 'feature/integration']), 'handoff', '/tmp/m.json'))
-        ->toContain('- The PR must open into `feature/integration`: after `handoff pr`, `gh pr view <pr> --json baseRefName --jq .baseRefName` prints `feature/integration`; otherwise `gh pr edit <pr> --base feature/integration` before you record the PR (engine.md §Kickoff).');
-    expect(pipeline_brief(brief_manifest('handoff'), 'handoff', '/tmp/m.json'))->not->toContain('The PR must open into');
+        ->toContain('- base: `feature/integration`')
+        ->not->toContain('The PR must open into')
+        ->not->toContain('gh pr edit <pr> --base');
 });
 
 it('tells a later step to report a plan gap only once it has found one, on either size', function (string $leg, string $step) {
@@ -478,9 +479,15 @@ it('words the design-only case and a single commit', function () {
         ->toContain('is 27 commits ahead and this branch holds only its design.');
 });
 
-it('names the spec and the plan to handoff from the manifest, in both modes', function (string $mode) {
+it('has handoff run its command and not the skill, in both modes', function (string $mode) {
+    $command = 'php ' . realpath(__DIR__ . '/..') . '/dispatch_cli.php handoff /tmp/m.json';
+
     expect(pipeline_brief(brief_manifest('handoff', ['mode' => $mode]), 'handoff', '/tmp/m.json', 'run'))
-        ->toContain('- The spec and the plan are `artifacts.spec` and `artifacts.plan` (Pointers above): give `handoff pr` those two paths and skip its own detection from the last commits or the newest files, which a merge of the base empties or crowds (engine.md §Catching up with the base).');
+        ->toContain("- Run `{$command}` as its own command: it pushes the branch, opens the draft PR or adopts the one the branch has, and records this step. It is the whole step (engine.md §Stations).")
+        ->toContain('- The leg\'s name is not a skill to invoke: do not invoke the `handoff` skill (`/handoff`), which asks the owner a question and posts a prompt comment.')
+        ->toContain('- Repair nothing it reports: no force-push, no `gh pr create` or `gh pr edit` by hand. A halt it recorded, a refusal, or a denied command is a halt with that reason.')
+        ->not->toContain('handoff pr')
+        ->not->toContain('--pr <number>');
 })->with(['autoflow', 'interactive']);
 
 /** @return list<array{0: string, 1: string, 2: string}> every step of both modes as `[mode, leg, step]` */
@@ -504,36 +511,44 @@ it('ends every brief of both modes on the literal record command, one line per s
 
     foreach (brief_steps() as [$mode, $leg, $step]) {
         $return = explode("## Return\n\n", pipeline_brief(brief_manifest($leg, ['mode' => $mode]), $leg, $path, $step))[1];
+        $own = PIPELINE_STEP_COMMANDS["{$leg}:{$step}"] ?? null;
+        $statuses = array_column(LegStatus::allowedFor($leg, $step), 'value');
 
         expect($return)
-            ->toContain("- `{$command} {$leg} {$step} --status continued")
+            ->toContain($own === null
+                ? "- `{$command} {$leg} {$step} --status continued"
+                : '- `php ' . realpath(__DIR__ . '/..') . "/dispatch_cli.php {$own} {$path}` (records `continued`, or `halted` with its reason)")
             ->toContain('- `… --status halted --reason "<why>"`')
             ->toContain('`feature-x.before.json` beside it is the dispatcher\'s snapshot')
             ->toContain('never find it by a glob')
             ->not->toContain('Never move `cursor.leg`');
-        expect(substr_count($return, "\n- `"))->toBe(count(LegStatus::allowedFor($leg, $step)));
-        foreach (LegStatus::allowedFor($leg, $step) as $status) {
-            expect($return)->toContain("--status {$status->value}");
+        expect(substr_count($return, "\n- `"))->toBe(count($statuses));
+        foreach ($own === null ? $statuses : array_diff($statuses, ['continued']) as $status) {
+            expect($return)->toContain("--status {$status}");
         }
     }
 });
 
-it('prints the return of a handoff step as its commands, and tells an autoflow step what to return', function () {
-    $command = 'php ' . realpath(__DIR__ . '/..') . '/dispatch_cli.php record /tmp/m.json handoff run';
+it('prints the return of a handoff step as its command, then record for the statuses it does not write', function () {
+    $cli = 'php ' . realpath(__DIR__ . '/..') . '/dispatch_cli.php';
 
     expect(pipeline_brief_return('handoff', 'run', 'autoflow', '/tmp/m.json'))->toBe(
         "## Return\n\n"
-        . "Your last act is one `record` command; only a read-only command your instructions name (`size`, `ui`, the proof page's `open`) comes after it. It is the only way you write the manifest: do not edit the file, and never find it by a glob (`m.before.json` beside it is the dispatcher's snapshot).\n\n"
-        . "- `{$command} --status continued --pr <number>`\n"
-        . "- `… --status plan-insufficient --reason \"<what the plan lacks>\"`\n"
+        . "Your last act is the `handoff` command, or one `record` command for a status it does not write; only a read-only command your instructions name (`size`, `ui`, the proof page's `open`) comes after it. They are the only way you write the manifest: do not edit the file, and never find it by a glob (`m.before.json` beside it is the dispatcher's snapshot).\n\n"
+        . "- `{$cli} handoff /tmp/m.json` (records `continued`, or `halted` with its reason)\n"
+        . "- `{$cli} record /tmp/m.json handoff run --status plan-insufficient --reason \"<what the plan lacks>\"`\n"
         . "- `… --status halted --reason \"<why>\"`\n\n"
         . 'Write a `--reason` without double quotes. '
-        . 'It prints `{"action":"recorded",…}`, or `{"action":"refused","reason":…}` with exit 1 and the manifest untouched: fix what it names and run it again. '
+        . 'Each prints `{"action":"recorded",…}`, or `{"action":"refused","reason":…}` with exit 1 and the manifest untouched: a refused `record` names what to fix, then run it again; a refused `handoff` is a halt with its reason. '
         . 'A `record` run again in the same step replaces the earlier one, and its `replaced` then names what that one wrote (`last_sha`, `cursor.status`): that is expected. '
         . 'Return the `status` it printed as your structured `{status, reason}`. When it refuses a `halted`, return `halted` with its reason all the same.'
     );
     expect(pipeline_brief_return('handoff', 'run', 'interactive', '/tmp/m.json'))
         ->toEndWith('that is expected. Take the `status` it printed and reply with one line naming it.');
+    expect(pipeline_brief_return('implement', 'run', 'autoflow', '/tmp/m.json'))
+        ->toStartWith("## Return\n\nYour last act is one `record` command; only a read-only command")
+        ->toContain('It is the only way you write the manifest')
+        ->toContain('with exit 1 and the manifest untouched: fix what it names and run it again. ');
 });
 
 it('prints each step\'s flags from the record table: the two files by their path, an optional flag in brackets', function () {
@@ -572,7 +587,7 @@ it('says what each step passes to record, and describes no JSON', function () {
         ->toContain("- Run the suite unless engine.md §Suite reuse finds this tree green, and record the run: `{$suite}`.")
         ->toContain('- Reconcile the closing links (engine.md §Closing links): each related issue\'s outcome goes to `record` as an `--issue-link`.');
     expect($brief('autoflow', 'handoff', 'run'))
-        ->toContain('- Invoke `handoff pr`. The PR opens draft and references the issue without a closing keyword (engine.md §Closing links). Its number goes to `record` as `--pr`.');
+        ->toContain('- Run `php ' . realpath(__DIR__ . '/..') . "/dispatch_cli.php handoff {$path}` as its own command:");
     expect($brief('autoflow', 'verify-ui', 'run'))
         ->toContain('- Write the proof page (engine.md §The proof store) and post the text-only record comment; the path `write` printed goes to `record` as `--proof`.')
         ->toContain('- Return `continued`, or `looped-back` when the check fails.');

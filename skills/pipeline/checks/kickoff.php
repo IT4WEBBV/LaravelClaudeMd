@@ -8,6 +8,7 @@
 
 require_once __DIR__ . '/agents.php';
 require_once __DIR__ . '/board.php';
+require_once __DIR__ . '/gh.php';
 require_once __DIR__ . '/dispatch.php';
 require_once __DIR__ . '/manifest.php';
 require_once __DIR__ . '/suite.php';
@@ -137,27 +138,9 @@ function pipeline_kickoff_issue(string $repoRoot, string $config, string $item):
     return ['number' => $number, 'title' => (string) ($issue['title'] ?? ''), 'url' => (string) ($issue['html_url'] ?? '')];
 }
 
-/** gh from $cwd, stdout and stderr apart so JSON stays JSON. @return array{0: int, 1: string, 2: string} */
-function pipeline_kickoff_gh(string $cwd, array $args): array
-{
-    $stderr = tmpfile();
-    $process = proc_open(['gh', ...$args], [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => $stderr], $pipes, $cwd);
-    if (! is_resource($process)) {
-        return [127, '', 'gh could not be started'];
-    }
-    $out = stream_get_contents($pipes[1]);
-    fclose($pipes[1]);
-    $code = proc_close($process);
-    rewind($stderr);
-    $err = trim((string) stream_get_contents($stderr));
-    fclose($stderr);
-
-    return [$code, trim((string) $out), $err];
-}
-
 function pipeline_kickoff_gh_json(string $cwd, array $args, string $failure): array
 {
-    [$code, $out, $err] = pipeline_kickoff_gh($cwd, $args);
+    [$code, $out, $err] = pipeline_gh_run($cwd, $args);
     $decoded = json_decode($out, true);
     if ($code !== 0 || ! is_array($decoded)) {
         throw new PipelineKickoffHalt("{$failure}: " . ($err === '' ? "gh exited {$code}" : $err));
@@ -294,7 +277,7 @@ function pipeline_worktree_of(string $repoRoot, string $branch): ?string
 function pipeline_kickoff_prepare(string $worktree, string $branch, ?string $base, array $manifest): string
 {
     if ($base !== null) {
-        pipeline_kickoff_on_base($worktree, $branch, $base);
+        pipeline_kickoff_on_base($worktree, $base);
     }
     if (pipeline_git_run($worktree, ['rev-parse', '--abbrev-ref', "{$branch}@{upstream}"])[0] === 0) {
         pipeline_git($worktree, ['branch', '--unset-upstream', $branch]);
@@ -306,15 +289,14 @@ function pipeline_kickoff_prepare(string $worktree, string $branch, ?string $bas
     return $path;
 }
 
-/** The create honoured the base, and `gh pr create` without `--base` opens the run's PR into it (gh reads `gh-merge-base`). */
-function pipeline_kickoff_on_base(string $worktree, string $branch, string $base): void
+/** The create honoured the base: the worktree's `HEAD` is `origin/<base>`. `dispatch_cli.php handoff` opens the PR into it with `--base`. */
+function pipeline_kickoff_on_base(string $worktree, string $base): void
 {
     $head = pipeline_git($worktree, ['rev-parse', 'HEAD']);
     $tip = pipeline_git($worktree, ['rev-parse', "origin/{$base}"]);
     if ($head !== $tip) {
         throw new PipelineKickoffHalt("the worktree's HEAD ({$head}) is not origin/{$base} ({$tip}): the declared worktree.create did not honour --base");
     }
-    pipeline_git($worktree, ['config', "branch.{$branch}.gh-merge-base", $base]);
 }
 
 /** Everything no step will look up (engine.md §Kickoff); a key with nothing to say is absent. */
@@ -351,12 +333,13 @@ function pipeline_kickoff_board(string $config): array
  */
 function pipeline_kickoff_claim(string $repoRoot, array $board, array $issue): array
 {
-    [$code, $out, $err] = pipeline_kickoff_gh($repoRoot, ['project', 'item-add', $board['number'], '--owner', $board['org'], '--url', $issue['url'], '--format', 'json']);
-    $item = json_decode($out, true)['id'] ?? null;
-    if ($code !== 0 || ! is_string($item)) {
-        return ["the board claim was not recorded: {$err}"];
-    }
-    [$code, , $err] = pipeline_kickoff_gh($repoRoot, ['project', 'item-edit', '--id', $item, '--project-id', $board['project-id'], '--field-id', $board['status-field-id'], '--single-select-option-id', $board['in-progress-option-id']]);
+    $error = pipeline_board_set(
+        fn (array $args): array => pipeline_gh_run($repoRoot, $args),
+        $board,
+        $issue['url'],
+        $board['status-field-id'],
+        $board['in-progress-option-id'],
+    );
 
-    return [$code === 0 ? "#{$issue['number']} is In Progress on board {$board['number']}" : "the board claim was not recorded: {$err}"];
+    return [$error === null ? "#{$issue['number']} is In Progress on board {$board['number']}" : "the board claim was not recorded: {$error}"];
 }

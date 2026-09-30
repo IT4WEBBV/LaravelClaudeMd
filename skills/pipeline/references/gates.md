@@ -141,6 +141,10 @@ php "$CHECKS/dispatch_cli.php" record <manifest> <leg> <step> --status <status> 
 # → {"action":"recorded",…} | {"action":"refused","reason":…} (exit 1, the manifest untouched)
 php "$CHECKS/dispatch_cli.php" suite <manifest> --outcome green|red --passed <n> --failed <n>
 #   after a full suite run → {"action":"recorded","suite":{…}} | {"action":"refused",…}
+php "$CHECKS/dispatch_cli.php" handoff <manifest>
+#   the whole handoff step, in both modes: push, the draft PR (opened or adopted), the Component, its record
+# → {"action":"recorded",…,"pr":…,"url":…,"created":…,"notes":[…]} | {"action":"recorded","status":"halted","reason":…,…}
+#   | {"action":"refused","reason":…} (exit 1)
 php "$CHECKS/dispatch_cli.php" size <manifest>                   # design's last command → Bounded | Architectural
 php "$CHECKS/dispatch_cli.php" ui "<manifest stem>.diff"         # implement's last command → true | false
 php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
