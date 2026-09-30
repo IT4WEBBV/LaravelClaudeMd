@@ -401,3 +401,23 @@ Each is a question the brainstorm would have put to the owner, with the answer a
 19. **Does the PR say anything about the base?** No. §Closing links has the finish step say that a
     merge into the base closes nothing.
 20. **Is a changelog entry needed?** No: this repo has no `.changelog/` directory and no `CHANGELOG.md`.
+
+Added by the plan step, where the plan needed an answer the design above does not give:
+
+21. **What does an existing body gain when it names both paths but not the issue?** Only
+    `Part of #<n>.`, in front. And `#<n>` counts as named only as a whole number: a body that holds
+    `#1250` does not name `#125`.
+22. **What does the answer of a recorded halt hold?** `record`'s whole answer (`last_sha` and `entry`
+    included, as `record --status halted` prints them) with `reason` added; the example under *The
+    answer* abbreviates it. A halt whose record is refused answers that refusal, with the halt's reason
+    appended to it.
+23. **Which manifest does the step read?** The snapshot, which is what `record` builds on. And
+    `handoff.php` asks its git runner (`cat-file -e HEAD:<path>`) whether the spec and the plan exist at
+    `HEAD`: `dispatch_cli_exists_at()` lives in the CLI script, which the pure tests do not load.
+24. **What if git's or gh's words are not valid UTF-8?** They are scrubbed (`mb_scrub()`) before they go
+    into a reason or a note, so the halt can still be written and printed as JSON.
+25. **What if `gh pr create` succeeds and the read-back lists no PR?** A halt that says so; the next run
+    of the step adopts the PR. The number is never parsed from what `create` printed (Assumption 18).
+26. **How does `## Return` word the refusal of the `handoff` command?** As a halt with its reason, where a
+    refused `record` still says *fix what it names and run it again*: the two differ, and the brief's
+    *repair nothing* line would otherwise contradict the return contract.
