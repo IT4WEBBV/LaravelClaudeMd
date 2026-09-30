@@ -865,6 +865,14 @@ session that answers to the owner: after the workflow returns `done` and `finish
 invoking session runs the CI gate and then `gh pr ready <pr>` (§The CI gate). The guarantee is unchanged: nothing marks the PR ready
 before `review-pr`'s finish step has run.
 
+**The leg is not the `review-pr` skill.** `DevOps-Claude-Config` ships a skill named `review-pr`, linked
+into every session, and the leg does not use it: its review step is `/critique pr`, its resolve step the
+finish step. That skill settles the draft status itself (`gh pr ready` on a clean review) and posts its
+own review comment, which would come before the CI gate. Both `review-pr` steps' briefs therefore open
+their overrides with (`pipeline_leg_overrides()`): **"The leg's name is not a skill to invoke: do not
+invoke the `review-pr` skill (`/review-pr`), which posts its own review comment and changes the PR's
+draft state. This brief is the whole step."**
+
 This is not a preference; it is the same guarantee the navigation guardrail makes. `gates.md` states
 that *"there is no path to a non-draft PR that has not passed `review-plan` and `review-pr`"* — and
 `implement` runs **before** both `verify-ui` and `review-pr`. An `implement` that marks the PR ready

@@ -226,6 +226,34 @@ it('makes the review-pr resolve step the finish step', function () {
     expect($brief)->toContain('the finish step')->toContain('gh pr ready')->toContain('proof_cli.php open');
 });
 
+it('tells both review-pr steps the leg is not the review-pr skill, in either mode', function (string $mode, string $step, string $next) {
+    $line = '- The leg\'s name is not a skill to invoke: do not invoke the `review-pr` skill (`/review-pr`), which posts its own review comment and changes the PR\'s draft state. This brief is the whole step (engine.md §Who takes the PR out of draft).';
+    $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
+    $manifest = brief_manifest('review-pr', ['mode' => $mode, 'gate_ledger' => $step === 'resolve' ? [$open] : []]);
+
+    expect(pipeline_brief($manifest, 'review-pr', '/tmp/m.json', $step))
+        ->toContain("## Overrides\n\n{$line}\n- {$next}");
+    expect(pipeline_brief($manifest, 'review-pr', '/tmp/m.json', 'resolve', brief_git_behind()))
+        ->toContain("## Overrides\n\n- Catch up with the base first")
+        ->toContain("Record the merge as that section says.\n{$line}\n- You are the finish step.");
+})->with([
+    'autoflow review' => ['autoflow', 'review', 'Apply `/critique`\'s `pr` procedure'],
+    'interactive review' => ['interactive', 'review', 'Invoke `/critique pr`'],
+    'autoflow resolve' => ['autoflow', 'resolve', 'You are the finish step.'],
+    'interactive resolve' => ['interactive', 'resolve', 'You are the finish step.'],
+]);
+
+it('says the leg is not a skill to no other step', function () {
+    foreach (['autoflow', 'interactive'] as $mode) {
+        foreach (array_diff(pipeline_legs(), ['review-pr']) as $leg) {
+            foreach (pipeline_steps($leg, $mode) as $step) {
+                expect(pipeline_brief(brief_manifest($leg, ['mode' => $mode]), $leg, '/tmp/m.json', $step))
+                    ->not->toContain('not a skill to invoke');
+            }
+        }
+    }
+});
+
 it('takes the step from its caller when given one, and derives it otherwise', function () {
     expect(pipeline_brief(brief_manifest('review-plan'), 'review-plan', '/tmp/m.json', 'resolve'))->toContain('`review-plan` leg, `resolve` step');
     expect(pipeline_brief(brief_manifest('review-plan'), 'review-plan', '/tmp/m.json'))->toContain('`review-plan` leg, `review` step');
