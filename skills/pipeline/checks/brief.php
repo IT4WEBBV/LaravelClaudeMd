@@ -312,10 +312,9 @@ const PIPELINE_CATCH_UP_STEPS = ['design:run', 'design:spec', 'design:plan', 're
 /** The run's spec and plan as git names them: relative to the worktree. */
 function pipeline_design_files(array $manifest): array
 {
-    $worktree = rtrim((string) $manifest['worktree'], '/') . '/';
     $paths = array_filter([$manifest['artifacts']['spec'] ?? null, $manifest['artifacts']['plan'] ?? null]);
 
-    return array_map(fn (string $path) => str_starts_with($path, $worktree) ? substr($path, strlen($worktree)) : $path, array_values($paths));
+    return array_map(fn (string $path) => pipeline_relative_path((string) $manifest['worktree'], $path), array_values($paths));
 }
 
 /**

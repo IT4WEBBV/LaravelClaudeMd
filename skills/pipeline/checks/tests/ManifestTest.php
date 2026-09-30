@@ -42,3 +42,20 @@ it('calls a run finished on status done, or on the old engine\'s leg done', func
     expect(manifest_finished(['cursor' => ['leg' => 'done', 'status' => 'continued']]))->toBeTrue();
     expect(manifest_finished(['cursor' => ['leg' => 'implement', 'status' => 'pending']]))->toBeFalse();
 });
+
+it('names the files of a run beside its manifest, the review and the actions included', function () {
+    expect(manifest_files('/tmp/wt/.claude/pipeline/feature-x.json'))->toBe([
+        'brief' => '/tmp/wt/.claude/pipeline/feature-x.brief.md',
+        'before' => '/tmp/wt/.claude/pipeline/feature-x.before.json',
+        'diff' => '/tmp/wt/.claude/pipeline/feature-x.diff',
+        'review' => '/tmp/wt/.claude/pipeline/feature-x.review.md',
+        'actions' => '/tmp/wt/.claude/pipeline/feature-x.actions.json',
+    ]);
+});
+
+it('names a path as git does: relative to the worktree', function () {
+    expect(pipeline_relative_path('/tmp/wt', '/tmp/wt/docs/spec.md'))->toBe('docs/spec.md');
+    expect(pipeline_relative_path('/tmp/wt/', '/tmp/wt/docs/spec.md'))->toBe('docs/spec.md');
+    expect(pipeline_relative_path('/tmp/wt', 'docs/spec.md'))->toBe('docs/spec.md');
+    expect(pipeline_relative_path('/tmp/wt', '/tmp/wt-other/docs/spec.md'))->toBe('/tmp/wt-other/docs/spec.md');
+});

@@ -31,14 +31,6 @@ require_once __DIR__ . '/suite.php';
 require_once __DIR__ . '/kickoff.php';
 require_once __DIR__ . '/ci.php';
 
-/** @return array{brief: string, before: string, diff: string} */
-function dispatch_cli_files(string $manifestPath): array
-{
-    $stem = preg_replace('/\.json$/', '', $manifestPath);
-
-    return ['brief' => "{$stem}.brief.md", 'before' => "{$stem}.before.json", 'diff' => "{$stem}.diff"];
-}
-
 /** git in the run's worktree, for the scope of a re-review of the PR (`pipeline_review_scope()`). */
 function dispatch_cli_git(array $manifest): Closure
 {
@@ -51,7 +43,7 @@ function dispatch_cli_emit(string $manifestPath, array $manifest, string $action
 {
     $leg = $manifest['cursor']['leg'];
     $step = pipeline_step($manifest, $leg);
-    $files = dispatch_cli_files($manifestPath);
+    $files = manifest_files($manifestPath);
 
     manifest_write($manifestPath, $manifest);
     manifest_write($files['before'], $manifest);
@@ -133,7 +125,7 @@ function dispatch_cli_tier_problem(array $manifest): ?string
 
 function dispatch_cli_returned(string $manifestPath, string $diffPath): array
 {
-    $before = manifest_read(dispatch_cli_files($manifestPath)['before']);
+    $before = manifest_read(manifest_files($manifestPath)['before']);
     $after = manifest_read($manifestPath);
     if ($before === null || $after === null || ! is_file($diffPath)) {
         return pipeline_halt('cannot check the return: the snapshot, the manifest or the diff file is missing');
@@ -214,7 +206,7 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
         return dispatch_cli_halt($manifestPath, $manifest, $leg, $problem);
     }
 
-    $snapshot = dispatch_cli_files($manifestPath)['before'];
+    $snapshot = manifest_files($manifestPath)['before'];
     if (is_file($snapshot)) {
         unlink($snapshot);
     }
@@ -239,6 +231,12 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
     ];
 }
 
+/** Whether `$path`, relative to the worktree or absolute under it, exists at `$ref`. */
+function dispatch_cli_exists_at(string $worktree, string $ref, string $path): bool
+{
+    return pipeline_git_run($worktree, ['cat-file', '-e', "{$ref}:" . pipeline_relative_path($worktree, $path)])[0] === 0;
+}
+
 /** `../references/manifest.md` §Invariant check, once per launch. */
 function dispatch_cli_invariant_problem(array $manifest): ?string
 {
@@ -249,8 +247,7 @@ function dispatch_cli_invariant_problem(array $manifest): ?string
         if ($sha === null || $path === null) {
             continue;
         }
-        $relative = str_starts_with($path, "{$worktree}/") ? substr($path, strlen($worktree) + 1) : $path;
-        if (pipeline_git_run($worktree, ['cat-file', '-e', "{$sha}:{$relative}"])[0] !== 0) {
+        if (! dispatch_cli_exists_at($worktree, $sha, $path)) {
             return "the recorded {$name} {$path} does not exist at {$sha}";
         }
     }
@@ -301,7 +298,7 @@ function dispatch_cli_brief(string $manifestPath, string $leg, string $step, arr
     }
     $manifest = [...$manifest, 'cursor' => ['leg' => $leg, 'status' => 'pending']];
     manifest_write($manifestPath, $manifest);
-    manifest_write(dispatch_cli_files($manifestPath)['before'], $manifest);
+    manifest_write(manifest_files($manifestPath)['before'], $manifest);
 
     return pipeline_brief($manifest, $leg, $manifestPath, $step, dispatch_cli_git($manifest));
 }
@@ -316,7 +313,7 @@ function dispatch_cli_brief(string $manifestPath, string $leg, string $step, arr
 function dispatch_cli_boundary_problem(string $manifestPath, array $manifest, string $next, array $reported): ?array
 {
     $after = $reported['after'] ?? null;
-    $files = dispatch_cli_files($manifestPath);
+    $files = manifest_files($manifestPath);
     $before = manifest_read($files['before']);
     $snapshot = dispatch_cli_snapshot_step($before);
     $label = fn (string $pair) => str_replace(':', ' ', $pair);
@@ -348,7 +345,7 @@ function dispatch_cli_snapshot_step(?array $before): ?string
 function dispatch_cli_return_problem(string $manifestPath, array $before, array $manifest, array $reported): ?array
 {
     $leg = $before['cursor']['leg'];
-    $files = dispatch_cli_files($manifestPath);
+    $files = manifest_files($manifestPath);
     if ($leg === 'implement' && (! is_file($files['diff']) || filemtime($files['diff']) < filemtime($files['before']))) {
         return ['leg' => $leg, 'reason' => "the implement step did not write {$files['diff']}"];
     }
@@ -398,11 +395,11 @@ function dispatch_cli_finish(string $manifestPath, string $decisionJson): array
 /** Why a `done` return does not hold: the last step must be `review-pr`'s resolve step, and its return must pass the check. */
 function dispatch_cli_finish_problem(string $manifestPath, array $manifest): ?string
 {
-    $before = manifest_read(dispatch_cli_files($manifestPath)['before']);
+    $before = manifest_read(manifest_files($manifestPath)['before']);
     $snapshot = dispatch_cli_snapshot_step($before);
     if ($snapshot !== 'review-pr:resolve') {
         return $snapshot === null
-            ? 'the workflow returned done, but there is no snapshot at ' . dispatch_cli_files($manifestPath)['before']
+            ? 'the workflow returned done, but there is no snapshot at ' . manifest_files($manifestPath)['before']
             : 'the workflow returned done, but the last snapshot is of the ' . str_replace(':', ' ', $snapshot) . ' step';
     }
 
