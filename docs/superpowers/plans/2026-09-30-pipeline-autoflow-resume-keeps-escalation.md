@@ -38,7 +38,7 @@
 ## File Structure
 
 - Modify `skills/pipeline/checks/pipeline.php` (add `pipeline_escalated()` after `pipeline_reset_at()`), `skills/pipeline/checks/agents.php` (`pipeline_start_profile()`'s first rule), `skills/pipeline/checks/dispatch_cli.php` (`dispatch_cli_launch()`'s answer), `skills/pipeline/checks/tests/DispatchCliTest.php` (three launch cases) (Task 1).
-- Modify `skills/pipeline/workflow/pipeline-autoflow.js` (header comment, the seed, the halt, the rename), `skills/pipeline/checks/tests/AutoflowScriptTest.php` (three new tests), `skills/pipeline/references/engine.md` (§`autoflow`'s code block, its `launch` and script bullets, §Design size's *Once, and one way*) (Task 2).
+- Modify `skills/pipeline/workflow/pipeline-autoflow.js` (header comment, the seed, the halt, the rename), `skills/pipeline/checks/tests/AutoflowScriptTest.php` (three new tests), `skills/pipeline/references/engine.md` (§`autoflow`'s code block, its `launch` and script bullets, §Agents per step's opening paragraph, §Design size's *Once, and one way*) (Task 2).
 
 ---
 
@@ -150,7 +150,7 @@ git commit -m "feat(pipeline): launch answers whether the ledger records an esca
 
 **Files:**
 - Modify: `skills/pipeline/workflow/pipeline-autoflow.js:15-18` (header comment), `:147` (the halt, after it), `:155` (the seed), `:172`, `:186`, `:188` (the rename)
-- Modify: `skills/pipeline/references/engine.md:86`, `:112-113`, `:121`, `:126`, `:677`
+- Modify: `skills/pipeline/references/engine.md:86`, `:112-113`, `:121`, `:126`, `:209-210`, `:677`
 - Test: `skills/pipeline/checks/tests/AutoflowScriptTest.php`
 
 **Interfaces:**
@@ -348,7 +348,22 @@ with
   `escalated` that is not a boolean; a review step that returns
 ```
 
-e. §Design size, *Once, and one way* (line 677), replace
+e. §Agents per step's opening paragraph (lines 209–210), replace
+
+```
+(`AgentTier::fromManifest()`); the script names no model or effort, and a missing or incomplete
+`agents`, `profile` or `tier` halts it before any agent. Models are `agent()`'s aliases, efforts its
+```
+
+with
+
+```
+(`AgentTier::fromManifest()`); the script names no model or effort, and a missing or incomplete
+`agents`, `profile` or `tier`, or an `escalated` that is not a boolean, halts it before any agent.
+Models are `agent()`'s aliases, efforts its
+```
+
+f. §Design size, *Once, and one way* (line 677), replace
 
 ```
 exempts one per run and counts the rest toward `review-plan`'s bound.
@@ -360,12 +375,12 @@ with
 exempts one per run, a resume included, and counts the rest toward `review-plan`'s bound.
 ```
 
-§Agents per step, *Which profile*, is not edited: after Step 3 its sentence ("escalation is one way, in the run as on a resume") holds as written.
+§Agents per step, *Which profile*, is not edited (e. touches only the section's opening paragraph): after Step 3 its sentence ("escalation is one way, in the run as on a resume") holds as written.
 
 - [ ] **Step 6: Run the whole suite**
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests && grep -n "escalated" skills/pipeline/references/engine.md | sed -n 1,20p`
-Expected: the suite PASSES, `LockStepTest`'s *keeps every engine.md section a brief names* included; `grep` shows the four new `escalated` mentions at §`autoflow` (code block, `launch` bullet, both script-bullet lines) beside the existing ones.
+Expected: the suite PASSES, `LockStepTest`'s *keeps every engine.md section a brief names* included; `grep` shows the four new `escalated` mentions at §`autoflow` (code block, `launch` bullet, both script-bullet lines) and the one in §Agents per step's opening paragraph beside the existing ones.
 
 - [ ] **Step 7: Commit**
 
@@ -383,6 +398,6 @@ git commit -m "feat(pipeline): a resume after an escalation keeps full and the o
 | `pipeline_escalated()` in `pipeline.php`; `pipeline_start_profile()`'s first rule through it | 1 (Steps 3–4) |
 | `launch`'s answer carries `escalated`, always a boolean | 1 (Step 5; test 4 → Step 1) |
 | Script: rename, seed from `args.escalated`, halt without a boolean | 2 (Step 3; tests 1–3 → Step 1) |
-| engine.md: `launch` bullet, script bullet (twice), *Once, and one way*; *Which profile* unchanged | 2 (Step 5) |
+| engine.md: `launch` bullet, script bullet (twice), §Agents per step's opening paragraph, *Once, and one way*; *Which profile* unchanged | 2 (Step 5) |
 | Assumptions 7–10 (fixture start step, key order, code block and header comment, halt rows) | 2 (Step 1b, 1c, 3a, 5a); 1 (Step 1a) |
 | Done when: the suite passes | 2 (Step 6) |

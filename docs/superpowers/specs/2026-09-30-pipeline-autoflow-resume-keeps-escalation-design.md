@@ -196,10 +196,12 @@ older `launch` and fed to the new script halts with the new reason; re-running `
    after `tier`, before `agents`, beside the other two agent fields. `DispatchCliTest`'s *launches from the
    cursor…* compares the whole answer with `toBe()`, key order included, so that case gains
    `'escalated' => false` in that place: the one test that spells the answer out by hand.
-9. **Q: Which other passages name `launch`'s answer fields?** (added by the plan step) A (assumed): two,
-   both updated with the rest: engine.md §`autoflow`'s code block (`# → {"action":"start",…,"tier":…,"agents":{…}}`)
-   gains `"escalated":…` after `"tier":…`, and the script's header comment (the fields launch hands it)
-   names `escalated`. Neither is pinned by a test.
+9. **Q: Which other passages name `launch`'s answer fields?** (added by the plan step) A (assumed): three,
+   all updated with the rest: engine.md §`autoflow`'s code block (`# → {"action":"start",…,"tier":…,"agents":{…}}`)
+   gains `"escalated":…` after `"tier":…`, the script's header comment (the fields launch hands it)
+   names `escalated`, and engine.md §Agents per step's opening paragraph, which lists what halts the
+   script before any agent, adds an `escalated` that is not a boolean (found by `/critique plan`).
+   None is pinned by a test.
 10. **Q: Which non-boolean values does test 3 cover?** (added by the plan step) A (assumed): the key
     unset, the string `'true'`, `1` and `null` — the shapes a hand edit or an older answer can take;
     `typeof … !== 'boolean'` catches all four.
