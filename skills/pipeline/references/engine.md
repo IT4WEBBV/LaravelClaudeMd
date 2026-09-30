@@ -297,11 +297,10 @@ file.
 
 ## The work item — resolved before anything is created
 
-A run that carries a GitHub issue owes that issue three things `work-on` already does and the
-pipeline previously did not: it claims it on the board, it refuses to start on blocked work, and
-at the end it settles whether merging closes it (§Closing links). This section is the first two;
-all of it runs **before the worktree exists**, because a run that must not start should leave
-nothing behind.
+A run that carries a GitHub issue owes that issue three things: it claims it on the board, it
+refuses to start on blocked work, and at the end it settles whether merging closes it (§Closing
+links). This section is the first two; all of it runs **before the worktree exists**, because a run
+that must not start should leave nothing behind.
 
 **Resolve the item first. A bare number classifies itself:**
 
@@ -310,8 +309,8 @@ gh api repos/<repo>/issues/<number> \
   --jq '{number, title, html_url, node_id, state, is_pr: (.pull_request != null)}'
 ```
 
-The `issues` endpoint returns both, and a PR has a non-null `pull_request` — the same probe
-`work-on` uses, which is why `/pipeline <number>` needs no separate issue and PR syntax.
+The `issues` endpoint returns both, and a PR has a non-null `pull_request`, which is why
+`/pipeline <number>` needs no separate issue and PR syntax.
 
 | Invocation | The run's issue |
 |---|---|
@@ -443,9 +442,7 @@ current checkout isn't already it. Derive the starting point from the invocation
     mid-rewrite declares a `--base <ref>` there because its current work lives on a long-lived
     integration branch while `origin/HEAD` still names the pre-cutover default. Dropping the
     flag cuts the run's branch from the wrong code, and every leg after it looks healthy. (For one
-    run's own base, see *A run on a base* above.) This is `work-on`'s own rule too (use the
-    configured command, "never `git worktree add` by hand"), and the pipeline invokes stations
-    rather than reimplementing them.
+    run's own base, see *A run on a base* above.)
   - **otherwise** (e.g. this config repo): a plain feature branch in place — `git switch -c
     <branch>` or a harness-native worktree under `.claude/worktrees/<branch>`.
   - **headless with no such machinery and no consent** → stop and report; never mutate the
@@ -461,9 +458,9 @@ current checkout isn't already it. Derive the starting point from the invocation
 
 Record the `worktree` absolute path in the manifest so every leg and every resume operates in
 the right place. A resume locates the run's worktree via `git worktree list` for the branch.
-**One worktree for the entire run** — `implement` reuses `work-on`'s logic but **not** its slot
-claim, so no *second* slot ever appears mid-chain. **Never torn down mid-run; torn down after the
-merge** by the session that created it (§After the merge).
+**One worktree for the entire run** — `implement` works in this worktree and claims no slot
+(§Implement), so no *second* slot ever appears mid-chain. **Never torn down mid-run; torn down after
+the merge** by the session that created it (§After the merge).
 
 **Keep the manifest out of git before writing it.** Many repos do not ignore `.claude/`, and a
 manifest that git can see would be committed by a stray `git add -A` and would change §Suite reuse's
@@ -515,8 +512,7 @@ Several legs need the worktree's stack: `implement` runs the suite after each st
 `verify-ui` drives a real browser. **The `implement` step brings the stack up itself, first thing,
 without asking** (its brief says so; `verify-ui` does the same if it is down) (`restart.sh`;
 non-destructive) and leaves it running afterwards. Starting the stack is a routine owned action,
-never a "shall I start docker?" prompt — `work-on` deliberately leaves stack *timing* to its caller,
-and under the pipeline the step's brief *is* that caller. This is the house preference [[docker-stack-no-hesitation]]. If the stack
+never a "shall I start docker?" prompt. This is the house preference [[docker-stack-no-hesitation]]. If the stack
 genuinely cannot start, that is a **hard failure** (below), not a reason to hesitate.
 
 *Worktree now, stack later:* creating the worktree is cheap (git); the stack starts lazily, only
@@ -527,10 +523,11 @@ unprobed, with no `Probed:` line, and the step carries on.
 
 ## Stations — what each leg invokes
 
-The pipeline **invokes** the existing skills; it never reimplements their judgment. One leg is no skill:
+The pipeline **invokes** the existing skills; it never reimplements their judgment. Two legs are no skill.
 `handoff` is a command, `dispatch_cli.php handoff` (`../checks/handoff.php`). Pushing a branch and opening
 a draft PR is mechanical, and the `handoff` skill, written for a person who closes a plan cycle, asks a
-question and posts a prompt that a run cannot use.
+question and posts a prompt that a run cannot use. `implement` follows §Implement, a procedure this file
+owns.
 Leg names are exactly `pipeline_legs()`: `design, review-plan, handoff, implement, verify-ui, review-pr`.
 
 | Leg | Invokes | Interactive form | Autonomous form | Manifest I/O |
@@ -538,7 +535,7 @@ Leg names are exactly `pipeline_legs()`: `design, review-plan, handoff, implemen
 | **design** *(compound)* | `superpowers:brainstorming`, then `superpowers:writing-plans` for an **Architectural** design (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it); for a **Bounded** design, brainstorming's Bounded path with no `writing-plans` (§Design size) | human drives the brainstorm dialogue; if brainstorming classifies Bounded without `medium` or `light`, the pipeline asks (§Design size); re-invoke `/pipeline` to continue | two steps (`pipeline_steps()`): a **spec** agent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions; a fresh **plan** agent reads the committed spec cold and writes the plan. A Bounded design is the spec step alone (§Design size, *`autoflow`'s design*). The brief says which path is permitted: Bounded only with `medium` or `light`, otherwise Architectural | writes spec + plan pointers; the size is the spec's `**Design size:**` header, never stored |
 | **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | two steps (`pipeline_step`): a **review** agent invokes `/critique plan` (in `autoflow` it applies `/critique plan`'s procedure itself: it cannot start a reviewer) and appends the review verbatim as an open `plan-approval` entry; a fresh **resolve** agent acts on it (§Resolving a review) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
 | **handoff** | `dispatch_cli.php handoff <manifest>` | the same command, run by the dispatched agent | pushes the branch (never forced), opens the **draft PR** or adopts the open draft the branch already has, with `--base` on a run on a base; English title `Implement: <the spec's heading> (issue: #N)` and a body that names the spec and the plan; references the issue **without a closing keyword**, `Part of #N` (§Closing links) — this PR carries no implementation yet; sets the board Component where the repo's `## Board` names a `component-default`; posts no comment | the command records the PR# pointer itself, through `record`'s code |
-| **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's `static-analysis` after each step and its `format` once before the push** (§Mechanical checks), set closing-issue links (§Closing links — `review-pr` reconciles them before the PR goes ready). **Leaves the PR draft** (below); in `autoflow` it does not wait on CI (§The CI gate). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
+| **implement** | no skill: §Implement, in the current worktree (no slot) — read the item, the spec and the plan, validate the names the plan relies on, execute it test-first, running the suite and `static-analysis` after each step and `format` once before the push (§Mechanical checks); the `ci` label before the first push. **Leaves the PR draft** (below); in `autoflow` it does not wait on CI (§The CI gate). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, writes the run's page to the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — the payload carries `nameWithOwner`, `pr` and `issue` so the page can link back to both — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
 | **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | a **review** agent invokes `/critique pr` (in `autoflow` it applies `/critique pr`'s procedure itself) and appends an open `pr-review` entry; the **finish** step (its resolve step) acts on it, runs the suite unless reused, reconciles closing links (§Closing links), rewrites the proof page, runs `gh pr ready`, and opens the page last (§The proof store). In `autoflow` the finish step leaves the PR draft, and the invoking session runs the CI gate and `gh pr ready` after `finish` (§The CI gate, §Who takes the PR out of draft) | feeds the PR-review gate; writes `issue_links` onto the entry; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
 
@@ -962,14 +959,14 @@ that *"there is no path to a non-draft PR that has not passed `review-plan` and 
 would undraft it while a triggered `verify-ui` and the whole PR review are still outstanding, which
 is exactly the outcome the guardrail exists to prevent.
 
-**The trap is inherited, so state it explicitly at the leg brief.** `work-on` marks ready at the end
-of its run, and that is correct *standalone* — nothing follows it there. Under the pipeline something
-does. The same applies to the prompt comment a PR opened before `dispatch_cli.php handoff` existed may
-carry, from the `handoff` skill: its template ends with *"implementation fully done → take the PR out of
-draft"*, which is right for a human resuming the work alone and **wrong** under the pipeline. The command
-posts no comment. The `implement` brief carries it verbatim
-(`pipeline_leg_overrides()`): **"Leave the PR draft; this overrides any mark-ready instruction in the
-plan, the PR comment, or `work-on`'s own logic."**
+**The trap comes from outside the run, so state it explicitly at the leg brief.** Two things can tell
+`implement` to mark the PR ready, and both are right only for a person finishing the work alone: a plan
+whose last task says so, and the prompt comment a PR opened before `dispatch_cli.php handoff` existed may
+carry, from the `handoff` skill, whose template ends with *"implementation fully done → take the PR out of
+draft"*. Under the pipeline something follows `implement`, so both are **wrong** here. The command posts no
+comment. The `implement` brief carries the rule verbatim (`pipeline_leg_overrides()`): **"Leave the PR
+draft, whatever the plan or a PR comment says about marking it ready (engine.md §Who takes the PR out of
+draft)."**
 
 A cold-resume session that picks the PR up from its comment is outside the loop, so nothing mechanical
 can stop it undrafting early — the instruction in the brief is the only control. Keep it there.
@@ -977,21 +974,20 @@ can stop it undrafting early — the instruction in the brief is the only contro
 **A PR stays untested until it carries the `ci` label** — in a repo that has one; a repo without it
 tests every push. Every fix pushed during `verify-ui` and `review-pr` is only tested once the label is
 on, and until then `gh pr checks`, and the CI gate, read the skipped CI check as green.
-`work-on`'s leg 8 adds it before the push whose CI it watches, and the `implement` brief says it as
-well: in `interactive` **"add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI
+The `implement` brief says it: in `interactive` **"add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI
 you watch"**; in `autoflow` before its first push, without waiting on CI (§The CI gate).
 
 ## The CI gate — CI on the PR's head commit, before `gh pr ready`
 
 `gh pr ready` waits for CI on the PR's head commit, whichever step pushed it. Before #85 the only CI wait
-was `implement`'s, inherited from `work-on`'s leg 8: `verify-ui` and `review-pr`'s finish step push
+was `implement`'s: `verify-ui` and `review-pr`'s finish step push
 commits no step watched, and a HeaderHarbor PR went ready while CI still ran on such a commit, which then
 went red unnoticed. The same wait held `implement` for about 7 of its ~21 minutes in both viewiemedia
 runs (#77), while `review-pr:review` reads the diff, not CI.
 
 - **`implement` does not wait on CI in `autoflow`.** It adds the `ci` label before its first push (§Who
-  takes the PR out of draft), pushes and returns; its brief overrides `work-on`'s CI watch.
-  `review-pr:review` runs while CI runs. `interactive` keeps `work-on`'s watch.
+  takes the PR out of draft), pushes and returns.
+  `review-pr:review` runs while CI runs. In `interactive` it watches its push's checks (§Implement).
 - **One gate, in the session that runs `gh pr ready`:** the invoking session once `finish` prints `done`
   in `autoflow`, the finish step in `interactive`. `dispatch_cli.php ci <manifest> --poll <n>`
   (`../checks/ci.php`) reads the worktree's `HEAD` (`git rev-parse HEAD`; a git error halts at once), then
@@ -1434,7 +1430,7 @@ a workflow agent cannot start one, and its step prompt says so.
 Under `autoflow` these are the only stops. **No finding stops a run.**
 
 - **Hard failure** — a station errors: tests won't go green, a tool dies, the stack won't start,
-  `work-on` hits a blocker, or a review step returns nothing after a single retry (in `interactive`
+  or a review step returns nothing after a single retry (in `interactive`
   `returned` answers `retry` once, then `halt`). → **halt.** `finish` (`returned` in `interactive`)
   writes the failure to the manifest
   (`cursor.status: halted`, `cursor.reason`); a human resumes. **No silent retry** beyond that one — a retry hides

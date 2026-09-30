@@ -97,3 +97,11 @@ it('keeps engine.md §Implement whole, down to its last paragraph', function () 
         ->toContain('`gh pr checks <pr> --watch`')
         ->toContain('**`/work-on <pr>` on a pipeline PR is outside the run.**');
 });
+
+it('keeps work-on out of the sections that describe a step', function () {
+    foreach (['Stations', 'Implement', 'Dev-stack readiness', 'Who takes the PR out of draft', 'The CI gate'] as $heading) {
+        expect(lockstep_section('engine.md', $heading))->not->toContain('`work-on`', "engine.md §{$heading} names `work-on`");
+    }
+    expect((string) file_get_contents(__DIR__ . '/../../references/engine.md'))->not->toContain('`work-on`\'s');
+    expect((string) file_get_contents(__DIR__ . '/../../SKILL.md'))->not->toContain('`work-on`');
+});
