@@ -112,7 +112,7 @@ Written first, seen red:
   `review` and `actions`) takes its place as the case that does **not** get the line.
 - `BriefTest.php`, new: an `autoflow` `design:plan` brief (`pipeline_brief($manifest, 'design', …,
   'plan')`) over a manifest with `artifacts.spec` and `artifacts.plan` set whose ledger ends with
-  `{gate: plan-approval, leg: review-plan, cycle: 1, at, reason: 'needs a queue', outcome: looped-back}`
+  `{gate: plan-approval, leg: review-plan, cycle: 2, at, reason: 'needs a queue', outcome: looped-back}`
   (after an earlier `review-plan` entry, so the index is not 0) contains `- redo what
   \`gate_ledger[1]\` looped back for`, `Plan gap: extend the plan` and `Leave that entry as it is, with no
   \`actions\``. Red today on the second and third.
@@ -144,3 +144,10 @@ Questions the brainstorm would have asked the owner, with the answer assumed.
    modes, and the same entry sends `interactive` back to `design`.
 5. **Does this PR close #113?** Yes; `review-pr` settles the closing links (engine.md §Closing links).
 6. **Changelog?** This repository has no `.changelog/` and no `CHANGELOG.md`, so none is written.
+7. **Which `cycle` does the new test's plan return carry?** `2`: it follows a `review-plan` entry of cycle
+   1, and `pipeline_next_cycle()` counts every `plan-approval` entry. The brief does not read the value;
+   the test keeps it coherent. (Added by the plan step.)
+8. **Does the new test name the step, or let the manifest pick it?** It lets the manifest pick it:
+   `pipeline_brief()` without a step resolves `pipeline_step()` → `pipeline_design_step()`, so one
+   assertion pins both that the route goes to `design:plan` and that the brief it gets carries the line.
+   (Added by the plan step.)
