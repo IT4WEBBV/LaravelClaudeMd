@@ -150,6 +150,32 @@ until s=$(gh pr view <P> -R <repo> --json state,isDraft --jq '"\(.state) \(.isDr
 ```
 Adopted session, finished signal: `SendMessage` to its name with `notify_when_idle: true` and no message.
 
+## Needs input
+
+While a merge watch is armed, before every message that ends a turn:
+
+```bash
+python3 ~/.claude/skills/orchestrate/needs_input.py <repo> <P>:<N> [<P>:<N> …]
+```
+One `<P>:<N>` (the PR and its issue) per PR whose merge watch is armed; a PR put back in draft by
+`gh pr ready --undo` is left out until it is ready again. No pair prints nothing, so the command can
+run before every report. It prints one line, with the links while they fit:
+
+```
+needs input: merge PR #109 (#91) https://github.com/IT4WEBBV/LaravelClaudeMd/pull/109
+needs input: merge PR #109 (#91), PR #118 (#104), PR #121 (#113)
+```
+
+The job list classifies the session from the last 800 characters of its latest message, and matches
+at most 200 characters after the colon (Claude Code 2.1.285). So:
+
+1. the line is the **last line** of the message, copied as the script printed it;
+2. plain text, **not in a code block**: a marker inside a fence is skipped;
+3. nothing after it, and no "no action needed" or "nothing needed from you" in the closing lines;
+4. one line: the script already put every waiting PR on it.
+
+A batched `AskUserQuestion` still comes last (Step 5); the line is the last line of the message text.
+
 ## Proof page
 
 Once, when announcing a ready PR, and only if the run made one. Pass the file, not the directory:
