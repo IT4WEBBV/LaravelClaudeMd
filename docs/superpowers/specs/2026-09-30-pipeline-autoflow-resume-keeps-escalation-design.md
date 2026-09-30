@@ -104,7 +104,8 @@ from the repo root), TDD: each test is written and seen failing before the code.
 
 1. **`AutoflowScriptTest` — the resume, beside the in-run dataset.** A new `it(...)` directly after
    *moves a light run to full when its design turns out Architectural, and on a Bounded escalation*:
-   `autoflow_start('design', [$escalated], "# x — design\n\n**Design size:** Bounded\n", tier: 'light')`
+   `autoflow_start('design', [$escalated], "# x — design\n\n**Design size:** Bounded\n", plan: 'plan.md', tier: 'light')`
+   (Assumption 7)
    with `$escalated = ['gate' => 'design-size', 'leg' => 'review-plan', 'at' => …, 'reason' => 'migration', 'outcome' => 'escalated']`;
    returns `design:spec` Bounded, `review-plan:review` `AUTOFLOW_STOP`. Expected: labels
    `['design:spec', 'review-plan:review']`, settings `['opus high', 'fable high']` (both `full`). Today it
@@ -185,3 +186,20 @@ older `launch` and fed to the new script halts with the new reason; re-running `
 6. **Q: New dataset row or a separate test for the resume?** A (assumed): a separate `it(...)` placed
    directly after the in-run dataset. The dataset's closure builds its start without a ledger, and adding
    a ledger parameter to every row for one case is noisier than a sibling test.
+7. **Q: Which step does test 1's resume start on?** (added by the plan step) A (assumed): `design:spec`,
+   so the fixture carries `plan: 'plan.md'`. Without a recorded plan, `pipeline_design_step()` answers
+   `plan` for a manifest with a spec, and the run would start on `design:plan`. A real resume after an
+   escalation has `artifacts.plan` from the Bounded design, and its ledger ends on the `escalated` entry
+   (not a plan return), so launch answers `startStep: 'spec'`, as `DispatchCliTest`'s escalation case
+   already builds it.
+8. **Q: Where does `escalated` sit in `launch`'s answer?** (added by the plan step) A (assumed): right
+   after `tier`, before `agents`, beside the other two agent fields. `DispatchCliTest`'s *launches from the
+   cursor…* compares the whole answer with `toBe()`, key order included, so that case gains
+   `'escalated' => false` in that place: the one test that spells the answer out by hand.
+9. **Q: Which other passages name `launch`'s answer fields?** (added by the plan step) A (assumed): two,
+   both updated with the rest: engine.md §`autoflow`'s code block (`# → {"action":"start",…,"tier":…,"agents":{…}}`)
+   gains `"escalated":…` after `"tier":…`, and the script's header comment (the fields launch hands it)
+   names `escalated`. Neither is pinned by a test.
+10. **Q: Which non-boolean values does test 3 cover?** (added by the plan step) A (assumed): the key
+    unset, the string `'true'`, `1` and `null` — the shapes a hand edit or an older answer can take;
+    `typeof … !== 'boolean'` catches all four.
