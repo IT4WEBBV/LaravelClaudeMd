@@ -103,7 +103,8 @@ function pipeline_is_plan_gap(array $entry): bool
 /**
  * The entry a step appends when it returns `plan-insufficient` on an Architectural design: a `plan-approval`
  * loop-back that no review wrote. Unlike `pipeline_is_plan_gap()` it counts `review-plan:review`'s own; a
- * `review-plan` loop-back is a resolved review and carries its `review`.
+ * `review-plan` loop-back is a resolved review and carries its `review`. It sends `autoflow` to `design:plan`
+ * (`pipeline_design_step()`) and gives the design brief its plan-gap line (`pipeline_brief_overrides()`).
  */
 function pipeline_is_plan_return(array $entry): bool
 {

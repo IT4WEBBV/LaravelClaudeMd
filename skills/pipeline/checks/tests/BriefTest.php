@@ -147,8 +147,33 @@ it('tells a later leg how to report a plan gap, and design to extend the plan fo
         ->toContain('Plan gap: extend the plan')
         ->toContain('Leave that entry as it is, with no `actions`: what you did goes in the spec, the plan and the reason you return.');
 
-    $reviewLoop = [...$gap, 'leg' => 'review-plan'];
+    $reviewReturn = [...$gap, 'leg' => 'review-plan'];
+    expect(pipeline_brief(brief_manifest('design', ['gate_ledger' => [$reviewReturn]]), 'design', '/tmp/m.json'))
+        ->toContain('- redo what `gate_ledger[0]` looped back for')
+        ->toContain('Plan gap: extend the plan')
+        ->toContain('Leave that entry as it is, with no `actions`: what you did goes in the spec, the plan and the reason you return.');
+
+    $reviewLoop = [...$reviewReturn, 'review' => 'r', 'actions' => [['claim' => 'x', 'disposition' => 'integrated', 'note' => 'n']]];
     expect(pipeline_brief(brief_manifest('design', ['gate_ledger' => [$reviewLoop]]), 'design', '/tmp/m.json'))
+        ->toContain('- redo what `gate_ledger[0]` looped back for')
+        ->not->toContain('Plan gap');
+});
+
+it('tells autoflow\'s plan step to extend the plan review-plan returned as insufficient, and to leave that entry alone', function () {
+    $resolved = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 1, 'at' => '2026-09-30T09:00:00Z', 'review' => 'r', 'actions' => [['claim' => 'x', 'disposition' => 'integrated', 'note' => 'n']], 'outcome' => 'looped-back'];
+    $return = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 2, 'at' => '2026-09-30T10:00:00Z', 'reason' => 'needs a queue', 'outcome' => 'looped-back'];
+    $approved = ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => 3, 'at' => '2026-09-30T11:00:00Z', 'review' => 'ok', 'outcome' => 'continued'];
+    $artifacts = ['spec' => 'docs/superpowers/specs/2026-09-30-x-design.md', 'plan' => 'docs/superpowers/plans/2026-09-30-x.md', 'pr' => null, 'issue' => null];
+    $manifest = fn (array $ledger) => brief_manifest('design', ['mode' => 'autoflow', 'artifacts' => $artifacts, 'gate_ledger' => $ledger]);
+
+    expect(pipeline_brief($manifest([$resolved, $return]), 'design', '/tmp/m.json'))
+        ->toContain('`design` leg, `plan` step')
+        ->toContain('- redo what `gate_ledger[1]` looped back for')
+        ->toContain('- The plan goes at `docs/superpowers/plans/2026-09-30-x.md`, beside the spec')
+        ->toContain('- Plan gap: extend the plan (and the spec where it must say more) to cover the entry\'s `reason`')
+        ->toContain('Leave that entry as it is, with no `actions`: what you did goes in the spec, the plan and the reason you return.');
+
+    expect(pipeline_brief($manifest([$resolved, $return, $approved]), 'design', '/tmp/m.json', 'spec'))
         ->not->toContain('Plan gap');
 });
 

@@ -696,7 +696,9 @@ of the plan approval**: the plan passed `review-plan` and turned out not to cove
    no `actions`: what it did goes in the spec, the plan and the reason it returns (#104: a design that
    recorded its answer on the entry halted the run at the next brief). Then `review-plan`, `handoff pr`
    (updating the existing PR) and `implement` run again, as after an escalation. In `autoflow` only
-   `design:plan` reruns (*`autoflow`'s design*).
+   `design:plan` reruns (*`autoflow`'s design*). `review-plan:review`'s own `plan-insufficient` is
+   answered the same way, and its `design` brief carries the same plan-gap line: it is a plan return
+   (`pipeline_is_plan_return()`), though no plan gap for `pipeline_done_legs()` or `run_audit.php` (#113).
 
 The entry resets `pipeline_done_legs()` like an escalation does, so the earlier plan approval cannot
 carry navigation past the re-review.
