@@ -70,8 +70,9 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
             $writeActions,
         ],
         'handoff:run' => [
-            'Invoke `handoff pr`. The PR opens draft and references the issue without a closing keyword (engine.md §Closing links). Its number goes to `record` as `--pr`.',
-            'The spec and the plan are `artifacts.spec` and `artifacts.plan` (Pointers above): give `handoff pr` those two paths and skip its own detection from the last commits or the newest files, which a merge of the base empties or crowds (engine.md §Catching up with the base).',
+            'Run `' . pipeline_cli('handoff', $manifestPath) . '` as its own command: it pushes the branch, opens the draft PR or adopts the one the branch has, and records this step. It is the whole step (engine.md §Stations).',
+            'The leg\'s name is not a skill to invoke: do not invoke the `handoff` skill (`/handoff`), which asks the owner a question and posts a prompt comment.',
+            'Repair nothing it reports: no force-push, no `gh pr create` or `gh pr edit` by hand. A halt it recorded, a refusal, or a denied command is a halt with that reason.',
         ],
         'implement:run' => [
             'Bring the dev stack up first, without asking (engine.md §Dev-stack readiness).',
@@ -230,10 +231,6 @@ function pipeline_brief_overrides(array $manifest, string $manifestPath, string 
     }
     if ($scope !== null) {
         $lines[] = pipeline_review_scope_line($scope);
-    }
-    $base = $manifest['base'] ?? null;
-    if ($leg === 'handoff' && $base !== null) {
-        $lines[] = "The PR must open into `{$base}`: after `handoff pr`, `gh pr view <pr> --json baseRefName --jq .baseRefName` prints `{$base}`; otherwise `gh pr edit <pr> --base {$base}` before you record the PR (engine.md §Kickoff).";
     }
     if ($leg !== 'design') {
         $lines = [...$lines, ...pipeline_plan_gap_lines($step)];
@@ -481,6 +478,9 @@ function pipeline_plan_path(string $spec): ?string
     return $count === 1 ? $plan : null;
 }
 
+/** The steps a command of their own performs and records: it stands in `## Return` where `record --status continued` would (`../references/engine.md` §Stations). */
+const PIPELINE_STEP_COMMANDS = ['handoff:run' => 'handoff'];
+
 /** A `dispatch_cli.php` command as a step copies it: the checks directory and the manifest by their full paths (#122). */
 function pipeline_cli(string $command, string $manifestPath): string
 {
@@ -488,8 +488,10 @@ function pipeline_cli(string $command, string $manifestPath): string
 }
 
 /**
- * The literal `record` command for each status the step may return, from `pipeline_record_table()`: the
- * first in full, the others by what differs. A required flag is printed bare, an optional one in brackets.
+ * The literal command for each status the step may return: `record` from `pipeline_record_table()`, the
+ * first in full and the others by what differs, after the step's own command where it has one
+ * (`PIPELINE_STEP_COMMANDS`), which records `continued` itself. A required flag is printed bare, an
+ * optional one in brackets.
  *
  * @return list<string>
  */
@@ -506,8 +508,10 @@ function pipeline_record_commands(string $leg, string $step, string $manifestPat
         'issue-link' => '--issue-link <issue>=<' . implode('|', array_column(IssueLinkOutcome::cases(), 'value')) . '>',
     ];
     $reason = ['plan-insufficient' => '--reason "<what the plan lacks>"', 'halted' => '--reason "<why>"'];
+    $own = PIPELINE_STEP_COMMANDS["{$leg}:{$step}"] ?? null;
+    $rows = pipeline_record_table()["{$leg}:{$step}"];
     $lines = [];
-    foreach (pipeline_record_table()["{$leg}:{$step}"] as $status => $row) {
+    foreach ($own === null ? $rows : array_diff_key($rows, ['continued' => true]) as $status => $row) {
         $flags = [
             ...array_map(fn (string $flag) => $flag === 'reason' ? $reason[$status] : $shown[$flag], $row['required']),
             ...array_map(fn (string $flag) => "[{$shown[$flag]}]" . ($flag === 'issue-link' ? '…' : ''), $row['optional']),
@@ -516,23 +520,30 @@ function pipeline_record_commands(string $leg, string $step, string $manifestPat
             . rtrim(" --status {$status} " . implode(' ', $flags));
     }
 
-    return $lines;
+    return [...($own === null ? [] : [pipeline_cli($own, $manifestPath)]), ...$lines];
 }
 
 /** The return contract is the commands (`../references/manifest.md` §What a leg writes): `record` writes, the step only passes what it made. */
 function pipeline_brief_return(string $leg, string $step, string $mode, string $manifestPath): string
 {
     $snapshot = basename(manifest_files($manifestPath)['before']);
-    $commands = implode("\n", array_map(fn (string $command) => "- `{$command}`", pipeline_record_commands($leg, $step, $manifestPath)));
+    $own = PIPELINE_STEP_COMMANDS["{$leg}:{$step}"] ?? null;
+    $commands = array_map(fn (string $command) => "- `{$command}`", pipeline_record_commands($leg, $step, $manifestPath));
+    if ($own !== null) {
+        $commands[0] .= ' (records `continued`, or `halted` with its reason)';
+    }
+    [$last, $only, $prints, $refused] = $own === null
+        ? ['one `record` command', 'It is', 'It prints', 'fix what it names and run it again']
+        : ["the `{$own}` command, or one `record` command for a status it does not write", 'They are', 'Each prints', "a refused `record` names what to fix, then run it again; a refused `{$own}` is a halt with its reason"];
     $reply = $mode === 'autoflow'
         ? 'Return the `status` it printed as your structured `{status, reason}`. When it refuses a `halted`, return `halted` with its reason all the same.'
         : 'Take the `status` it printed and reply with one line naming it.';
 
     return "## Return\n\n"
-        . "Your last act is one `record` command; only a read-only command your instructions name (`size`, `ui`, the proof page's `open`) comes after it. It is the only way you write the manifest: do not edit the file, and never find it by a glob (`{$snapshot}` beside it is the dispatcher's snapshot).\n\n"
-        . "{$commands}\n\n"
+        . "Your last act is {$last}; only a read-only command your instructions name (`size`, `ui`, the proof page's `open`) comes after it. {$only} the only way you write the manifest: do not edit the file, and never find it by a glob (`{$snapshot}` beside it is the dispatcher's snapshot).\n\n"
+        . implode("\n", $commands) . "\n\n"
         . 'Write a `--reason` without double quotes. '
-        . 'It prints `{"action":"recorded",…}`, or `{"action":"refused","reason":…}` with exit 1 and the manifest untouched: fix what it names and run it again. '
+        . $prints . ' `{"action":"recorded",…}`, or `{"action":"refused","reason":…}` with exit 1 and the manifest untouched: ' . $refused . '. '
         . 'A `record` run again in the same step replaces the earlier one, and its `replaced` then names what that one wrote (`last_sha`, `cursor.status`): that is expected. '
         . $reply;
 }
