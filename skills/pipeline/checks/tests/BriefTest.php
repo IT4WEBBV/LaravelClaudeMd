@@ -389,7 +389,7 @@ it('says when no merge met the branch, and when nothing was committed since the 
         ->not->toContain('git log');
 });
 
-it('asks git only on review-pr\'s review step, and briefs the whole PR when git cannot scope it', function (string $leg, string $step, int $calls) {
+it('asks git only on the steps that need it, and briefs the whole PR and no catch-up when git fails', function (string $leg, string $step, int $calls) {
     $asked = [];
     $git = function (array $args) use (&$asked) {
         $asked[] = $args;
@@ -398,11 +398,59 @@ it('asks git only on review-pr\'s review step, and briefs the whole PR when git 
     };
     $manifest = brief_manifest($leg, ['mode' => 'autoflow', 'gate_ledger' => [rereview_entry('continued', str_repeat('a', 40))]]);
 
-    expect(pipeline_brief($manifest, $leg, '/tmp/m.json', $step, $git))->not->toContain('Scoped re-review');
+    expect(pipeline_brief($manifest, $leg, '/tmp/m.json', $step, $git))->not->toContain('Scoped re-review')->not->toContain('Catch up with the base');
     expect($asked)->toHaveCount($calls);
 })->with([
     'review-pr review' => ['review-pr', 'review', 1],
-    'review-pr resolve' => ['review-pr', 'resolve', 0],
+    'review-pr resolve' => ['review-pr', 'resolve', 1],
     'review-plan review' => ['review-plan', 'review', 0],
-    'implement' => ['implement', 'run', 0],
+    'implement' => ['implement', 'run', 1],
 ]);
+
+/** A git that finds the branch 27 commits behind `origin/main`, with `$files` changed on both sides. */
+function brief_git_behind(array $files = ['a.php', 'b.php'], string $behind = '27'): Closure
+{
+    return fn (array $args): array => match ($args[0]) {
+        'symbolic-ref' => [0, 'origin/main', ''],
+        'fetch' => [0, '', ''],
+        'rev-list' => [0, $behind, ''],
+        'diff' => [0, implode("\n", $files), ''],
+        default => [1, '', 'unexpected'],
+    };
+}
+
+it('puts the catch-up line first on every step that writes to the branch, with the merge command in its literal form', function (string $mode, string $leg, string $step) {
+    $brief = pipeline_brief(brief_manifest($leg, ['mode' => $mode]), $leg, '/tmp/m.json', $step, brief_git_behind());
+
+    expect($brief)->toContain("## Overrides\n\n- Catch up with the base first (engine.md §Catching up with the base): `origin/main` is 27 commits ahead and changed files this branch changes too (`a.php`, `b.php`). Before any other work run `git -C /tmp/wt merge --no-edit origin/main`, as its own command in exactly that form. On a conflict, resolve each file keeping both sides' intent, `git -C /tmp/wt add <file>`, and conclude with `git -C /tmp/wt commit --no-edit`. Only where both sides cannot be kept: `git -C /tmp/wt merge --abort` and return `halted`, quoting the conflicting hunks. Never rebase, never force-push. A denied command is a halt naming it; do not reshape it. Record the merge as that section says.\n- ");
+})->with([
+    'design run' => ['interactive', 'design', 'run'],
+    'design spec' => ['autoflow', 'design', 'spec'],
+    'design plan' => ['autoflow', 'design', 'plan'],
+    'review-plan resolve' => ['autoflow', 'review-plan', 'resolve'],
+    'implement' => ['autoflow', 'implement', 'run'],
+    'review-pr resolve' => ['interactive', 'review-pr', 'resolve'],
+]);
+
+it('gives no catch-up line to a step that does not write to the branch, or without git, or when the base state is null', function () {
+    foreach ([['review-plan', 'review'], ['review-pr', 'review'], ['handoff', 'run'], ['verify-ui', 'run']] as [$leg, $step]) {
+        expect(pipeline_brief(brief_manifest($leg, ['mode' => 'autoflow']), $leg, '/tmp/m.json', $step, brief_git_behind()))
+            ->not->toContain('Catch up with the base');
+    }
+    expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json', 'run'))->not->toContain('Catch up with the base');
+    expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json', 'run', brief_git_behind(['a.php'], '0')))->not->toContain('Catch up with the base');
+});
+
+it('words the design-only case and a single commit', function () {
+    $manifest = ['worktree' => '/tmp/wt/'];
+
+    expect(pipeline_catch_up_line($manifest, ['base' => 'origin/feature/integration', 'behind' => 1, 'shared' => []]))
+        ->toStartWith('Catch up with the base first (engine.md §Catching up with the base): `origin/feature/integration` is 1 commit ahead and this branch holds only its design. Before any other work run `git -C /tmp/wt merge --no-edit origin/feature/integration`, as its own command in exactly that form.');
+    expect(pipeline_brief(brief_manifest('design', ['mode' => 'autoflow']), 'design', '/tmp/m.json', 'spec', brief_git_behind(['docs/spec.md'])))
+        ->toContain('is 27 commits ahead and this branch holds only its design.');
+});
+
+it('names the spec and the plan to handoff from the manifest, in both modes', function (string $mode) {
+    expect(pipeline_brief(brief_manifest('handoff', ['mode' => $mode]), 'handoff', '/tmp/m.json', 'run'))
+        ->toContain('- The spec and the plan are `artifacts.spec` and `artifacts.plan` (Pointers above): give `handoff pr` those two paths and skip its own detection from the last commits or the newest files, which a merge of the base empties or crowds (engine.md §Catching up with the base).');
+})->with(['autoflow', 'interactive']);

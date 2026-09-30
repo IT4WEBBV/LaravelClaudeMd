@@ -1247,3 +1247,30 @@ it('scopes an interactive run\'s re-review the same way', function () {
     expect(dispatch_cli(['next', $fixture['manifest']])['json'])->toMatchArray(['action' => 'dispatch', 'leg' => 'review-pr', 'step' => 'review']);
     expect(file_get_contents($fixture['brief']))->toContain("a review of this PR completed at `{$reviewed}`");
 });
+
+it('prints the catch-up line first in the brief of a writing step behind its base, in both modes, and briefs without it when the fetch fails', function () {
+    $behind = function (): string {
+        $dir = base_repo(['shared.php' => "base\n"]);
+        rereview_commit($dir, ['shared.php' => "feature\n"]);
+        base_moves($dir, ['shared.php' => "main\n"]);
+
+        return $dir;
+    };
+    $line = fn (string $dir) => "## Overrides\n\n- Catch up with the base first (engine.md §Catching up with the base): `origin/main` is 1 commit ahead and changed files this branch changes too (`shared.php`). Before any other work run `git -C {$dir} merge --no-edit origin/main`, as its own command in exactly that form.";
+
+    $dir = $behind();
+    $flow = dispatch_fixture(['mode' => 'autoflow', 'worktree' => $dir, 'cursor' => ['leg' => 'implement', 'status' => 'pending']]);
+    expect(dispatch_cli(['brief', $flow['manifest'], 'implement', 'run'])['stdout'])->toContain($line($dir));
+
+    $dir = $behind();
+    $interactive = dispatch_fixture(['mode' => 'interactive', 'worktree' => $dir, 'cursor' => ['leg' => 'implement', 'status' => 'pending']]);
+    expect(dispatch_cli(['next', $interactive['manifest']])['json'])->toMatchArray(['action' => 'dispatch', 'leg' => 'implement', 'step' => 'run']);
+    expect(file_get_contents($interactive['brief']))->toContain($line($dir));
+
+    $dir = $behind();
+    pipeline_git($dir, ['remote', 'set-url', 'origin', dirname($dir) . '/moved.git']);
+    $offline = dispatch_fixture(['mode' => 'autoflow', 'worktree' => $dir, 'cursor' => ['leg' => 'implement', 'status' => 'pending']]);
+    expect(dispatch_cli(['brief', $offline['manifest'], 'implement', 'run'])['stdout'])
+        ->toContain('`implement` leg, `run` step')
+        ->not->toContain('Catch up with the base');
+});
