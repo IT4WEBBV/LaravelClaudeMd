@@ -136,6 +136,11 @@ php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from 
 php "$CHECKS/dispatch_cli.php" brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui …] [--size …]]
 #   each step's first command; the flags name the step before it, on every step but the run's first
 # → the brief, or {"action":"halt","reason":…}
+php "$CHECKS/dispatch_cli.php" record <manifest> <leg> <step> --status <status> [flags]
+#   each step's one manifest write, in both modes; the brief's ## Return prints it
+# → {"action":"recorded",…} | {"action":"refused","reason":…} (exit 1, the manifest untouched)
+php "$CHECKS/dispatch_cli.php" suite <manifest> --outcome green|red --passed <n> --failed <n>
+#   after a full suite run → {"action":"recorded","suite":{…}} | {"action":"refused",…}
 php "$CHECKS/dispatch_cli.php" size <manifest>                   # design's last command → Bounded | Architectural
 php "$CHECKS/dispatch_cli.php" ui "<manifest stem>.diff"         # implement's last command → true | false
 php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
