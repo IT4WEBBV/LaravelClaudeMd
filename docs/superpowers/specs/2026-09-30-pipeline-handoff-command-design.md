@@ -261,7 +261,8 @@ the replays that use it.
   reads *beyond what the `handoff` command and `work-on` do*.
 - **`README.md`**, *Permissions for unattended runs*: the command pushes and calls gh from inside one
   `php … dispatch_cli.php handoff <manifest>` call, as `kickoff` creates the worktree and edits the
-  board; a denial of that call halts the step with the command named.
+  board; its rule, `Bash(php * dispatch_cli.php handoff *)`, is listed in the `permissions.allow` block
+  beside the merge rules, and a denial of that call halts the step with the command named.
 
 ### What does not change
 

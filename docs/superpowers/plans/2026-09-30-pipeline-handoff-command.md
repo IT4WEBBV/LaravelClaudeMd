@@ -79,7 +79,7 @@ that owns the code.
 4. **`artifacts.pr` names a PR whose head is another branch.** Expected: a halt before the push, naming
    both branches. Test in Task 4 (the `another branch's PR` row).
 5. **The worktree is on another branch than the manifest's, or on a detached `HEAD`.** Expected: a halt
-   before the push. Test in Task 4 (the `another branch checked out` row).
+   before the push. Test in Task 4 (the `another branch checked out` and `a detached HEAD` rows).
 
 ---
 
@@ -126,6 +126,7 @@ it('sets a single-select field on the board item of a URL with two gh calls, and
         'project item-edit --id ITEM_1 --project-id PVT_1 --field-id F_1 --single-select-option-id O_1',
     ]);
     expect(pipeline_board_set($gh([[1, '', 'HTTP 401: Bad credentials']]), $board, $url, 'F_1', 'O_1'))->toBe('HTTP 401: Bad credentials');
+    expect(pipeline_board_set($gh([[1, '', '']]), $board, $url, 'F_1', 'O_1'))->toBe('gh project item-add exited 1');
     expect(pipeline_board_set($gh([[0, '{}', '']]), $board, $url, 'F_1', 'O_1'))->toBe('gh project item-add returned no item id');
     expect(pipeline_board_set($gh([[0, '{"id":"ITEM_1"}', ''], [1, '', '']]), $board, $url, 'F_1', 'O_1'))->toBe('gh project item-edit exited 1');
 });
@@ -171,6 +172,7 @@ function pipeline_gh_run(string $cwd, array $args): array
 /**
  * Sets one single-select field on the board item of `$url` (an issue or a PR): `item-add`, which returns
  * the existing item when the URL is already on the board, then `item-edit`. Both calls are idempotent.
+ * A call that fails answers gh's words, or `exited <code>` when gh said nothing, the same for both.
  * `$gh` runs gh and returns `[code, out, err]`; `$board` is `pipeline_repo_board()`'s `board`.
  *
  * @return ?string null when the field is set, else why not
@@ -178,9 +180,12 @@ function pipeline_gh_run(string $cwd, array $args): array
 function pipeline_board_set(callable $gh, array $board, string $url, string $fieldId, string $optionId): ?string
 {
     [$code, $out, $err] = $gh(['project', 'item-add', $board['number'], '--owner', $board['org'], '--url', $url, '--format', 'json']);
+    if ($code !== 0) {
+        return $err === '' ? "gh project item-add exited {$code}" : $err;
+    }
     $item = json_decode($out, true)['id'] ?? null;
-    if ($code !== 0 || ! is_string($item)) {
-        return $err === '' ? 'gh project item-add returned no item id' : $err;
+    if (! is_string($item)) {
+        return 'gh project item-add returned no item id';
     }
     [$code, , $err] = $gh(['project', 'item-edit', '--id', $item, '--project-id', $board['project-id'], '--field-id', $fieldId, '--single-select-option-id', $optionId]);
 
@@ -671,7 +676,8 @@ function handoff_pr(array $overrides = []): array
 /**
  * An autoflow run on `handoff:run`, briefed, for issue 125: `base_repo()`'s clone of a bare origin on
  * `feature` with a committed spec and plan, `$config` as its `.claude/work-on.config.md` when given, and
- * the fake gh holding `$prs`.
+ * the fake gh holding `$prs`. The config is written before `record_fixture()` commits, so it is committed
+ * and pushed with the branch: the command reads it from the worktree either way.
  */
 function handoff_fixture(array $manifest = [], string $config = '', array $prs = []): array
 {
@@ -1134,6 +1140,15 @@ it('records a halt before anything is pushed', function (Closure $arrange, strin
         },
         "the worktree is on other, not on the run's branch feature",
     ],
+    'a detached HEAD' => [
+        function () {
+            $fixture = handoff_fixture();
+            pipeline_git($fixture['repo'], ['switch', '-q', '--detach']);
+
+            return $fixture;
+        },
+        "the worktree is on HEAD, not on the run's branch feature",
+    ],
 ]);
 
 it('records a halt with git\'s words when the push is refused, and opens no PR', function () {
@@ -1490,7 +1505,9 @@ failure, running the step again is the repair.
 
 In the bullet that opens *"**After the create** kickoff checks that the worktree's `HEAD` equals
 `origin/<base>`"*, replace everything from *"Then it sets `git config branch.<branch>.gh-merge-base
-<base>`"* to the bullet's end (*"…and look healthy on every leg after it."*) with:
+<base>`"* to the bullet's end with the text below. The bullet ends at `engine.md:401`, where *"leg after
+it."* stands on a line of its own (the sentence *"…and look healthy on every leg after it."* wraps):
+that line goes too.
 
 ```markdown
   Then it writes `base` into the first manifest. `dispatch_cli.php handoff` opens the PR with
@@ -1564,14 +1581,25 @@ php "$CHECKS/dispatch_cli.php" handoff <manifest>
 
 - [ ] **Step 5: `README.md`, *Permissions for unattended runs***
 
-Before the paragraph that opens *"The pipeline skill's suite needs `node` on PATH"*, add:
+In the `permissions.allow` block, add a fourth rule after the three merge rules (a comma after
+`"Bash(git -C * commit --no-edit)"`):
+
+```json
+  "Bash(php * dispatch_cli.php handoff *)"
+```
+
+In the section's first paragraph, *"so allow the three commands in `~/.claude/settings.json`"* becomes
+*"so allow them, and the `handoff` command below, in `~/.claude/settings.json`"*. Before the paragraph
+that opens *"The pipeline skill's suite needs `node` on PATH"*, add:
 
 ```markdown
 The `handoff` step pushes the branch and calls gh from inside one command,
 `php <checks>/dispatch_cli.php handoff <manifest>`, as `kickoff` creates the worktree and edits the board
-from inside one `php` call. No rule is listed for it: the classifier allows `kickoff` in the same
-sessions. A denial of that call halts the step with the command named, and the rule that allows it is
-`Bash(php * dispatch_cli.php handoff *)`.
+from inside one `php` call. The push is a run's first outward write, so its rule is listed above with
+the merge rules: `Bash(php * dispatch_cli.php handoff *)`. The brief prints the command bare, with no
+`cd … &&` in front, which is the form the rule matches. Without the rule a denial halts the step with
+the command named; nothing is pushed by then, and a resume after the rule is added runs the command
+again.
 ```
 
 - [ ] **Step 6: Run the whole suite**
