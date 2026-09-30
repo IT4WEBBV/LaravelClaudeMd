@@ -111,3 +111,30 @@ function pipeline_repo_board(string $configMarkdown): array
 
     return ['state' => 'valid', 'board' => $board, 'error' => null];
 }
+
+/**
+ * Sets one single-select field on the board item of `$url` (an issue or a PR): `item-add`, which returns
+ * the existing item when the URL is already on the board, then `item-edit`. Both calls are idempotent.
+ * A call that fails answers gh's words, or `exited <code>` when gh said nothing, the same for both.
+ * `$gh` runs gh and returns `[code, out, err]`; `$board` is `pipeline_repo_board()`'s `board`.
+ *
+ * @return ?string null when the field is set, else why not
+ */
+function pipeline_board_set(callable $gh, array $board, string $url, string $fieldId, string $optionId): ?string
+{
+    [$code, $out, $err] = $gh(['project', 'item-add', $board['number'], '--owner', $board['org'], '--url', $url, '--format', 'json']);
+    if ($code !== 0) {
+        return $err === '' ? "gh project item-add exited {$code}" : $err;
+    }
+    $item = json_decode($out, true)['id'] ?? null;
+    if (! is_string($item)) {
+        return 'gh project item-add returned no item id';
+    }
+    [$code, , $err] = $gh(['project', 'item-edit', '--id', $item, '--project-id', $board['project-id'], '--field-id', $fieldId, '--single-select-option-id', $optionId]);
+
+    return match (true) {
+        $code === 0 => null,
+        $err === '' => "gh project item-edit exited {$code}",
+        default => $err,
+    };
+}

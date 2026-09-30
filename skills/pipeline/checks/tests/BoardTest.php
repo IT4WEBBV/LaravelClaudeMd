@@ -158,3 +158,26 @@ it('reports absent for a config with no Board section at all', function () {
     expect($result['state'])->toBe('absent');
     expect($result['error'])->toBeNull();
 });
+
+it('sets a single-select field on the board item of a URL with two gh calls, and returns gh\'s words when either fails', function () {
+    $board = ['org' => 'acme', 'number' => '7', 'project-id' => 'PVT_1'];
+    $url = 'https://github.com/acme/app/pull/7';
+    $calls = [];
+    $gh = function (array $answers) use (&$calls): Closure {
+        return function (array $args) use (&$calls, &$answers): array {
+            $calls[] = implode(' ', $args);
+
+            return array_shift($answers);
+        };
+    };
+
+    expect(pipeline_board_set($gh([[0, '{"id":"ITEM_1"}', ''], [0, '', '']]), $board, $url, 'F_1', 'O_1'))->toBeNull();
+    expect($calls)->toBe([
+        'project item-add 7 --owner acme --url https://github.com/acme/app/pull/7 --format json',
+        'project item-edit --id ITEM_1 --project-id PVT_1 --field-id F_1 --single-select-option-id O_1',
+    ]);
+    expect(pipeline_board_set($gh([[1, '', 'HTTP 401: Bad credentials']]), $board, $url, 'F_1', 'O_1'))->toBe('HTTP 401: Bad credentials');
+    expect(pipeline_board_set($gh([[1, '', '']]), $board, $url, 'F_1', 'O_1'))->toBe('gh project item-add exited 1');
+    expect(pipeline_board_set($gh([[0, '{}', '']]), $board, $url, 'F_1', 'O_1'))->toBe('gh project item-add returned no item id');
+    expect(pipeline_board_set($gh([[0, '{"id":"ITEM_1"}', ''], [1, '', '']]), $board, $url, 'F_1', 'O_1'))->toBe('gh project item-edit exited 1');
+});
