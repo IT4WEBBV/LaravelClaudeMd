@@ -1169,7 +1169,7 @@ it('halts before anything is created on a base that is unsafe, not a branch on o
     'the default branch' => ['main', "the base main is origin's default branch: leave --base out"],
 ]);
 
-it('kicks off on a per-run base: cut from it, gh-merge-base set, recorded in the manifest', function () {
+it('kicks off on a per-run base: cut from it, recorded in the manifest, and no gh-merge-base on the branch', function () {
     $fixture = kickoff_fixture('create-wt <branch> --no-start');
     $sha = kickoff_integration_branch($fixture);
     $branch = 'feature/issue-69-pipeline-kickoff-as-one-command';
@@ -1178,16 +1178,8 @@ it('kicks off on a per-run base: cut from it, gh-merge-base set, recorded in the
 
     expect($ready)->toMatchArray(['action' => 'ready', 'branch' => $branch]);
     expect(pipeline_git($ready['worktree'], ['rev-parse', 'HEAD']))->toBe($sha);
-    expect(pipeline_git($ready['worktree'], ['config', "branch.{$branch}.gh-merge-base"]))->toBe('feature/integration');
+    expect(pipeline_git_run($ready['worktree'], ['config', "branch.{$branch}.gh-merge-base"])[0])->not->toBe(0);
     expect(manifest_read($ready['manifest']))->toMatchArray(['base' => 'feature/integration', 'artifacts' => ['issue' => 69]]);
-});
-
-it('sets no gh-merge-base without a base', function () {
-    $fixture = kickoff_fixture();
-
-    $ready = kickoff($fixture, ['69'])['json'];
-
-    expect(pipeline_git_run($ready['worktree'], ['config', "branch.{$ready['branch']}.gh-merge-base"])[0])->not->toBe(0);
 });
 
 it('halts when the declared create does not honour the base, naming the worktree it left', function () {

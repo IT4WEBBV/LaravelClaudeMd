@@ -277,7 +277,7 @@ function pipeline_worktree_of(string $repoRoot, string $branch): ?string
 function pipeline_kickoff_prepare(string $worktree, string $branch, ?string $base, array $manifest): string
 {
     if ($base !== null) {
-        pipeline_kickoff_on_base($worktree, $branch, $base);
+        pipeline_kickoff_on_base($worktree, $base);
     }
     if (pipeline_git_run($worktree, ['rev-parse', '--abbrev-ref', "{$branch}@{upstream}"])[0] === 0) {
         pipeline_git($worktree, ['branch', '--unset-upstream', $branch]);
@@ -289,15 +289,14 @@ function pipeline_kickoff_prepare(string $worktree, string $branch, ?string $bas
     return $path;
 }
 
-/** The create honoured the base, and `gh pr create` without `--base` opens the run's PR into it (gh reads `gh-merge-base`). */
-function pipeline_kickoff_on_base(string $worktree, string $branch, string $base): void
+/** The create honoured the base: the worktree's `HEAD` is `origin/<base>`. `dispatch_cli.php handoff` opens the PR into it with `--base`. */
+function pipeline_kickoff_on_base(string $worktree, string $base): void
 {
     $head = pipeline_git($worktree, ['rev-parse', 'HEAD']);
     $tip = pipeline_git($worktree, ['rev-parse', "origin/{$base}"]);
     if ($head !== $tip) {
         throw new PipelineKickoffHalt("the worktree's HEAD ({$head}) is not origin/{$base} ({$tip}): the declared worktree.create did not honour --base");
     }
-    pipeline_git($worktree, ['config', "branch.{$branch}.gh-merge-base", $base]);
 }
 
 /** Everything no step will look up (engine.md §Kickoff); a key with nothing to say is absent. */
