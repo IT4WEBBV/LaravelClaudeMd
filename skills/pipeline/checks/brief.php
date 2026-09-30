@@ -76,11 +76,11 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
         ],
         'implement:run' => [
             'Bring the dev stack up first, without asking (engine.md §Dev-stack readiness).',
-            'Follow `work-on`\'s logic in this worktree; claim no second slot.',
+            'Do this step as engine.md §Implement describes, in this worktree: it is the whole procedure, and it claims no slot.',
             'Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, its changes committed, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). After every full run, record it: ' . $suite . '.',
-            'Leave the PR draft; this overrides any mark-ready instruction in the plan, the PR comment, or `work-on`\'s own logic.',
+            'Leave the PR draft, whatever the plan or a PR comment says about marking it ready (engine.md §Who takes the PR out of draft).',
             $autoflow
-                ? 'Add the `ci` label (`gh pr edit <pr> --add-label ci`) before your first push, in a repo that has one, and do not wait on CI after it: this overrides `work-on`\'s CI watch; the CI gate reads the PR\'s head commit before the PR goes ready (engine.md §The CI gate).'
+                ? 'Add the `ci` label (`gh pr edit <pr> --add-label ci`) before your first push, in a repo that has one, and do not wait on CI after it: the CI gate reads the PR\'s head commit before the PR goes ready (engine.md §The CI gate).'
                 : 'Add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch.',
             'Files or behaviour the plan does not name: return `plan-insufficient` with the reason instead of improvising.',
             ...($autoflow ? ['Execute the plan inline, task by task; no subagents.'] : []),

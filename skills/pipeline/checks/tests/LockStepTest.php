@@ -91,3 +91,9 @@ it('keeps engine.md\'s repo config section in lock-step with the keys the parser
         expect($section)->toContain($row);
     }
 });
+
+it('keeps engine.md §Implement whole, down to its last paragraph', function () {
+    expect(lockstep_section('engine.md', 'Implement'))
+        ->toContain('`gh pr checks <pr> --watch`')
+        ->toContain('**`/work-on <pr>` on a pipeline PR is outside the run.**');
+});

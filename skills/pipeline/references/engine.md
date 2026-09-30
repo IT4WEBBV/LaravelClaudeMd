@@ -555,6 +555,48 @@ idempotent board calls, and its failure is a note. The command records `continue
 the next run adopts it instead of opening a second one (#118). Every outward act is idempotent: after any
 failure, running the step again is the repair.
 
+## Implement — the step, start to finish
+
+The `implement` step is no skill: this section is the whole procedure, and its brief points here. The
+rules it follows are sections of this file, named where they apply rather than restated.
+
+1. **Read.** The issue when the manifest has `artifacts.issue` (`gh issue view <n> --comments`), the spec
+   and the plan whole, and the PR (`gh pr view <pr>`).
+2. **Stack.** Bring the dev stack up first, without asking (§Dev-stack readiness).
+3. **Validate the names the plan relies on** against the code as it stands, before the first change:
+   every file, class, function, route and config key the plan names, by grep or by reading. A base merged
+   since the plan (§Catching up with the base) can have moved one.
+   - All there, as the plan says: go on.
+   - Renamed or moved, same meaning: use the current name, and say so in the message of the commit that
+     meets it.
+   - Missing, or doing something other than the plan assumes: a plan gap, handled as the brief's plan-gap
+     lines say (`plan-insufficient`; on a Bounded spec the escalation check first, §Design size).
+4. **Execute the plan task by task, test-first.** Each task's test is written first and seen red; then the
+   code; then the suite (unless §Suite reuse finds the tree green) and `static-analysis` (§Mechanical
+   checks). Record every full run with `dispatch_cli.php suite`. One commit per logical unit: a plan task
+   by default, which the step may split. In `autoflow`, inline: no subagents.
+5. **Format once** when the code is complete, over the whole tree, before the last suite run and the push,
+   its changes committed (§Mechanical checks).
+6. **The `ci` label, then the push.** In a repo that has the label (`gh label list --search ci`), add it
+   (`gh pr edit <pr> --add-label ci`) before the first push; then `git push`, never forced.
+7. **CI.** In `autoflow`, do not wait on it: the CI gate reads the PR's head commit before the PR goes
+   ready (§The CI gate). In `interactive`, watch the push's checks (`gh pr checks <pr> --watch`); a red is
+   a failing step, fixed and pushed again, and one that predates the change is a halt with the evidence
+   (§Suite reuse).
+8. **Leave the PR draft**, whatever the plan or a PR comment says about marking it ready (§Who takes the
+   PR out of draft).
+9. **What the plan does not name**, files or behaviour, is `plan-insufficient`, never improvised.
+
+**What the step does not do**, because another part of the run owns it: `gh pr ready` (§Who takes the PR
+out of draft); closing keywords or other PR body edits (§Closing links: `handoff` writes `Part of #N`,
+`review-pr`'s finish step reconciles); board moves (§The work item, `handoff`); claiming a slot or creating
+a worktree (§Kickoff); writing the manifest other than through `suite` and `record`; a review of its own
+work (`review-pr`).
+
+**`/work-on <pr>` on a pipeline PR is outside the run.** That skill routes a PR by its own rules, and a
+pipeline PR's body carries no `## Chain audit` block, so it treats the PR as not yet audited, as it did
+before this section existed. Nothing in the run uses it or guards against it.
+
 ## Design size — Bounded or Architectural
 
 One chain, one set of legs and gates; only what the design leg writes is proportional to the change.
