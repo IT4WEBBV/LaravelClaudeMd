@@ -83,7 +83,7 @@ php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [-
 # → {"action":"ready","manifest":…,"worktree":…,"branch":…,"notes":[…]} | {"action":"halt","reason":…}
 git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
 PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>] [--decision "<verbatim>"]…
-# → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"noOpen":…,"checks":…,"tables":{…},"profile":…,"tier":…,"agents":{…}}
+# → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"noOpen":…,"checks":…,"tables":{…},"profile":…,"tier":…,"escalated":…,"agents":{…}}
 #   | {"action":"done"} | {"action":"halt","reason":…}
 # start: the workflow pipeline-autoflow with that JSON as args, in the background; wait for its completion notice
 php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
@@ -110,7 +110,9 @@ launched the run, with its reason.
   steps, the loop-back targets, the statuses per `<leg>:<step>` and the bound, built from the
   functions `interactive` routes by, so the script keeps no copy of them.
   `agents`, `profile` and `tier` are the step agents' models and efforts, the profile the run starts
-  on and the tier its invocation named (§Agents per step); an invalid `agents` override in the
+  on and the tier its invocation named (§Agents per step); `escalated` is whether the ledger records
+  an escalation (`pipeline_escalated()`), from which the script seeds its own, so a resume keeps
+  `full` and the one exemption as a run does; an invalid `agents` override in the
   manifest halts `launch` with the other manifest checks, before anything is written.
 - **The script** gives each step a schema whose `status` allows only what that step may return
   (`tables.allowed`, from `LegStatus::allowedFor()`), continues, loops back or returns on that status,
@@ -118,12 +120,13 @@ launched the run, with its reason.
   `{action: halt, leg, reason}`. Nothing ends a run as `done` except `review-pr`'s resolve step
   continuing. The design size it goes by is the one `launch` read, then the one each `design` step
   copied from its spec. A Bounded escalation is not a loop-back, and escalation is one-way (§Design
-  size), so the script exempts one per run; every other `plan-insufficient` counts toward
+  size), so the script exempts one per run, a resume included (`escalated`); every other `plan-insufficient` counts toward
   `review-plan`'s bound. A status it cannot route halts, and so do `args` that are not a `launch` `start` answer
   or whose `tables.loopTarget` has no `review-plan`, the gate every `plan-insufficient` is charged to; `tables`
   missing or incomplete halts with a reason that names them. `AutoflowScriptTest` replays the script
   on `launch`'s answer. Every step runs on the model and effort `agents` gives it (§Agents per step),
-  and `agents`, `profile` or `tier` missing or incomplete halts before any agent; a review step that returns
+  and `agents`, `profile` or `tier` missing or incomplete halts before any agent, and so does an
+  `escalated` that is not a boolean; a review step that returns
   nothing runs once more on the retry entry; a step that throws or returns nothing halts the run.
 - **A step** first runs `dispatch_cli.php brief <manifest> <leg> <step>`, followed on every step but
   the run's first by what the step before it returned: `--after <leg>:<step> --status <status>`, plus
@@ -207,7 +210,8 @@ machine and changes silently. `launch` hands the table to the script as `agents`
 (`pipeline_agent_table()`, the manifest's override laid over it) with `profile`, the profile the run
 starts on (`pipeline_start_profile()`), and `tier`, the tier its invocation named
 (`AgentTier::fromManifest()`); the script names no model or effort, and a missing or incomplete
-`agents`, `profile` or `tier` halts it before any agent. Models are `agent()`'s aliases, efforts its
+`agents`, `profile` or `tier`, or an `escalated` that is not a boolean, halts it before any agent.
+Models are `agent()`'s aliases, efforts its
 levels. The owner's constraints are tokens (plan limits), quality and speed, not price.
 
 Three tiers, picked by the invocation's word: `full` with no word, `medium`, and `light` for a tiny
@@ -674,7 +678,7 @@ past the re-review.
 
 In `interactive`, `pipeline_route` sends every Bounded `plan-insufficient` to `design`
 without counting repeats, and relies on the grow-form brief to make the spec Architectural; `autoflow`
-exempts one per run and counts the rest toward `review-plan`'s bound.
+exempts one per run, a resume included, and counts the rest toward `review-plan`'s bound.
 
 ### A plan gap on an Architectural design — a loop-back, not a halt
 

@@ -99,6 +99,18 @@ it('exempts one Bounded escalation and then counts on from the ledger\'s loop-ba
     expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'review-plan', 'reason' => 'review-plan: loop-back bound exhausted']);
 });
 
+it('counts a Bounded escalation toward review-plan\'s bound on a resume after an earlier one, as one uninterrupted run does', function () {
+    $escalated = ['gate' => 'design-size', 'leg' => 'review-plan', 'at' => '2026-09-24T00:00:00Z', 'reason' => 'migration', 'outcome' => 'escalated'];
+    $looped = fn (int $cycle) => ['gate' => 'plan-approval', 'leg' => 'review-plan', 'cycle' => $cycle, 'at' => "2026-09-24T0{$cycle}:00:00Z", 'review' => 'r', 'outcome' => 'looped-back'];
+    $start = autoflow_start('handoff', [$escalated, $looped(1), $looped(2)], "# x — design\n\n**Design size:** Bounded\n");
+    $replay = autoflow_replay($start, ['handoff:run' => [AUTOFLOW_PI]]);
+
+    expect($start['escalated'])->toBeTrue();
+    expect($start['loops']['review-plan'])->toBe(2);
+    expect($replay['labels'])->toBe(['handoff:run']);
+    expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'handoff', 'reason' => 'review-plan: loop-back bound exhausted']);
+});
+
 it('halts a start step its leg does not have, before any agent', function () {
     $replay = autoflow_replay([...autoflow_start('handoff'), 'startStep' => 'resolve'], []);
 
@@ -373,6 +385,21 @@ it('moves a light run to full when its design turns out Architectural, and on a 
     ], ['review-plan:review', 'design:spec', 'review-plan:review'], ['opus medium', 'opus high', 'fable high']],
 ]);
 
+it('keeps a light run on full when it resumes after an escalation and its rerun spec step still says Bounded', function () {
+    $escalated = ['gate' => 'design-size', 'leg' => 'review-plan', 'at' => '2026-09-29T10:00:00Z', 'reason' => 'migration', 'outcome' => 'escalated'];
+    $start = autoflow_start('design', [$escalated], "# x — design\n\n**Design size:** Bounded\n", plan: 'plan.md', tier: 'light');
+    $replay = autoflow_replay($start, [
+        'design:spec' => [[...AUTOFLOW_C, 'size' => 'Bounded']],
+        'review-plan:review' => [AUTOFLOW_STOP],
+    ]);
+
+    expect($start['startStep'])->toBe('spec');
+    expect($start['profile'])->toBe('full');
+    expect($replay['labels'])->toBe(['design:spec', 'review-plan:review']);
+    expect($replay['settings'])->toBe(['opus high', 'fable high']);
+    expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'review-plan', 'reason' => 'stub stop']);
+});
+
 it('starts implement on its loop-back entry when the ledger already counts a verify-ui or review-pr loop-back, and not after a plan gap', function (array $entry, string $setting) {
     $replay = autoflow_replay(autoflow_start('implement', [$entry]), ['implement:run' => [[...AUTOFLOW_STOP, 'ui' => false]]]);
 
@@ -430,4 +457,15 @@ it('halts before any agent when launch\'s agents, profile or tier are missing or
     'a tier that is not a table' => [function (array $start) { $start['tier'] = 'heavy'; return $start; }],
     'a tier that names the retry entry' => [function (array $start) { $start['tier'] = 'retry'; return $start; }],
     'a profile that is neither full nor the tier' => [function (array $start) { $start['tier'] = 'medium'; $start['profile'] = 'light'; return $start; }],
+]);
+
+it('halts before any agent when launch\'s answer carries no boolean escalated flag', function (callable $break) {
+    $replay = autoflow_replay($break(autoflow_start('handoff')), []);
+
+    expect($replay)->toBe(['labels' => [], 'prompts' => [], 'settings' => [], 'result' => ['action' => 'halt', 'leg' => 'handoff', 'reason' => 'args carry no escalated flag: re-run launch from checks that answer it']]);
+})->with([
+    'no escalated flag' => [function (array $start) { unset($start['escalated']); return $start; }],
+    'a string' => [function (array $start) { $start['escalated'] = 'true'; return $start; }],
+    'a number' => [function (array $start) { $start['escalated'] = 1; return $start; }],
+    'null' => [function (array $start) { $start['escalated'] = null; return $start; }],
 ]);
