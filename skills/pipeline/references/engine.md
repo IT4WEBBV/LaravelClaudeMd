@@ -871,6 +871,7 @@ runs (#77), while `review-pr:review` reads the diff, not CI.
 
 | Verdict on the head commit | Answer |
 |---|---|
+| `merge`: a merge since the last completed review met the branch's changes (`autoflow`) | `fix` the first time in a run, before the PR is read; after that round the gate goes on to the rows below |
 | `mismatch`: GitHub's head is not the worktree's `HEAD` | `wait`; `halt` at the third read, naming both shas: a push GitHub shows within seconds, and one it does not show by then did not land |
 | `green`: every check finished `SUCCESS`, `NEUTRAL` or `SKIPPED` | `ready` |
 | `none`: no check at all | `ready`; with `.github/workflows/*.yml` or `*.yaml` in the worktree only from the third read, since GitHub registers a push's checks seconds after it |
@@ -901,8 +902,24 @@ poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll
   re-reviewing: run the loop again by hand on the halted manifest (`ci` is read-only and refuses only a
   retired mode, a missing PR or a worktree whose `HEAD` git cannot read) rather than `launch`, which would
   re-run `review-pr:review`.
+- **A merge the review did not see** (#124). The finish step is a run's last, so a merge it makes
+  (§Catching up with the base), conflict resolutions included, would reach a ready PR unreviewed. In
+  `autoflow`, `ci` computes `pipeline_review_scope()` and hands its `files` to the gate: after `finish`
+  recorded `done` the scope's base is the review that just completed, so the files are exactly what a
+  merge since that review met. When there are any, the gate answers `fix` with verdict `merge`, the files
+  and the decision `Unreviewed merge on the PR's head commit <sha>: a merge since the last completed
+  review met this branch's changes in <files>` (`<sha>` is the worktree's `HEAD`), before it reads the PR
+  or its checks. The session does what it does for a red: the same `launch --from review-pr --decision
+  "<its decision>"` and a new workflow. That review is scoped, reads those files whole (§Scoped
+  re-review), and records a `reviewed_sha` that contains the merge, so the gate's next read finds nothing
+  unreviewed. Once per run, counted as the CI round is and apart from it: a run may have one of each. A
+  further unreviewed merge neither halts nor loops; the gate goes on to CI, and the PR body's
+  `## Base merges` line is its record. The round fires on a clean merge of a shared file as on a
+  conflict: git 2.33 cannot tell the two apart afterwards, and a textual merge of a file both sides
+  changed is what a review is for.
 - **In `interactive`** the finish step runs the same loop, `gh pr ready` on `ready`, and shows any other
-  answer to the human; there is no automatic round.
+  answer to the human; there is no automatic round, and no merge round: the human resolves the review
+  and sees the merge as it is made.
 - **The merge watch stays on `state`** (§After the merge): once the PR is ready, CI on its head has
   settled.
 

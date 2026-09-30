@@ -112,7 +112,7 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    `poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll); echo "$answer" | grep -q '"action":"wait"'; do sleep 30; poll=$((poll + 1)); done; echo "$answer"`.
    **`ready`:** `gh pr ready <pr>`. The manifest already says done; when `gh pr ready` is denied the
    PR stays draft and no halt is written: put the denial in the report, and the owner runs
-   `gh pr ready` by hand. **`fix`:** the diff as in step 2, then
+   `gh pr ready` by hand. **`fix`** (a red CI, or a merge the last review did not see): the diff as in step 2, then
    `launch <manifest> "<manifest stem>.diff" --from review-pr --decision "<its decision>"`, and steps
    3–5 again. **`halt`:** `finish <manifest> '<the answer>'`, then as any halt; on a `mismatch` GitHub's
    head and the worktree's `HEAD` differ: once they match (push the branch, or reconcile it when GitHub

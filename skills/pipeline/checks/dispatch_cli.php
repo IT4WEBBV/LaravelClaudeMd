@@ -425,8 +425,8 @@ function dispatch_cli_ui(string $diffPath): ?string
 
 /**
  * The CI gate's reads (`../references/engine.md` §The CI gate): the worktree's `HEAD`, then the PR's head
- * commit and its checks in one gh call, and what the session does next. It never writes the manifest, so
- * polling it changes nothing.
+ * commit and its checks in one gh call, the merges since the last completed review in an `autoflow` run,
+ * and what the session does next. It never writes the manifest, so polling it changes nothing.
  */
 function dispatch_cli_ci(string $manifestPath, int $poll): array
 {
@@ -454,7 +454,18 @@ function dispatch_cli_ci(string $manifestPath, int $poll): array
         $head,
         glob("{$worktree}/.github/workflows/*.y*ml") !== [],
         $poll,
+        dispatch_cli_unreviewed($manifest),
     );
+}
+
+/**
+ * The files where a merge since the last completed review met the branch's changes (`../references/engine.md`
+ * §The CI gate). `autoflow` only: there `finish` closed that review before the gate runs; an `interactive`
+ * finish step runs the gate while its own review entry is still open.
+ */
+function dispatch_cli_unreviewed(array $manifest): array
+{
+    return $manifest['mode'] === 'autoflow' ? pipeline_review_scope($manifest, dispatch_cli_git($manifest))['files'] ?? [] : [];
 }
 
 /** `ci <manifest> [--poll <n>]`, n counted from 1; null is a usage error. */

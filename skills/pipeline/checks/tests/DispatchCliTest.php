@@ -857,6 +857,40 @@ it('refuses a ci it cannot parse', function (array $arguments) {
     'an unknown flag' => [['--wait', '3']],
 ]);
 
+/**
+ * A finished run on PR 7 in a real repo: after the review at its recorded commit, the finish step merged a
+ * main that changed a file the branch changes. gh is a fake that cannot read the PR.
+ */
+function ci_merge_fixture(string $mode, array $decisions = []): array
+{
+    $dir = rereview_repo(['shared.php' => "a\nb\nc\nd\ne\nf\ng\n"]);
+    $reviewed = rereview_commit($dir, ['shared.php' => "A\nb\nc\nd\ne\nf\ng\n"]);
+    rereview_main_moves($dir, ['shared.php' => "a\nb\nc\nd\ne\nf\nG\n"]);
+    $head = rereview_merge($dir);
+    $fixture = dispatch_fixture([
+        'mode' => $mode, 'worktree' => $dir, 'cursor' => ['leg' => 'review-pr', 'status' => 'done'],
+        'artifacts' => ['spec' => null, 'plan' => null, 'pr' => 7, 'issue' => null],
+        'gate_ledger' => [rereview_entry('continued', $reviewed)], 'decisions' => $decisions,
+    ]);
+    mkdir($fixture['dir'] . '/bin');
+    file_put_contents($fixture['dir'] . '/bin/gh', "#!/bin/sh\necho 'HTTP 502: Bad Gateway' >&2\nexit 1\n");
+    chmod($fixture['dir'] . '/bin/gh', 0755);
+
+    return [...$fixture, 'head' => $head, 'env' => ['PATH' => $fixture['dir'] . '/bin:' . getenv('PATH')]];
+}
+
+it('answers the merge round for an autoflow run whose finish step merged a shared file, once, and never for an interactive run', function () {
+    $flow = ci_merge_fixture('autoflow');
+    $before = file_get_contents($flow['manifest']);
+    $decision = "Unreviewed merge on the PR's head commit {$flow['head']}: a merge since the last completed review met this branch's changes in shared.php";
+
+    expect(ci_gate($flow)['json'])->toBe(['action' => 'fix', 'verdict' => 'merge', 'files' => ['shared.php'], 'decision' => $decision]);
+    expect(file_get_contents($flow['manifest']))->toBe($before);
+
+    expect(ci_gate(ci_merge_fixture('autoflow', [$decision]))['json'])->toBe(['action' => 'wait', 'verdict' => 'unreadable']);
+    expect(ci_gate(ci_merge_fixture('interactive'))['json'])->toBe(['action' => 'wait', 'verdict' => 'unreadable']);
+});
+
 function kickoff_issue(array $overrides = []): array
 {
     return ['number' => 69, 'title' => 'Pipeline: kickoff as one command', 'html_url' => 'https://github.com/acme/app/issues/69', 'pull_request' => null, ...$overrides];
