@@ -85,7 +85,7 @@ were added for this plan).
 ### Task 1: §The repo config, and the key lists as constants
 
 **Files:**
-- Modify: `skills/pipeline/checks/checks.php:3-15` (docblock, `$known`), `:33`, `:61`, `:78-85` (docblock)
+- Modify: `skills/pipeline/checks/checks.php:3-15` (docblock, `$known`), `:32`, `:61`, `:78-85` (docblock)
 - Modify: `skills/pipeline/checks/board.php:3-23` (docblock, `$required`, `$optional`), `:74`, `:86`, `:93`, `:103-110`
 - Modify: `skills/pipeline/references/engine.md` (new section before `## The work item`; one clause in §The work item)
 - Test: `skills/pipeline/checks/tests/LockStepTest.php`
@@ -174,7 +174,7 @@ with
 
 - [ ] **Step 4: The constants in `board.php`**
 
-Replace the head of the file, from `<?php` through the `$optional` line:
+Replace the head of the file, from `<?php` through the blank line after the `$optional` line (1-24):
 
 ```php
 <?php
@@ -347,7 +347,10 @@ it('names work-on in no brief', function (string $mode) {
         ...[pipeline_plan_gap_lines('run'), pipeline_plan_gap_lines('review'), pipeline_plan_gap_lines('resolve')],
     );
 
-    expect(str_replace(realpath(__DIR__ . '/..'), '<checks>', implode("\n", $lines)))->not->toContain('work-on');
+    $brief = pipeline_brief(brief_manifest('implement', ['mode' => $mode]), 'implement', '/tmp/m.json');
+
+    expect(str_replace(realpath(__DIR__ . '/..'), '<checks>', implode("\n", $lines)))->not->toContain('work-on')
+        ->and(str_replace(realpath(__DIR__ . '/..'), '<checks>', $brief))->not->toContain('work-on');
 })->with(['autoflow', 'interactive']);
 ```
 
@@ -760,7 +763,7 @@ git commit -m "docs(pipeline): engine.md and SKILL.md state each rule the implem
 - [ ] **Step 1: The whole pipeline suite**
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`
-Expected: PASS, every test, the four new tests (two of them over two modes) included. Record it with
+Expected: PASS, every test, the five new tests (three plain, two over two modes: seven new cases) included. Record it with
 `dispatch_cli.php suite` as the brief says.
 
 - [ ] **Step 2: Push**
