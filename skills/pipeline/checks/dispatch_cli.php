@@ -12,12 +12,14 @@
  *                 php dispatch_cli.php size <manifest>
  *                 php dispatch_cli.php ui <diff-file>
  *                 php dispatch_cli.php ci <manifest> [--poll <n>]
+ *   both:         php dispatch_cli.php record <manifest> <leg> <step> --status <status> [flags]
  *
  * `brief` prints the brief as Markdown; `size` and `ui` print a bare value for a step to copy
  * (`Bounded` / `Architectural`, `true` / `false`); every other answer, and a `brief` that halts, is
- * one JSON line. Exits 0 on every decision, a halt included. Exits 1 on a usage error (a `kickoff`,
- * a `launch`, a `brief` or a `ci` it cannot parse included), and when `size` has no readable manifest
- * or `ui` no diff file.
+ * one JSON line. Exits 0 on every decision, a halt included; `record` exits 1 on a refusal, which is
+ * no decision about the run and leaves the manifest untouched, so a failed write cannot be missed in an
+ * `&&` chain. Exits 1 on a usage error (a `kickoff`, a `launch`, a `brief` or a `ci` it cannot parse
+ * included), and when `size` has no readable manifest or `ui` no diff file.
  */
 
 require_once __DIR__ . '/triggers.php';
@@ -27,6 +29,7 @@ require_once __DIR__ . '/design_size.php';
 require_once __DIR__ . '/dispatch.php';
 require_once __DIR__ . '/agents.php';
 require_once __DIR__ . '/brief.php';
+require_once __DIR__ . '/record.php';
 require_once __DIR__ . '/suite.php';
 require_once __DIR__ . '/kickoff.php';
 require_once __DIR__ . '/ci.php';
@@ -610,6 +613,213 @@ function dispatch_cli_launch_command(array $arguments): ?array
     return $parsed === null ? null : dispatch_cli_launch(...$parsed);
 }
 
+/** `record`'s and `suite`'s no: exit 1, the manifest untouched. */
+function dispatch_cli_refuse(string $reason): array
+{
+    return ['action' => 'refused', 'reason' => $reason];
+}
+
+/** Why a step may not write at `$manifestPath`, or null: the snapshot's own path (#122), no manifest, an invalid one. */
+function dispatch_cli_write_problem(string $manifestPath): ?string
+{
+    if (str_ends_with($manifestPath, '.before.json')) {
+        return "{$manifestPath} is the dispatcher's snapshot; the manifest is " . substr($manifestPath, 0, -strlen('.before.json')) . '.json';
+    }
+    $manifest = manifest_read($manifestPath);
+
+    return $manifest === null ? "no readable manifest at {$manifestPath}" : dispatch_cli_invalid($manifest);
+}
+
+/** Writes the manifest and reads it back: null when it landed, else the refusal. A result that is no JSON is never written. */
+function dispatch_cli_write(string $manifestPath, array $manifest): ?array
+{
+    if (json_encode($manifest) === false) {
+        return dispatch_cli_refuse('the result cannot be written as JSON: ' . json_last_error_msg());
+    }
+    @manifest_write($manifestPath, $manifest); // the read-back below is the check; a warning would break the one JSON line
+
+    return pipeline_normalized(manifest_read($manifestPath) ?? []) === pipeline_normalized($manifest)
+        ? null
+        : dispatch_cli_refuse("the write did not land at {$manifestPath}");
+}
+
+/**
+ * `$given` with `--review-file` and `--actions-file` replaced by what they hold, or why not: each is a file
+ * no older than the step's snapshot, so a step cannot hand in the file of an earlier one; `--proof` is a file.
+ */
+function dispatch_cli_record_files(string $snapshotPath, array $given): array|string
+{
+    foreach (['review-file' => 'review', 'actions-file' => 'actions'] as $flag => $what) {
+        if (! isset($given[$flag])) {
+            continue;
+        }
+        $path = $given[$flag];
+        if (! is_file($path)) {
+            return "--{$flag} {$path} is not a file";
+        }
+        if (filemtime($path) < filemtime($snapshotPath)) {
+            return "--{$flag} {$path} is older than this step's snapshot: write this step's {$what} to it first";
+        }
+        $given[$flag] = (string) file_get_contents($path);
+    }
+
+    return isset($given['proof']) && ! is_file($given['proof']) ? "--proof {$given['proof']} is not a file" : $given;
+}
+
+/**
+ * The base to diff against: `pipeline_base_ref()`, else origin's default branch as origin itself names
+ * it, fetched, as kickoff resolves it; null when neither gives one. A checkout without `origin/HEAD`
+ * must not cost a review step its review.
+ */
+function dispatch_cli_base_ref(array $manifest, callable $git): ?string
+{
+    $base = pipeline_base_ref($manifest, $git);
+    if ($base !== null) {
+        return $base;
+    }
+    try {
+        $branch = pipeline_kickoff_default_branch(rtrim((string) $manifest['worktree'], '/'));
+    } catch (PipelineKickoffHalt) {
+        return null;
+    }
+    [$code] = $git(['fetch', '-q', 'origin', "+refs/heads/{$branch}:refs/remotes/origin/{$branch}"]);
+
+    return $code === 0 ? "origin/{$branch}" : null;
+}
+
+/** The content triggers that fired over the branch's diff against its base, by name; null when git cannot give the diff. */
+function dispatch_cli_annotations(array $manifest, callable $git): ?array
+{
+    $base = dispatch_cli_base_ref($manifest, $git);
+    [$code, $diff] = $base === null ? [1, ''] : $git(['diff', "{$base}...HEAD"]);
+    if ($code !== 0) {
+        return null;
+    }
+    $composer = rtrim((string) $manifest['worktree'], '/') . '/composer.json';
+    $package = is_file($composer) ? json_decode((string) file_get_contents($composer), true)['name'] ?? null : null;
+
+    return pipeline_annotations(pipeline_triggers($diff, $package));
+}
+
+/**
+ * What only the machine knows, for `pipeline_record()`: `now`, the design size of the spec the step
+ * names (else the snapshot's), and from git `head`, `annotations` and which of the given spec and plan
+ * paths exist at `HEAD`. A halt asks git nothing, so a step can always record its halt.
+ *
+ * @return array{head: ?string, now: string, annotations: ?list<string>, size: DesignSize, committed: list<string>}
+ */
+function dispatch_cli_record_facts(array $before, array $given): array
+{
+    $sized = [...$before, 'artifacts' => [...($before['artifacts'] ?? []), ...array_intersect_key($given, ['spec' => true])]];
+    $facts = ['head' => null, 'now' => gmdate('Y-m-d\TH:i:s\Z'), 'annotations' => null, 'size' => dispatch_cli_design_size($sized), 'committed' => []];
+    if ($given['status'] === LegStatus::Halted->value) {
+        return $facts;
+    }
+    $worktree = rtrim((string) $before['worktree'], '/');
+    $git = dispatch_cli_git($before);
+    [$code, $head] = $git(['rev-parse', 'HEAD']);
+    $paths = array_map(
+        fn (string $path) => pipeline_relative_path($worktree, $path),
+        array_values(array_intersect_key($given, ['spec' => true, 'plan' => true])),
+    );
+
+    return [
+        ...$facts,
+        'head' => $code === 0 ? $head : null,
+        'annotations' => dispatch_cli_annotations($before, $git),
+        'committed' => array_values(array_filter($paths, fn (string $path) => dispatch_cli_exists_at($worktree, 'HEAD', $path))),
+    ];
+}
+
+/**
+ * A step's one manifest write (`../references/manifest.md` §What a leg writes): the snapshot of the step
+ * `brief` or `next` ran for, plus what the flags add, checked by the next boundary's own
+ * `pipeline_return_problem()` before it is written, and read back after.
+ */
+function dispatch_cli_record(string $manifestPath, string $leg, string $step, array $given): array
+{
+    $problem = dispatch_cli_write_problem($manifestPath);
+    if ($problem !== null) {
+        return dispatch_cli_refuse($problem);
+    }
+    $snapshotPath = manifest_files($manifestPath)['before'];
+    $before = manifest_read($snapshotPath);
+    $snapshot = dispatch_cli_snapshot_step($before);
+    if ($snapshot !== "{$leg}:{$step}") {
+        return dispatch_cli_refuse($snapshot === null
+            ? "no snapshot at {$snapshotPath}: record follows this step's brief (next in interactive)"
+            : 'the snapshot is of the ' . str_replace(':', ' ', $snapshot) . " step, not {$leg} {$step}");
+    }
+    $given = dispatch_cli_record_files($snapshotPath, $given);
+    if (is_string($given)) {
+        return dispatch_cli_refuse($given);
+    }
+    $facts = dispatch_cli_record_facts($before, $given);
+    $current = (array) manifest_read($manifestPath);
+    $candidate = pipeline_record($before, $current, $leg, $step, $given, $facts);
+    if (is_string($candidate)) {
+        return dispatch_cli_refuse($candidate);
+    }
+    $problem = pipeline_return_problem(pipeline_normalized($before), pipeline_normalized($candidate), $leg, $step, $facts['size']);
+    if ($problem !== null) {
+        return dispatch_cli_refuse("the next check would halt on this: {$problem}");
+    }
+
+    return dispatch_cli_write($manifestPath, $candidate) ?? [
+        'action' => 'recorded',
+        'leg' => $leg,
+        'step' => $step,
+        'status' => $given['status'],
+        'last_sha' => $candidate['last_sha'] ?? null,
+        'entry' => pipeline_record_entry($before, $candidate, $leg, $step),
+        'replaced' => pipeline_record_replaced($before, $current),
+    ];
+}
+
+/**
+ * `record <manifest> <leg> <step> --status <status> [flags]`; null is a usage error: a flag `record` does
+ * not know, one without a value, one given twice (`--issue-link` repeats), or no `--status`. A flag the
+ * step's row does not list is a refusal, not a usage error (`pipeline_record()`).
+ *
+ * @return array{0: string, 1: string, 2: string, 3: array<string, string|list<string>>}|null
+ */
+function dispatch_cli_record_args(array $arguments): ?array
+{
+    $positional = [];
+    $given = [];
+    while ($arguments !== []) {
+        $argument = (string) array_shift($arguments);
+        if (! str_starts_with($argument, '--')) {
+            $positional[] = $argument;
+
+            continue;
+        }
+        $name = substr($argument, 2);
+        $value = array_shift($arguments);
+        if (! in_array($name, ['status', ...PIPELINE_RECORD_FLAGS], true) || $value === null) {
+            return null;
+        }
+        if ($name === 'issue-link') {
+            $given[$name][] = (string) $value;
+
+            continue;
+        }
+        if (isset($given[$name])) {
+            return null;
+        }
+        $given[$name] = (string) $value;
+    }
+
+    return count($positional) === 3 && isset($given['status']) ? [...$positional, $given] : null;
+}
+
+function dispatch_cli_record_command(array $arguments): ?array
+{
+    $parsed = dispatch_cli_record_args($arguments);
+
+    return $parsed === null ? null : dispatch_cli_record(...$parsed);
+}
+
 $result = match ($argv[1] ?? '') {
     'kickoff' => dispatch_cli_kickoff(array_slice($argv, 2)),
     'next' => dispatch_cli_next((string) ($argv[2] ?? '')),
@@ -620,13 +830,14 @@ $result = match ($argv[1] ?? '') {
     'size' => dispatch_cli_size((string) ($argv[2] ?? '')),
     'ui' => dispatch_cli_ui((string) ($argv[2] ?? '')),
     'ci' => dispatch_cli_ci_command(array_slice($argv, 2)),
+    'record' => dispatch_cli_record_command(array_slice($argv, 2)),
     default => null,
 };
 
 if ($result === null) {
-    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--medium|--light] [--base <branch>] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] [--decision <text>]... | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> | ci <manifest> [--poll <n>] (size needs a readable manifest, ui an existing diff file)\n");
+    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--medium|--light] [--base <branch>] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] [--decision <text>]... | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> | ci <manifest> [--poll <n>] | record <manifest> <leg> <step> --status <status> [--spec <path>] [--plan <path>] [--pr <number>] [--proof <path>] [--review-file <path>] [--actions-file <path>] [--issue-link <n>=<outcome>]... [--reason <text>] (size needs a readable manifest, ui an existing diff file)\n");
     exit(1);
 }
 
 echo is_string($result) ? $result : json_encode($result, JSON_UNESCAPED_SLASHES) . "\n";
-exit(0);
+exit(is_array($result) && ($result['action'] ?? null) === 'refused' ? 1 : 0);
