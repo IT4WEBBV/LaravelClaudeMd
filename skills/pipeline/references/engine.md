@@ -498,7 +498,10 @@ and under the pipeline the step's brief *is* that caller. This is the house pref
 genuinely cannot start, that is a **hard failure** (below), not a reason to hesitate.
 
 *Worktree now, stack later:* creating the worktree is cheap (git); the stack starts lazily, only
-before `implement` — nothing is spun up merely to brainstorm.
+before `implement` — nothing is spun up merely to brainstorm. One exception: a design step that probes
+a claim whose command needs the stack brings it up then, without asking, and leaves it running for
+`implement` (§What design proves). There a stack that cannot start is no hard failure: the claim stays
+unprobed, with no `Probed:` line, and the step carries on.
 
 ## Stations — what each leg invokes
 
@@ -563,7 +566,8 @@ the committed spec cold, and the spec agent's exploration does not ride along in
   and sets `artifacts.plan`. The plan goes beside the spec (`pipeline_plan_path()`:
   `…/specs/<date>-<slug>-design.md` → `…/plans/<date>-<slug>.md`); when that file exists, from an
   earlier pass or the Bounded plan the design grew from, the step updates it in place. An answer the plan
-  needs and the spec does not give goes into the spec's `## Assumptions`, committed before the plan.
+  needs and the spec does not give goes into the spec's `## Assumptions`, committed before the plan. It
+  may probe a behavioural claim the plan relies on, not an approach (§What design proves).
 
 Both return `size`. The next design step is read from the manifest, as `review` / `resolve` is
 (`pipeline_design_step()`): `plan` when the spec is set and the plan is not, or when the newest ledger
@@ -727,13 +731,49 @@ and ran the suite there, 5–10 suite calls per design, with design peaks here o
 131–156k for viewiemedia designs that did not; `implement` then re-typed the same code. The plan became
 a diff in prose, so `review-plan` reviewed code instead of design.
 
-**The one exception is a probe.** When the choice between approaches hinges on whether one of them
-works at all, `design` answers that one question with throwaway code: a few lines run on their own,
-never the plan's code, never the suite. The question and what the probe showed go into the spec, beside
-the approach they decided (owner, #92). The probe is brainstorming's *Spike* steps used as one step
-inside an Architectural design, not a third design size: a Spike ends in a reported recommendation with
-no spec and no plan, which a run cannot finish on, so the pipeline never classifies a work item as Spike
-(§Design size). The probe's terminal state is its sentence in the spec.
+**Two exceptions, both probes.**
+
+*To choose an approach.* When the choice between approaches hinges on whether one of them works at all,
+`design` answers that one question with throwaway code: a few lines run on their own, never the plan's
+code, never the suite. The question and what the probe showed go into the spec, beside the approach they
+decided (owner, #92). The probe is brainstorming's *Spike* steps used as one step inside an
+Architectural design, not a third design size: a Spike ends in a reported recommendation with no spec
+and no plan, which a run cannot finish on, so the pipeline never classifies a work item as Spike
+(§Design size). The probe's terminal state is its sentence in the spec. `design:plan` has no such probe:
+it chooses no approach.
+
+*To check a claim* (#105). When the spec or the plan relies on what existing code *does*, which reading
+cannot show, a design step answers that one yes/no question with **one throwaway command**: a `php -r`
+or tinker one-liner (`php artisan tinker --execute="…"`), or one existing test selected by filter, run
+the repo's own way (in a project, inside the `web` container; §Dev-stack readiness). Still excluded: the
+suite, or a filter wide enough to be one; the plan's code, in a scratch copy or anywhere else; a new
+file of any kind (a probe test, a script). One command per claim: a command that fails for its own
+reasons (a typo, a wrong namespace) may be corrected, and stays one question. There is no cap on the
+claims probed in a pass. A signature, a path, a config key or a column is still confirmed by reading,
+`php -l` or grep.
+
+Why: reading confirms what code declares, not what it does. After #92, 3 of the 11 runs that reached
+`implement` came back `plan-insufficient`, against 0 of the 7 before; two of the three were a claim
+about existing behaviour that nobody ran (IT4WEBBV/TallUi#429: a bound `null` was said to throw a
+`TypeError`; IT4WEBBV/viewiemedia#2116: a `SocialFactory` row that did not hold). Each cost about
+0.9–1.3M weighted tokens: `design`, `review-plan` and `handoff` again.
+
+The record is one line beside the task that relies on the claim, or beside the claim in the spec when
+the step writes no plan:
+
+```markdown
+Probed: a bound `null` throws a `TypeError`: no, nothing is thrown (`php -r '…'`)
+```
+
+`Probed:`, the claim, what the command showed, the command. A claim with no such line was not run:
+`review-plan` reads it as assumed.
+
+A refuted claim changes what is written: the step designs or plans on what the probe showed, and the
+line records the refutation. In `design:plan`, where the refuted claim is one the spec's design rests
+on, the step corrects the spec's sentence and adds the `Probed:` line there, committed before the plan
+as an `## Assumptions` addition is; where the refutation overturns the chosen approach it returns
+`halted` with the probe as the reason, because it may not re-design. A claim the spec records as probed
+is not probed again by `design:plan`: the plan's task cites it.
 
 **A plan carries no *Verified before writing* header.** The plans that have one are records and stay as
 they are; they are not exemplars for it (§What a leg brief consists of).
@@ -824,6 +864,14 @@ does not run `gh pr ready`, and neither does `verify-ui`.
 session that answers to the owner: after the workflow returns `done` and `finish` records it, the
 invoking session runs the CI gate and then `gh pr ready <pr>` (§The CI gate). The guarantee is unchanged: nothing marks the PR ready
 before `review-pr`'s finish step has run.
+
+**The leg is not the `review-pr` skill.** `DevOps-Claude-Config` ships a skill named `review-pr`, linked
+into every session, and the leg does not use it: its review step is `/critique pr`, its resolve step the
+finish step. That skill settles the draft status itself (`gh pr ready` on a clean review) and posts its
+own review comment, which would come before the CI gate. Both `review-pr` steps' briefs therefore open
+their overrides with (`pipeline_leg_overrides()`): **"The leg's name is not a skill to invoke: do not
+invoke the `review-pr` skill (`/review-pr`), which posts its own review comment and changes the PR's
+draft state. This brief is the whole step."**
 
 This is not a preference; it is the same guarantee the navigation guardrail makes. `gates.md` states
 that *"there is no path to a non-draft PR that has not passed `review-plan` and `review-pr`"* — and
