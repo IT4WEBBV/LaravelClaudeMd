@@ -1156,8 +1156,8 @@ reason to stop. The fetch runs from PHP, as kickoff's does (`pipeline_kickoff_ba
 `refs/remotes/origin/<base>`, never the working tree, which is why `brief` may fetch where it may not
 merge (a merge run from PHP would hide the command from the permission layer and change the tree
 `brief` reads). With an unreachable remote `brief` waits on git's network timeout, once per writing
-step, and then prints the brief without the line. The review steps do not merge (a reviewer that resolves a conflict reviews its own work),
-nor does `handoff` or `verify-ui`. Both modes get the line.
+step, and then prints the brief without the line. The review steps do not merge (a reviewer that
+resolves a conflict reviews its own work), nor does `handoff` or `verify-ui`. Both modes get the line.
 
 **The line is the step's first override** and carries the command:
 `git -C <worktree> merge --no-edit origin/<base>`, run as its own command in exactly that form, because a
