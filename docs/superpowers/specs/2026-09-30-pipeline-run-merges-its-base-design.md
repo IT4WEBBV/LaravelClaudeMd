@@ -52,7 +52,8 @@ an owner answer and a relaunch (issue #124 has the cases). Three causes:
    need no permission at all, as kickoff's `worktree.create` runs behind the one kickoff call. Rejected:
    the owner decided to document an allow rule for the visible form, `CLAUDE.md` (§Remote servers) rejects
    wrapping a command so the permission layer cannot see it, and `brief` would change the tree it then
-   snapshots.
+   snapshots. The fetch approach 1 runs from PHP is not that: it moves only `refs/remotes/origin/<base>`,
+   never the working tree, and kickoff already fetches the same way (`pipeline_kickoff_base()`).
 
 ## Design
 
@@ -76,7 +77,9 @@ null for "no". `$git` runs git in the worktree, as `pipeline_git_run()` does.
 
 It returns `['base' => 'origin/<name>', 'behind' => <int>, 'shared' => list<string>]`; `shared` is empty
 in the design-only case. Any git call that fails returns null: a run that cannot tell carries on, as a
-run does today, and CI tests the merge ref.
+run does today, and CI tests the merge ref. With an unreachable remote the fetch waits on git's network
+timeout, once per writing step, before `brief` prints the brief without the line; the section says so,
+because `brief` was instant until now.
 
 **Why a design-only branch merges on any movement.** The issue's overlap rule measures the branch by its
 diff, and before `implement` that diff is the spec and the plan: files the base never touches, however
@@ -139,6 +142,11 @@ A new section in `engine.md`, after §Suite reuse. It holds the rule, the why (t
   (`gh pr view --json body` into a file, append, `gh pr edit --body-file`), never blanking it. A resolve
   step also names the merge in its entry's `actions`. Before a PR exists the merge commit is the record:
   the PR shows it among its commits once `handoff` opens it.
+- **Outside the review's and the plan's bounds.** The merge and its conflict resolutions are the base's
+  changes, not the step's. They fall outside a resolve step's *"Change nothing the review did not name"*
+  (§Resolving a review), and a file only the merge touched is no plan gap for `implement`
+  (*"Files or behaviour the plan does not name: return `plan-insufficient`"*). The section says so in one
+  sentence, so a step that reads both lines does not halt on the contradiction.
 - **No rebase and no force-push, anywhere in a run.** The section says so once, and §Scoped re-review
   already treats a rewritten history as "review everything again".
 - **What this does not catch.** A base that changed only files the branch does not touch is not merged,
@@ -149,6 +157,27 @@ A new section in `engine.md`, after §Suite reuse. It holds the rule, the why (t
 No boundary check verifies that a step merged. The state is recomputed at every writing step's brief, so
 a step that skipped the merge leaves the next one the same line; after the last step the CI gate below
 and GitHub's own conflict marker on the PR are what the owner sees.
+
+### `handoff` takes the spec and the plan from the manifest
+
+`handoff pr` finds the spec and the plan in the last two commits
+(`git log -2 --name-only --pretty=format:`, handoff `SKILL.md` A.4.a), and `engine.md` §What a Bounded
+design commits relies on that. `git log --name-only` lists no files for a merge commit, and this design
+puts one there: `design:plan` merging between the spec commit and the plan commit, or
+`review-plan:resolve` merging directly before `handoff`. The spec then comes out empty, and the skill's
+fallback (A.4.b: the newest file by date, a question on several of one date) asks, because a merged
+batch base brings the sibling runs' specs of the same date into the tree. A question in an unattended
+step is a halt.
+
+The handoff skill is the other repo's and stays as it is. The pipeline owns the `handoff:run` brief and
+already carries both paths as pointers, so that brief gets one more override line, in both modes:
+
+> The spec and the plan are `artifacts.spec` and `artifacts.plan` (Pointers above): give `handoff pr`
+> those two paths and skip its own detection from the last commits or the newest files, which a merge of
+> the base empties or crowds (engine.md §Catching up with the base).
+
+`engine.md` §Catching up with the base says why in a paragraph, and §What a Bounded design commits no
+longer claims the last two commits are how `handoff pr` finds them.
 
 ### A merge the review did not see: one round at the CI gate
 
@@ -211,8 +240,23 @@ step, like the hooks):
 with one sentence on why the form matters: a rule matches the command as typed, so `Bash(git merge:*)`
 does not cover `git -C <worktree> merge`, and a chained command is matched part by part. Pipeline
 `SKILL.md` step 3 (*"unattended runs need auto permission mode or allow rules for `git push`, `gh` and
-`docker`"*) names these rules too and points at the README. `git -C <worktree> add <file>` is left out:
-runs stage files in every step today without a denial.
+`docker`"*) names these rules too and points at the README.
+
+The README also says three things about these rules:
+
+- **What the docs settle.** A `*` in a Bash rule matches any text, spaces included, and a command that
+  matches an allow rule is decided there, before the auto-mode classifier sees it (Claude Code docs,
+  *permissions* §Wildcard patterns and §Compound commands, *permission-modes* §How the classifier
+  evaluates actions; read by `review-plan`, not by this design).
+- **The startup warning is expected.** Claude Code warns at startup about an allow rule with a `*`
+  before the subcommand, and `git -C * merge …` has that shape. The rules stay. Whether a rule that
+  draws the warning still matches is the one thing the docs leave open; if it does not, the form that
+  avoids the warning is `cd <worktree> && git merge --no-edit origin/<base>` with
+  `Bash(git merge --no-edit origin/*)`. That is another form than the one the owner settled, so the
+  README names it as the fallback and this change does not make it.
+- **`git -C <worktree> add <file>` has no rule.** No `git add` rule matches the `-C` form either: those
+  adds pass because the classifier allows them, as it does in every step that stages a file today, not
+  because a rule matches.
 
 ### `orchestrate`: the sibling note
 
@@ -231,8 +275,9 @@ half a sentence pointing at it.
 ### What does not change
 
 The manifest's shape and `pipeline_leg_writable_keys()`; the workflow script; the routing tables and
-statuses; §Scoped re-review's scope; `handoff`, `work-on` and `review-pr` (the other repo's skills);
-`hooks/git-freshness.sh`, which keeps warning and changes nothing on a working branch.
+statuses; §Scoped re-review's scope; `handoff`, `work-on` and `review-pr` (the other repo's skills: only
+the pipeline's own `handoff:run` brief gains a line, above); `hooks/git-freshness.sh`, which keeps
+warning and changes nothing on a working branch.
 
 ## Tests
 
@@ -248,7 +293,8 @@ Test-first, in `implement`.
 - **`BriefTest.php`**: the line is the first override on each of the six writing steps and absent on
   `review-plan:review`, `review-pr:review`, `handoff:run` and `verify-ui:run`; it carries
   `git -C <worktree> merge --no-edit origin/<base>` literally; the design-only wording; no line without a
-  git runner or with a null state.
+  git runner or with a null state; `handoff:run`'s brief names `artifacts.spec` and `artifacts.plan` as
+  the spec and the plan, in both modes.
 - **`ReviewScopeTest.php`**: still green after `pipeline_base_ref()` is extracted (no new case).
 - **`CiTest.php`**: unreviewed files answer `fix` with the merge decision before the head or the checks
   are read (also with a null view); with the round spent the answer is what CI gives; no files, no change;
@@ -286,7 +332,8 @@ therefore use `commit --no-edit`, not the `merge --continue` the issue suggests.
 - `CLAUDE.md` §Git Workflow and §Remote servers; `README.md` machine setup; `hooks/git-freshness.sh`
   (its warnings; it changes only local `main`/`master`).
 - `~/.claude/skills/handoff/SKILL.md`: its PR update prepends to the existing body, so a `## Base merges`
-  section survives a re-run of `handoff pr`.
+  section survives a re-run of `handoff pr`; and, after `review-plan`, its A.4 (how it finds the spec and
+  the plan).
 
 ## Out of scope
 
@@ -320,9 +367,11 @@ Each is a question the brainstorm would have put to the owner, with the answer a
 7. **Is a step that was told to merge and did not a halt?** No. The next writing step gets the line
    again; there is no boundary check for it.
 8. **Where does the record go before a PR exists?** Nowhere but the merge commit.
-9. **Do the allow rules stop the auto-mode classifier's denial?** Assumed from the issue, not verified
-   here: a matching allow rule is evaluated before the classifier, and `*` matches inside a Bash rule.
-   The first batch after the merge shows it; a denial still halts the step with the command named.
+9. **Do the allow rules stop the auto-mode classifier's denial?** Per the Claude Code docs, yes: a
+   matching allow rule is decided before the classifier, and `*` matches any text inside a Bash rule
+   (§Permissions names the pages). Still assumed: that a rule which draws the startup warning for a `*`
+   before the subcommand keeps matching. The first batch after the merge shows it; a denial still halts
+   the step with the command named, which is today's behaviour.
 10. **Where do the allow rules go?** Documented in `README.md` for `~/.claude/settings.json`; the run
     writes no settings file.
 11. **Is `decisions` the place for orchestrate's sibling note?** Yes, marked as a note: the CI gate's

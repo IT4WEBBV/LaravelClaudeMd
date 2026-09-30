@@ -5,7 +5,7 @@
 **Goal:** A `/pipeline` run keeps its own branch current with its base by a plain merge the brief orders, instead of halting on "behind", and a merge the last review did not see gets one review round at the CI gate (#124).
 
 **Architecture:**
-- `skills/pipeline/checks/brief.php` computes the base state (`pipeline_base_state()`: fetch, compare, overlap) on the six steps that write to the branch and puts one override line first in the brief, carrying the literal `git -C <worktree> merge --no-edit origin/<base>` command. The step only runs it and resolves conflicts.
+- `skills/pipeline/checks/brief.php` computes the base state (`pipeline_base_state()`: fetch, compare, overlap) on the six steps that write to the branch and puts one override line first in the brief, carrying the literal `git -C <worktree> merge --no-edit origin/<base>` command. The step only runs it and resolves conflicts. The `handoff:run` brief names `artifacts.spec` and `artifacts.plan`, because a merge commit hides them from `handoff pr`'s own detection.
 - `skills/pipeline/checks/ci.php` answers `fix` with verdict `merge`, once per run, when `dispatch_cli.php ci` hands it the files a merge since the last completed review met the branch in (`pipeline_review_scope()`'s `files`, `autoflow` only).
 - The rule and its why live in a new `engine.md` section, §Catching up with the base. `CLAUDE.md` gets the exception to the stale-checkout rule, `README.md` the allow rules, `orchestrate` the sibling note.
 
@@ -37,11 +37,11 @@
 
 ## File Structure
 
-- Modify `skills/pipeline/checks/brief.php`: `PIPELINE_CATCH_UP_STEPS`, `pipeline_base_ref()`, `pipeline_design_files()`, `pipeline_base_state()`, `pipeline_catch_up_line()`; `pipeline_brief()` and `pipeline_brief_overrides()` take the state; `pipeline_review_scope()` calls `pipeline_base_ref()`.
+- Modify `skills/pipeline/checks/brief.php`: `PIPELINE_CATCH_UP_STEPS`, `pipeline_base_ref()`, `pipeline_design_files()`, `pipeline_base_state()`, `pipeline_catch_up_line()`; `pipeline_brief()` and `pipeline_brief_overrides()` take the state; `pipeline_review_scope()` calls `pipeline_base_ref()`; `pipeline_leg_overrides()` gets one more `handoff:run` line.
 - Modify `skills/pipeline/checks/ci.php`: `PIPELINE_MERGE_UNREVIEWED`, `pipeline_ci_unreviewed()`, `pipeline_merge_rounds()`, `pipeline_decisions_starting()`; `pipeline_ci_answer()` takes `$unreviewed`.
 - Modify `skills/pipeline/checks/dispatch_cli.php`: `dispatch_cli_unreviewed()`, called by `dispatch_cli_ci()`.
 - Create `skills/pipeline/checks/tests/BaseStateTest.php`. Modify `BriefTest.php`, `CiTest.php`, `DispatchCliTest.php`, `LockStepTest.php`.
-- Modify `skills/pipeline/references/engine.md` (new section; §What a leg brief consists of; §The CI gate), `skills/pipeline/references/manifest.md` (the `decisions` row), `skills/pipeline/SKILL.md` (steps 3 and 5).
+- Modify `skills/pipeline/references/engine.md` (new section; §What a leg brief consists of; §What a Bounded design commits; §The CI gate), `skills/pipeline/references/manifest.md` (the `decisions` row), `skills/pipeline/SKILL.md` (steps 3 and 5).
 - Modify `CLAUDE.md`, `README.md`, `skills/orchestrate/SKILL.md`, `skills/orchestrate/references/commands.md`.
 
 Test helpers are shared across test files, as they already are: `suite_repo()` (`SuiteTest.php`), `rereview_repo()`, `rereview_commit()`, `rereview_main_moves()`, `rereview_merge()`, `rereview_entry()` (`ReviewScopeTest.php`), `brief_manifest()` (`BriefTest.php`), `dispatch_fixture()`, `dispatch_cli()` (`DispatchCliTest.php`). `ReviewScopeTest`'s repos have no `origin` remote (they set `origin/main` with `update-ref`), so the fetch fails there and the base state is null: every existing test on those repos keeps its result.
@@ -268,16 +268,19 @@ function pipeline_base_state(array $manifest, callable $git): ?array
     if ($git(['fetch', '-q', 'origin', "+refs/heads/{$name}:refs/remotes/origin/{$name}"])[0] !== 0) {
         return null;
     }
-    $behind = pipeline_git_lines($git, ['rev-list', '--count', "HEAD..{$base}"]);
+    $behind = (int) (pipeline_git_lines($git, ['rev-list', '--count', "HEAD..{$base}"])[0] ?? 0);
+    if ($behind === 0) {
+        return null;
+    }
     $ours = pipeline_git_lines($git, ['diff', '--name-only', '--no-renames', "{$base}...HEAD"]);
     $theirs = pipeline_git_lines($git, ['diff', '--name-only', '--no-renames', "HEAD...{$base}"]);
-    if ($behind === null || $ours === null || $theirs === null || (int) ($behind[0] ?? 0) === 0) {
+    if ($ours === null || $theirs === null) {
         return null;
     }
     $own = array_diff($ours, pipeline_design_files($manifest));
     $shared = array_values(array_intersect($own, $theirs));
 
-    return $own === [] || $shared !== [] ? ['base' => $base, 'behind' => (int) $behind[0], 'shared' => $shared] : null;
+    return $own === [] || $shared !== [] ? ['base' => $base, 'behind' => $behind, 'shared' => $shared] : null;
 }
 ```
 
@@ -298,8 +301,8 @@ git commit -m "feat(pipeline): the base state says whether a step must merge its
 ### Task 2: the brief line, and the section it names
 
 **Files:**
-- Modify: `skills/pipeline/checks/brief.php` (`pipeline_brief()`, `pipeline_brief_overrides()`, new `pipeline_catch_up_line()`)
-- Modify: `skills/pipeline/references/engine.md` (new section before `## Scoped re-review`; one bullet in §What a leg brief consists of)
+- Modify: `skills/pipeline/checks/brief.php` (`pipeline_brief()`, `pipeline_brief_overrides()`, new `pipeline_catch_up_line()`, the `handoff:run` overrides in `pipeline_leg_overrides()`)
+- Modify: `skills/pipeline/references/engine.md` (new section before `## Scoped re-review`; one bullet in §What a leg brief consists of; the first sentence of §What a Bounded design commits)
 - Test: `skills/pipeline/checks/tests/BriefTest.php`, `skills/pipeline/checks/tests/LockStepTest.php`, `skills/pipeline/checks/tests/DispatchCliTest.php`
 
 **Interfaces:**
@@ -308,6 +311,7 @@ git commit -m "feat(pipeline): the base state says whether a step must merge its
   - `pipeline_catch_up_line(array $manifest, array $state): string`.
   - `pipeline_brief_overrides(array $manifest, string $leg, string $step, ?array $scope = null, ?array $catchUp = null): string`.
   - `pipeline_brief()` keeps its signature.
+  - `pipeline_leg_overrides()`'s `handoff:run` list: a second line, naming `artifacts.spec` and `artifacts.plan`.
 
 - [ ] **Step 1: Write the failing tests.** In `BriefTest.php`, replace the last test of the file (*asks git only on review-pr's review step, and briefs the whole PR when git cannot scope it*) with
 
@@ -376,6 +380,11 @@ it('words the design-only case and a single commit', function () {
     expect(pipeline_brief(brief_manifest('design', ['mode' => 'autoflow']), 'design', '/tmp/m.json', 'spec', brief_git_behind(['docs/spec.md'])))
         ->toContain('is 27 commits ahead and this branch holds only its design.');
 });
+
+it('names the spec and the plan to handoff from the manifest, in both modes', function (string $mode) {
+    expect(pipeline_brief(brief_manifest('handoff', ['mode' => $mode]), 'handoff', '/tmp/m.json', 'run'))
+        ->toContain('- The spec and the plan are `artifacts.spec` and `artifacts.plan` (Pointers above): give `handoff pr` those two paths and skip its own detection from the last commits or the newest files, which a merge of the base empties or crowds (engine.md §Catching up with the base).');
+})->with(['autoflow', 'interactive']);
 ```
 
 In `LockStepTest.php`, the test *keeps every engine.md section a brief names*, replace
@@ -426,8 +435,8 @@ it('prints the catch-up line first in the brief of a writing step behind its bas
 
 - [ ] **Step 2: Run them to see them fail**
 
-Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='asks git only on the steps|catch-up|engine.md section a brief names|design-only case'`
-Expected: FAIL. *asks git only on the steps that need it* on `toHaveCount(1)` for `review-pr resolve` and `implement` (0 calls today); *puts the catch-up line first* on `toContain` for all six; *words the design-only case* and *keeps every engine.md section a brief names* with `Call to undefined function pipeline_catch_up_line()`; *prints the catch-up line first in the brief of a writing step* on its first `toContain`. *gives no catch-up line to a step that does not write* passes already.
+Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter='asks git only on the steps|catch-up|engine.md section a brief names|design-only case|names the spec and the plan to handoff'`
+Expected: FAIL. *names the spec and the plan to handoff* on its `toContain`, in both modes; *asks git only on the steps that need it* on `toHaveCount(1)` for `review-pr resolve` and `implement` (0 calls today); *puts the catch-up line first* on `toContain` for all six; *words the design-only case* and *keeps every engine.md section a brief names* with `Call to undefined function pipeline_catch_up_line()`; *prints the catch-up line first in the brief of a writing step* on its first `toContain`. *gives no catch-up line to a step that does not write* passes already.
 
 - [ ] **Step 3: The line.** In `brief.php`, directly above `pipeline_review_scope_line()`'s docblock:
 
@@ -512,6 +521,23 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step, ?a
     ];
 ```
 
+In `pipeline_leg_overrides()`, replace
+
+```php
+        'handoff:run' => [
+            'Invoke `handoff pr`. The PR opens draft and references the issue without a closing keyword (engine.md §Closing links). Set `artifacts.pr`.',
+        ],
+```
+
+with
+
+```php
+        'handoff:run' => [
+            'Invoke `handoff pr`. The PR opens draft and references the issue without a closing keyword (engine.md §Closing links). Set `artifacts.pr`.',
+            'The spec and the plan are `artifacts.spec` and `artifacts.plan` (Pointers above): give `handoff pr` those two paths and skip its own detection from the last commits or the newest files, which a merge of the base empties or crowds (engine.md §Catching up with the base).',
+        ],
+```
+
 - [ ] **Step 5: engine.md, the section.** In `skills/pipeline/references/engine.md`, insert directly above the line `## Scoped re-review — a review of the PR after a completed one reads what changed since`:
 
 ```markdown
@@ -535,7 +561,11 @@ fetches the base (`origin/<manifest base>`, else `origin/HEAD`) and compares:
 | holds nothing, or only its spec and plan | moved at all | the line: a design is written by reading the code, so it reads current code |
 
 Any git call that fails gives no line: a run that cannot tell carries on, and an offline fetch is no
-reason to stop. The review steps do not merge (a reviewer that resolves a conflict reviews its own work),
+reason to stop. The fetch runs from PHP, as kickoff's does (`pipeline_kickoff_base()`): it moves only
+`refs/remotes/origin/<base>`, never the working tree, which is why `brief` may fetch where it may not
+merge (a merge run from PHP would hide the command from the permission layer and change the tree
+`brief` reads). With an unreachable remote `brief` waits on git's network timeout, once per writing
+step, and then prints the brief without the line. The review steps do not merge (a reviewer that resolves a conflict reviews its own work),
 nor does `handoff` or `verify-ui`. Both modes get the line.
 
 **The line is the step's first override** and carries the command:
@@ -544,6 +574,10 @@ permission rule matches a command as typed (`README.md`, *Permissions for unatte
 command is a halt naming it, never a reshaped command.
 
 - **The merge comes first**, on the clean tree the previous step left, then the step's own work.
+- **Outside the review's and the plan's bounds.** The merge and its conflict resolutions are the
+  base's changes, not the step's: they fall outside a resolve step's *"Change nothing the review did
+  not name"* (§Resolving a review), and a file only the merge touched is no plan gap and no
+  `plan-insufficient` for `implement`.
 - **Conflicts.** Resolve each file keeping both sides' intent, leave no conflict marker behind,
   `git -C <worktree> add <file>`, and conclude with `git -C <worktree> commit --no-edit`
   (`git merge --continue` needs an editor, which a step does not have). Where keeping both sides is a
@@ -569,6 +603,13 @@ brief, so a step that skipped the merge leaves the next one the same line. A mer
 a design step is reviewed with the rest of the diff; one made by the finish step gets its own review
 round at the gate (§The CI gate, *A merge the review did not see*).
 
+**`handoff` takes the spec and the plan from the manifest.** `handoff pr` finds them in the last two
+commits, and `git log --name-only` lists no files for a merge commit: a merge by `design:plan` between
+the spec commit and the plan commit, or by `review-plan`'s resolve step directly before `handoff`,
+leaves its spec empty. Its fallback takes the newest file by date and asks on several of one date,
+which a merged batch base supplies, and a question in an unattended step is a halt. So `handoff:run`'s
+brief names `artifacts.spec` and `artifacts.plan` and tells the step to skip the detection.
+
 **What this does not catch.** A base that changed only files the branch does not touch is not merged,
 even where the branch's code depends on them: the blind spot §Scoped re-review names, covered by CI on
 the merge ref. A design grown after code exists (a plan gap) is measured by the branch's own files, not
@@ -592,10 +633,25 @@ with
   behind it (§Catching up with the base);
 ```
 
+In §What a Bounded design commits, replace
+
+```markdown
+Two commits, spec then plan, so `handoff pr` finds both in the last two commits exactly as it does
+for an Architectural design. They are named as `writing-plans` names them, the spec at
+```
+
+with
+
+```markdown
+Two commits, spec then plan, as an Architectural design makes them. `handoff`'s brief names both from
+the manifest, so a merge commit between or after them hides neither (§Catching up with the base).
+They are named as `writing-plans` names them, the spec at
+```
+
 - [ ] **Step 6: Run the suite**
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests`
-Expected: PASS, the whole suite (the four filtered tests of Step 2 included).
+Expected: PASS, the whole suite (the filtered tests of Step 2 included).
 
 - [ ] **Step 7: Commit**
 
@@ -963,9 +1019,21 @@ step like the hooks:
 
 The form matters: a rule matches the command as typed, so a project's `Bash(git merge:*)` does not cover
 `git -C <worktree> merge`, and a chained command is matched part by part. The brief prints these
-commands in exactly this form and tells the step to run each as its own command. Whether an allow rule
-also keeps the auto-mode classifier from denying the merge is assumed, not measured: the first batch
-after this lands shows it, and a denial still halts the step with the command named.
+commands in exactly this form and tells the step to run each as its own command. A `*` in a Bash rule
+matches any text, spaces included, and a command that matches an allow rule is decided there, before the
+auto-mode classifier sees it (Claude Code docs, *permissions* §Wildcard patterns and *permission-modes*
+§How the classifier evaluates actions).
+
+Claude Code warns at startup about an allow rule with a `*` before the subcommand, and
+`git -C * merge …` has that shape: the warning is expected, and the rules stay. What the docs leave open
+is whether a rule that draws the warning still matches; the first batch after this lands shows it, and a
+denial still halts the step with the command named. If the rules turn out inert, the form that avoids
+the warning is `cd <worktree> && git merge --no-edit origin/<base>` with
+`Bash(git merge --no-edit origin/*)`. That is a change of the brief line (`pipeline_catch_up_line()`)
+and of these rules together, not a rule to swap by hand.
+
+`git -C <worktree> add <file>` has no rule here: no `git add` rule matches the `-C` form either, and
+those adds pass because the classifier allows them, as it does in every step that stages a file.
 ````
 
 - [ ] **Step 3: pipeline `SKILL.md`, step 3.** Replace
@@ -1049,6 +1117,7 @@ git commit -m "docs: a pipeline run's branch is the exception to the stale-check
 | Which steps catch up (`PIPELINE_CATCH_UP_STEPS`), both modes | 1 (constant), 2 (brief, `next`) |
 | The brief line, first override, literal command, design-only wording | 2 |
 | What the step does and records (engine.md §Catching up with the base) | 2 |
+| `handoff` takes the spec and the plan from the manifest (brief line, `BriefTest`, engine.md) | 2 |
 | A merge the review did not see: one round at the CI gate, `autoflow` only, once per run | 3 |
 | `CLAUDE.md` exception | 4 |
 | Permissions: README allow rules, pipeline `SKILL.md` step 3 | 4 |
