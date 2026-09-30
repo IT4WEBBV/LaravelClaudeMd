@@ -378,7 +378,7 @@ it('prints the brief for the step it is given and records that step as running',
     expect($result['stdout'])
         ->toContain('`review-plan` leg, `resolve` step')
         ->toContain('the open review: `gate_ledger[0]`')
-        ->toContain('as your structured result');
+        ->toContain('as your structured `{status, reason}`');
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-plan', 'status' => 'pending']);
 });
 

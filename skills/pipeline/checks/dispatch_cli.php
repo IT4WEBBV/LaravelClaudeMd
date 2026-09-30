@@ -19,8 +19,8 @@
  * (`Bounded` / `Architectural`, `true` / `false`); every other answer, and a `brief` that halts, is
  * one JSON line. Exits 0 on every decision, a halt included; `record` and `suite` exit 1 on a
  * refusal, which is no decision about the run and leaves the manifest untouched, so a failed write cannot
- * be missed in an `&&` chain. Exits 1 on a usage error (a `kickoff`, a `launch`, a `brief` or a `ci` it cannot parse
- * included), and when `size` has no readable manifest or `ui` no diff file.
+ * be missed in an `&&` chain. Exits 1 on a usage error (a `kickoff`, a `launch`, a `brief` or a `ci` it
+ * cannot parse included), and when `size` has no readable manifest or `ui` no diff file.
  */
 
 require_once __DIR__ . '/triggers.php';
