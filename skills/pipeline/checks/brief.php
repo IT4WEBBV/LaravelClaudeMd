@@ -207,7 +207,7 @@ function pipeline_brief_overrides(array $manifest, string $leg, string $step, ?a
     if ($leg === 'design' && pipeline_design_grows($ledger)) {
         $lines[] = pipeline_grow_form_line($step);
     }
-    if ($leg === 'design' && pipeline_is_plan_gap(end($ledger) ?: [])) {
+    if ($leg === 'design' && pipeline_is_plan_return(end($ledger) ?: [])) {
         $lines[] = 'Plan gap: extend the plan (and the spec where it must say more) to cover the entry\'s `reason`; describe what is already built as state, do not re-design it (engine.md §Design size). Leave that entry as it is, with no `actions`: what you did goes in the spec, the plan and the reason you return.';
     }
     if ($leg === 'review-pr' && pipeline_ci_rounds($manifest) > 0) {
