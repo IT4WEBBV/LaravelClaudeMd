@@ -333,3 +333,21 @@ Each is a question the brainstorm would have put to the owner, with the answer a
     number. Merged siblings are not listed: the run is cut from a base that holds them.
 13. **Interactive mode too?** The brief line and the `CLAUDE.md` exception apply to any `/pipeline` run.
     The gate's merge round is `autoflow`'s alone: in `interactive` the human is at the finish step.
+14. **What when `artifacts.spec` or `artifacts.plan` is recorded as an absolute path?** (asked by the
+    plan) The worktree prefix is stripped before the path is taken out of the branch's own files, as
+    `dispatch_cli_invariant_problem()` does; git prints paths relative to the worktree.
+15. **What does a branch without a commit of its own record?** (asked by the plan) Nothing:
+    `git merge --no-edit` fast-forwards it, there is no merge commit and no conflict, and no PR exists
+    yet. The record rules apply to a merge that made a commit.
+16. **Which sha does the unreviewed-merge decision name?** (asked by the plan) The worktree's `HEAD`, the
+    one `dispatch_cli_ci()` already reads: the gate answers before it looks at the PR, so GitHub's head is
+    not known to it yet, and the relaunch reviews the worktree.
+17. **How does the line word one commit?** (asked by the plan) `1 commit ahead`, otherwise
+    `<n> commits ahead`.
+18. **May the plan change `BriefTest`'s *asks git only on review-pr's review step*?** (asked by the plan)
+    Yes: that test counts git calls per step, and a writing step now asks git for the base state. Its
+    counts change (one call where git fails at once); the review steps' counts do not.
+19. **Do the base-state tests need a real `origin`?** (asked by the plan) Yes. `ReviewScopeTest`'s repos
+    fake `origin/main` with `update-ref` and have no remote, so the fetch fails there and the state is
+    null: existing tests keep passing unchanged, and `BaseStateTest` builds a bare `origin` with two
+    clones so the fetch is exercised.
