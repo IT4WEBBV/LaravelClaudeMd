@@ -137,7 +137,9 @@ launched the run, with its reason.
   prints the brief. It prints a halt instead when the return does not hold, or when the ledger does not
   support the step (`resolve` with no open review, `review` with one already open, the design step the
   manifest does not call for). The step records its results with `dispatch_cli.php record`
-  (`manifest.md` §What a leg writes), then returns the status it recorded as `{status, reason}`;
+  (`manifest.md` §What a leg writes) — `handoff:run` excepted, whose command `dispatch_cli.php handoff`
+  does the step and records `continued` or `halted` itself (§Stations) —, then returns the status it
+  recorded as `{status, reason}`;
   `implement` also returns `ui`, copied from `dispatch_cli.php ui <diff>` (`pipeline_triggers()` over
   its diff), and each `design` step returns `size`, copied from `dispatch_cli.php size <manifest>`
   (`DesignSize::fromSpec()` over the committed spec). Both are read-only and run after `record`: `size`
@@ -224,7 +226,7 @@ change.
 | `design:plan` | opus high | opus medium | opus medium | As `design:spec`. The plan step runs only on an Architectural design, so on `full`; the `medium` and `light` entries keep every step in every tier. |
 | `review-plan:review` | fable high | fable medium | opus medium | Full: independent of the author, Fable's documented starting point; xhigh added nothing measurable in two runs, and `low` answers from memory more. Medium: a short spec is flatter work. Light: spares Fable quota; the same model as the author, accepted on a ~15-line spec (owner decision), and the PR review stays independent. |
 | `review-plan:resolve` | opus high | opus medium | sonnet medium | Full: it decides which findings to reject. Medium and light: few findings on a short spec. |
-| `handoff:run` | sonnet low | sonnet low | sonnet low | Near-mechanical on every tier. Haiku 4.5 has no effort setting and writes `implement`'s prompt: rejected. |
+| `handoff:run` | sonnet low | sonnet low | sonnet low | Runs one command (`dispatch_cli.php handoff`) and returns the status it printed. Haiku 4.5 has no effort setting: rejected. |
 | `implement:run` | opus high | opus high | sonnet high | Medium keeps high: TDD and the escalation check after every commit happen here, and its time goes to CI and Pint, not the model. Light: a tiny change; a `verify-ui` or `review-pr` loop-back still reruns it on the loop-back entry. |
 | `verify-ui:run` | sonnet high | sonnet medium | sonnet medium | Mostly browser operation; full stays high because it is a gate that can send the run back to `implement`. Medium and light: few states to capture, and no lower, since it is a gate. |
 | `review-pr:review` | fable high | fable high | opus high | The last gate before a human merges: high on every tier. Light: on the first round Opus is independent of Sonnet's code, and it spares Fable quota. |
@@ -314,7 +316,7 @@ to clean up.
 
 **Then the board — claim the item before the slow steps.** Board identifiers are **not** in this
 skill; they live in the `## Board` section of the repo's `.claude/work-on.config.md`, the same
-single source `work-on` and `handoff` read. Parse it with `pipeline_repo_board()`
+single source `work-on` and the pipeline's `handoff` command read. Parse it with `pipeline_repo_board()`
 (`../checks/board.php`), which returns the same three states, for the same reason, as
 `pipeline_repo_checks()`:
 
@@ -393,12 +395,9 @@ this one is per run.
   repo-level `--base` gets a second one; the script decides which wins, and the check below catches it.
 - **After the create** kickoff checks that the worktree's `HEAD` equals `origin/<base>`: a script that
   ignored the flag halts there, naming the worktree it left, rather than handing every leg a branch cut
-  from the wrong code. Then it sets `git config branch.<branch>.gh-merge-base <base>`, so `handoff`'s
-  `gh pr create`, which passes no `--base`, opens the PR into the base (gh reads that config when
-  `--base` is absent), and writes `base` into the first manifest. `handoff`'s brief then has it check the
-  PR's `baseRefName` and retarget with `gh pr edit --base` when it differs: a gh that ignores the config,
-  or a PR that already existed, would otherwise open into the default branch and look healthy on every
-  leg after it.
+  from the wrong code. Then it writes `base` into the first manifest. `dispatch_cli.php handoff` opens the
+  PR with `--base <base>` and retargets a PR the branch already had (`gh pr edit --base`, §Stations):
+  kickoff sets no `gh-merge-base` config, and no brief asks a step to check the PR's base.
 - **Every leg after it** reads the base from its brief (`pipeline_brief_state()`), and every
   `origin/<base>` diff, `run_audit.php`'s diff and the CI gate's fix round use it (§The loop). `launch`
   needs no flag for it: the manifest carries it, and a leg that changes `base` is a return that does not
@@ -507,17 +506,33 @@ unprobed, with no `Probed:` line, and the step carries on.
 
 ## Stations — what each leg invokes
 
-The pipeline **invokes** the existing skills; it never reimplements them. Leg names are exactly
-`pipeline_legs()`: `design, review-plan, handoff, implement, verify-ui, review-pr`.
+The pipeline **invokes** the existing skills; it never reimplements their judgment. One leg is no skill:
+`handoff` is a command, `dispatch_cli.php handoff` (`../checks/handoff.php`). Pushing a branch and opening
+a draft PR is mechanical, and the `handoff` skill, written for a person who closes a plan cycle, asks a
+question and posts a prompt that a run cannot use.
+Leg names are exactly `pipeline_legs()`: `design, review-plan, handoff, implement, verify-ui, review-pr`.
 
 | Leg | Invokes | Interactive form | Autonomous form | Manifest I/O |
 |---|---|---|---|---|
 | **design** *(compound)* | `superpowers:brainstorming`, then `superpowers:writing-plans` for an **Architectural** design (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it); for a **Bounded** design, brainstorming's Bounded path with no `writing-plans` (§Design size) | human drives the brainstorm dialogue; if brainstorming classifies Bounded without `medium` or `light`, the pipeline asks (§Design size); re-invoke `/pipeline` to continue | two steps (`pipeline_steps()`): a **spec** agent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions; a fresh **plan** agent reads the committed spec cold and writes the plan. A Bounded design is the spec step alone (§Design size, *`autoflow`'s design*). The brief says which path is permitted: Bounded only with `medium` or `light`, otherwise Architectural | writes spec + plan pointers; the size is the spec's `**Design size:**` header, never stored |
 | **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | two steps (`pipeline_step`): a **review** agent invokes `/critique plan` (in `autoflow` it applies `/critique plan`'s procedure itself: it cannot start a reviewer) and appends the review verbatim as an open `plan-approval` entry; a fresh **resolve** agent acts on it (§Resolving a review) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
-| **handoff** | `handoff pr` | — | pushes the branch, opens the **draft PR**; its PR comment is a **projection** of the manifest, not a second source of truth. References the issue **without a closing keyword** (§Closing links) — this PR carries no implementation yet | writes the PR# pointer |
+| **handoff** | `dispatch_cli.php handoff <manifest>` | the same command, run by the dispatched agent | pushes the branch (never forced), opens the **draft PR** or adopts the open draft the branch already has, with `--base` on a run on a base; English title `Implement: <the spec's heading> (issue: #N)` and a body that names the spec and the plan; references the issue **without a closing keyword**, `Part of #N` (§Closing links) — this PR carries no implementation yet; sets the board Component where the repo's `## Board` names a `component-default`; posts no comment | the command records the PR# pointer itself, through `record`'s code |
 | **implement** | `work-on`'s logic **in the current worktree** (no second slot) — read the item, validate against the code, execute the plan **test-first, running the suite and the repo's `static-analysis` after each step and its `format` once before the push** (§Mechanical checks), set closing-issue links (§Closing links — `review-pr` reconciles them before the PR goes ready). **Leaves the PR draft** (below); in `autoflow` it does not wait on CI (§The CI gate). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, writes the run's page to the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — the payload carries `nameWithOwner`, `pr` and `issue` so the page can link back to both — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
 | **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | a **review** agent invokes `/critique pr` (in `autoflow` it applies `/critique pr`'s procedure itself) and appends an open `pr-review` entry; the **finish** step (its resolve step) acts on it, runs the suite unless reused, reconciles closing links (§Closing links), rewrites the proof page, runs `gh pr ready`, and opens the page last (§The proof store). In `autoflow` the finish step leaves the PR draft, and the invoking session runs the CI gate and `gh pr ready` after `finish` (§The CI gate, §Who takes the PR out of draft) | feeds the PR-review gate; writes `issue_links` onto the entry; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
+
+**`handoff` in order.** `record`'s own checks first (the manifest, this step's snapshot), so a refusal
+pushes nothing. Then, read-only: `artifacts.spec` and `artifacts.plan` exist at `HEAD`, the worktree is on
+the run's branch, the `## Board` section is not `invalid`, and the PR lookup — `artifacts.pr` when set,
+else `gh pr list --head <branch> --state open`. A PR that is not an open draft, one on another branch,
+more than one, or a gh that cannot answer is a halt, still with nothing pushed. Then the push, then
+`gh pr create --draft --head <branch> [--base <base>]` read back through the same listing, or, on an
+existing PR, `gh pr edit --base` when its base differs and `gh pr edit --body` when its body lacks the
+spec, the plan or the issue: a body is only added to and a title never changed. The Component is two
+idempotent board calls, and its failure is a note. The command records `continued` with the PR, or
+`halted` with the reason, through `record`'s code; a record refused once the PR is open names the PR, and
+the next run adopts it instead of opening a second one (#118). Every outward act is idempotent: after any
+failure, running the step again is the repair.
 
 ## Design size — Bounded or Architectural
 
@@ -586,7 +601,7 @@ there, and `brief` refuses the other step. On a loop-back the script reruns:
 
 ### What a Bounded design commits
 
-Two commits, spec then plan, as an Architectural design makes them. `handoff`'s brief names both from
+Two commits, spec then plan, as an Architectural design makes them. `handoff` reads both from
 the manifest, so a merge commit between or after them hides neither (§Catching up with the base).
 They are named as `writing-plans` names them, the spec at
 `docs/superpowers/specs/<date>-<slug>-design.md` and the plan beside it at
@@ -674,7 +689,7 @@ php -r 'require $argv[1] . "/triggers.php"; require $argv[1] . "/design_size.php
    In `autoflow` the spec step grows the spec and the plan step adds the remaining steps
    (*`autoflow`'s design*).
 3. `review-plan` re-runs over the grown spec and plan **plus `git diff origin/<base>...HEAD`**.
-4. `handoff pr` re-runs; it updates the existing PR, so the resume prompt matches the grown plan.
+4. `handoff` re-runs: it pushes and keeps the existing PR.
 5. `implement` continues.
 
 **Gates count again.** `$doneLegs` is `pipeline_done_legs(gate_ledger)`, which ignores every gate pass
@@ -708,8 +723,8 @@ of the plan approval**: the plan passed `review-plan` and turned out not to cove
 3. `design` extends the plan, and the spec where it must say more, to cover the entry's `reason`;
    what is already built is described as state, not re-designed. It leaves the entry unchanged, with
    no `actions`: what it did goes in the spec, the plan and the reason it returns (#104: a design that
-   recorded its answer on the entry halted the run at the next brief). Then `review-plan`, `handoff pr`
-   (updating the existing PR) and `implement` run again, as after an escalation. In `autoflow` only
+   recorded its answer on the entry halted the run at the next brief). Then `review-plan`, `handoff` (it
+   pushes and keeps the existing PR) and `implement` run again, as after an escalation. In `autoflow` only
    `design:plan` reruns (*`autoflow`'s design*). `review-plan:review`'s own `plan-insufficient` is
    answered the same way, and its `design` brief carries the same plan-gap line: it is a plan return
    (`pipeline_is_plan_return()`), though no plan gap for `pipeline_done_legs()` or `run_audit.php` (#113).
@@ -886,9 +901,10 @@ is exactly the outcome the guardrail exists to prevent.
 
 **The trap is inherited, so state it explicitly at the leg brief.** `work-on` marks ready at the end
 of its run, and that is correct *standalone* — nothing follows it there. Under the pipeline something
-does. The same applies to the prompt `handoff pr` writes into the PR comment: its template ends with
-*"implementation fully done → take the PR out of draft"*, which is right for a human resuming the work
-alone and **wrong** under the pipeline. The `implement` brief carries it verbatim
+does. The same applies to the prompt comment a PR opened before `dispatch_cli.php handoff` existed may
+carry, from the `handoff` skill: its template ends with *"implementation fully done → take the PR out of
+draft"*, which is right for a human resuming the work alone and **wrong** under the pipeline. The command
+posts no comment. The `implement` brief carries it verbatim
 (`pipeline_leg_overrides()`): **"Leave the PR draft; this overrides any mark-ready instruction in the
 plan, the PR comment, or `work-on`'s own logic."**
 
@@ -1052,8 +1068,10 @@ and the dispatch prompt is one line naming that file; in `autoflow` the step pri
   step that writes to the branch, first among them the order to merge the base when the branch fell
   behind it (§Catching up with the base);
 - **the return contract**: the literal `record` command for each status the step may return, with the
-  manifest's full path, printed from `pipeline_record_table()` (`../checks/record.php`); the snapshot
-  beside the manifest is named so that no step mistakes it for the manifest;
+  manifest's full path, printed from `pipeline_record_table()` (`../checks/record.php`), with
+  `handoff:run`'s own command in the place of its `record --status continued`
+  (`PIPELINE_STEP_COMMANDS`); the snapshot beside the manifest is named so that no step mistakes it for
+  the manifest;
 - **nothing a station does not ask for.** No test policy, proof format or process of anyone's own
   invention.
 
@@ -1252,12 +1270,9 @@ brief, so a step that skipped the merge leaves the next one the same line. A mer
 a design step is reviewed with the rest of the diff; one made by the finish step gets its own review
 round at the gate (§The CI gate, *A merge the review did not see*).
 
-**`handoff` takes the spec and the plan from the manifest.** `handoff pr` finds them in the last two
-commits, and `git log --name-only` lists no files for a merge commit: a merge by `design:plan` between
-the spec commit and the plan commit, or by `review-plan`'s resolve step directly before `handoff`,
-leaves its spec empty. Its fallback takes the newest file by date and asks on several of one date,
-which a merged batch base supplies, and a question in an unattended step is a halt. So `handoff:run`'s
-brief names `artifacts.spec` and `artifacts.plan` and tells the step to skip the detection.
+**`handoff` takes the spec and the plan from the manifest.** The command reads `artifacts.spec` and
+`artifacts.plan`; it detects nothing from the last commits or the newest files, which a merge of the base
+empties or crowds.
 
 **What this does not catch.** A base that changed only files the branch does not touch is not merged,
 even where the branch's code depends on them: the blind spot §Scoped re-review names, covered by CI on
@@ -1371,6 +1386,9 @@ Under `autoflow` these are the only stops. **No finding stops a run.**
     any other step that returns nothing, or a station that would need an agent the step cannot start,
     halts at once. The halt reaches the invoking session as the workflow's return, and `finish` writes it to
     the manifest.
+  - **A halt `dispatch_cli.php handoff` recorded** (a refused push, a PR that is not a draft, a gh that
+    cannot answer) is a hard failure like any other. A resume runs the command again, and it adopts the PR
+    the branch has.
 - **A Fable usage limit is not a hard failure.** `/critique` moves the reviewer to Opus itself
   (`../../critique/SKILL.md` §Stage 2). That switch is not the single retry above: a reviewer that
   then returns nothing still gets its retry, on Opus. Its record is `/critique`'s one chat line; the

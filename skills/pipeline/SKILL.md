@@ -10,7 +10,7 @@ description: Use when walking a feature end-to-end through the full development 
 A **trampoline** that walks a feature through its chain of station skills, carrying state from
 one to the next so the review gates become un-skippable **by construction** rather than by
 memory. It is the *spine*, not better station logic — each station already owns its own quality
-(`brainstorming`, `writing-plans`, `/critique`, `handoff`, `work-on`, `browser-verification`).
+(`brainstorming`, `writing-plans`, `/critique`, `work-on`, `browser-verification`).
 
 Core principle: **a loop that only loops; every step is a fresh agent.** In `autoflow` the loop is a
 program, the saved workflow `pipeline-autoflow` (`workflow/pipeline-autoflow.js`), whose steps each run
@@ -132,6 +132,6 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
 - **New review logic** (that is `/critique`) or **new bug-hunting** (that is `/code-review`).
 - **Tearing down a worktree before its PR is merged,** or one the run did not create. After the
   merge the run removes its own slot without asking (`references/engine.md` §After the merge).
-- **Posting to GitHub beyond what `handoff`/`work-on` already do**, and nothing it writes ever
-  addresses a person.
+- **Posting to GitHub beyond what the `handoff` command and `work-on` already do**, and nothing it
+  writes ever addresses a person.
 - **A findings store, or any persistent state not reconstructable** from git + gh.

@@ -72,15 +72,16 @@ the other machine on its own:
 ### Permissions for unattended runs
 
 A `/pipeline` run merges its base into its own branch when its brief says so (pipeline `engine.md`
-§Catching up with the base). A denial in a background step is final, so allow the three commands in
-`~/.claude/settings.json`: user level, so they reach every project on the machine, and a per-machine
-step like the hooks:
+§Catching up with the base). A denial in a background step is final, so allow them, and the `handoff`
+command below, in `~/.claude/settings.json`: user level, so they reach every project on the machine, and
+a per-machine step like the hooks:
 
 ```json
 "permissions": { "allow": [
   "Bash(git -C * merge --no-edit origin/*)",
   "Bash(git -C * merge --abort)",
-  "Bash(git -C * commit --no-edit)"
+  "Bash(git -C * commit --no-edit)",
+  "Bash(php * dispatch_cli.php handoff *)"
 ] }
 ```
 
@@ -101,6 +102,14 @@ and of these rules together, not a rule to swap by hand.
 
 `git -C <worktree> add <file>` has no rule here: no `git add` rule matches the `-C` form either, and
 those adds pass because the classifier allows them, as it does in every step that stages a file.
+
+The `handoff` step pushes the branch and calls gh from inside one command,
+`php <checks>/dispatch_cli.php handoff <manifest>`, as `kickoff` creates the worktree and edits the board
+from inside one `php` call. The push is a run's first outward write, so its rule is listed above with
+the merge rules: `Bash(php * dispatch_cli.php handoff *)`. The brief prints the command bare, with no
+`cd … &&` in front, which is the form the rule matches. Without the rule a denial halts the step with
+the command named; nothing is pushed by then, and a resume after the rule is added runs the command
+again.
 
 The pipeline skill's suite needs `node` on PATH: `AutoflowScriptTest` replays the autoflow Workflow
 script under it, and fails rather than skips without it, so a machine without `node` has a red suite.

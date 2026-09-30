@@ -132,7 +132,9 @@ passes, with `last_sha`, `cycle`, `at`, `reviewed_sha`, `annotations` and `outco
 manifest untouched and names what is wrong. A review goes in as a file (`<manifest stem>.review.md`), a
 resolve step's actions as `<manifest stem>.actions.json`. `suite` is the one key a step writes earlier,
 with `dispatch_cli.php suite` (`engine.md` §Suite reuse). The brief's `## Return` prints the step's
-commands, and `pipeline_record_table()` holds what each step passes.
+commands, and `pipeline_record_table()` holds what each step passes. `handoff`'s write is made by its
+command, `dispatch_cli.php handoff` (`../checks/handoff.php`), through `record`'s own code: the same
+candidate, the same check, the same read-back.
 
 The checks judge the manifest, however it was written: one repaired by hand that holds is accepted.
 
