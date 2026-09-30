@@ -266,3 +266,60 @@ it('refuses a record it cannot parse as a usage error', function (array $argumen
     'a flag record does not know' => [['/tmp/m.json', 'handoff', 'run', '--status', 'continued', '--number', '7']],
     'a flag given twice' => [['/tmp/m.json', 'handoff', 'run', '--status', 'continued', '--pr', '7', '--pr', '8']],
 ]);
+
+it('writes the suite with the worktree\'s tree key and changes nothing else', function () {
+    $fixture = record_fixture('implement', 'run');
+    $before = manifest_read($fixture['manifest']);
+
+    $result = dispatch_cli(['suite', $fixture['manifest'], '--outcome', 'green', '--passed', '104', '--failed', '0']);
+
+    expect($result['code'])->toBe(0);
+    $suite = manifest_read($fixture['manifest'])['suite'];
+    expect($result['json'])->toBe(['action' => 'recorded', 'suite' => $suite]);
+    expect($suite)->toMatchArray(['tree' => pipeline_tree_key($fixture['repo']), 'outcome' => 'green', 'passed' => 104, 'failed' => 0]);
+    expect($suite['at'])->toMatch('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/');
+    expect(array_diff_key(manifest_read($fixture['manifest']), ['suite' => true]))->toBe($before);
+});
+
+it('keeps the suite a step recorded in the record that follows, and the next brief accepts both', function () {
+    $fixture = record_fixture('implement', 'run');
+    dispatch_cli(['suite', $fixture['manifest'], '--outcome', 'red', '--passed', '100', '--failed', '4']);
+    $suite = manifest_read($fixture['manifest'])['suite'];
+    file_put_contents($fixture['stepDiff'], '');
+
+    expect(record_cli($fixture, 'implement', 'run', ['--status', 'continued'])['json'])->toMatchArray(['action' => 'recorded', 'replaced' => []]);
+    expect(manifest_read($fixture['manifest'])['suite'])->toBe($suite);
+    expect(boundary_brief($fixture, 'review-pr', 'review', 'implement:run', ['--status', 'continued', '--ui', 'false'])['stdout'])->toContain('`review-pr` leg, `review` step');
+});
+
+it('refuses a green suite with failures, the snapshot\'s path, and a tree key it cannot compute', function () {
+    $fixture = record_fixture('implement', 'run');
+    $bytes = file_get_contents($fixture['manifest']);
+
+    $green = dispatch_cli(['suite', $fixture['manifest'], '--outcome', 'green', '--passed', '100', '--failed', '4']);
+    expect($green['code'])->toBe(1);
+    expect($green['json'])->toBe(['action' => 'refused', 'reason' => 'a green suite has no failures: --failed is 4']);
+
+    expect(dispatch_cli(['suite', $fixture['before'], '--outcome', 'green', '--passed', '104', '--failed', '0'])['json']['reason'])
+        ->toBe("{$fixture['before']} is the dispatcher's snapshot; the manifest is {$fixture['manifest']}");
+    expect(file_get_contents($fixture['manifest']))->toBe($bytes);
+
+    $noRepo = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'implement', 'status' => 'pending']]);
+    $result = dispatch_cli(['suite', $noRepo['manifest'], '--outcome', 'green', '--passed', '104', '--failed', '0']);
+    expect($result['code'])->toBe(1);
+    expect($result['json']['reason'])->toStartWith('cannot compute the tree key, so this run is not reusable: run the suite again next time (');
+    expect(manifest_read($noRepo['manifest']))->not->toHaveKey('suite');
+});
+
+it('refuses a suite it cannot parse as a usage error', function (array $arguments) {
+    $result = dispatch_cli(['suite', ...$arguments]);
+
+    expect($result['code'])->toBe(1);
+    expect($result['stdout'])->toBe('');
+})->with([
+    'no manifest' => [[]],
+    'no counts' => [['/tmp/m.json', '--outcome', 'green']],
+    'an outcome that is neither' => [['/tmp/m.json', '--outcome', 'yellow', '--passed', '1', '--failed', '0']],
+    'a count that is no number' => [['/tmp/m.json', '--outcome', 'green', '--passed', 'all', '--failed', '0']],
+    'a flag given twice' => [['/tmp/m.json', '--outcome', 'green', '--outcome', 'red', '--passed', '1', '--failed', '0']],
+]);

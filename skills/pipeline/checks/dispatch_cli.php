@@ -13,12 +13,13 @@
  *                 php dispatch_cli.php ui <diff-file>
  *                 php dispatch_cli.php ci <manifest> [--poll <n>]
  *   both:         php dispatch_cli.php record <manifest> <leg> <step> --status <status> [flags]
+ *                 php dispatch_cli.php suite <manifest> --outcome green|red --passed <n> --failed <n>
  *
  * `brief` prints the brief as Markdown; `size` and `ui` print a bare value for a step to copy
  * (`Bounded` / `Architectural`, `true` / `false`); every other answer, and a `brief` that halts, is
- * one JSON line. Exits 0 on every decision, a halt included; `record` exits 1 on a refusal, which is
- * no decision about the run and leaves the manifest untouched, so a failed write cannot be missed in an
- * `&&` chain. Exits 1 on a usage error (a `kickoff`, a `launch`, a `brief` or a `ci` it cannot parse
+ * one JSON line. Exits 0 on every decision, a halt included; `record` and `suite` exit 1 on a
+ * refusal, which is no decision about the run and leaves the manifest untouched, so a failed write cannot
+ * be missed in an `&&` chain. Exits 1 on a usage error (a `kickoff`, a `launch`, a `brief` or a `ci` it cannot parse
  * included), and when `size` has no readable manifest or `ui` no diff file.
  */
 
@@ -820,6 +821,51 @@ function dispatch_cli_record_command(array $arguments): ?array
     return $parsed === null ? null : dispatch_cli_record(...$parsed);
 }
 
+/**
+ * The write a step makes before it returns (`../references/engine.md` §Suite reuse): only the `suite` key,
+ * into the manifest as it is, with the tree key computed here. A key that cannot be computed is a machinery
+ * failure: nothing is written, so that run is never reused.
+ */
+function dispatch_cli_suite(string $manifestPath, string $outcome, int $passed, int $failed): array
+{
+    $problem = dispatch_cli_write_problem($manifestPath)
+        ?? ($outcome === 'green' && $failed > 0 ? "a green suite has no failures: --failed is {$failed}" : null);
+    if ($problem !== null) {
+        return dispatch_cli_refuse($problem);
+    }
+    $manifest = (array) manifest_read($manifestPath);
+    try {
+        $tree = pipeline_tree_key(rtrim((string) $manifest['worktree'], '/'));
+    } catch (RuntimeException $exception) {
+        return dispatch_cli_refuse("cannot compute the tree key, so this run is not reusable: run the suite again next time ({$exception->getMessage()})");
+    }
+    $suite = ['tree' => $tree, 'outcome' => $outcome, 'passed' => $passed, 'failed' => $failed, 'at' => gmdate('Y-m-d\TH:i:s\Z')];
+
+    return dispatch_cli_write($manifestPath, [...$manifest, 'suite' => $suite]) ?? ['action' => 'recorded', 'suite' => $suite];
+}
+
+/** `suite <manifest> --outcome green|red --passed <n> --failed <n>`, each flag once; null is a usage error. */
+function dispatch_cli_suite_command(array $arguments): ?array
+{
+    $manifestPath = array_shift($arguments);
+    $options = [];
+    while ($arguments !== []) {
+        $name = (string) array_shift($arguments);
+        $value = array_shift($arguments);
+        if (! in_array($name, ['--outcome', '--passed', '--failed'], true) || $value === null || isset($options[$name])) {
+            return null;
+        }
+        $options[$name] = (string) $value;
+    }
+    $valid = $manifestPath !== null
+        && count($options) === 3
+        && in_array($options['--outcome'], ['green', 'red'], true)
+        && ctype_digit($options['--passed'])
+        && ctype_digit($options['--failed']);
+
+    return $valid ? dispatch_cli_suite((string) $manifestPath, $options['--outcome'], (int) $options['--passed'], (int) $options['--failed']) : null;
+}
+
 $result = match ($argv[1] ?? '') {
     'kickoff' => dispatch_cli_kickoff(array_slice($argv, 2)),
     'next' => dispatch_cli_next((string) ($argv[2] ?? '')),
@@ -831,11 +877,12 @@ $result = match ($argv[1] ?? '') {
     'ui' => dispatch_cli_ui((string) ($argv[2] ?? '')),
     'ci' => dispatch_cli_ci_command(array_slice($argv, 2)),
     'record' => dispatch_cli_record_command(array_slice($argv, 2)),
+    'suite' => dispatch_cli_suite_command(array_slice($argv, 2)),
     default => null,
 };
 
 if ($result === null) {
-    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--medium|--light] [--base <branch>] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] [--decision <text>]... | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> | ci <manifest> [--poll <n>] | record <manifest> <leg> <step> --status <status> [--spec <path>] [--plan <path>] [--pr <number>] [--proof <path>] [--review-file <path>] [--actions-file <path>] [--issue-link <n>=<outcome>]... [--reason <text>] (size needs a readable manifest, ui an existing diff file)\n");
+    fwrite(STDERR, "usage: dispatch_cli.php kickoff <repo-root> <number|idea> [--medium|--light] [--base <branch>] [--decision <text>]... | next <manifest> | returned <manifest> <diff-file> | launch <manifest> <diff-file> [--from <leg>] [--decision <text>]... | brief <manifest> <leg> <step> [--after <leg>:<step> --status <status> [--ui true|false] [--size <size>]] | finish <manifest> <decision-json> | size <manifest> | ui <diff-file> | ci <manifest> [--poll <n>] | record <manifest> <leg> <step> --status <status> [--spec <path>] [--plan <path>] [--pr <number>] [--proof <path>] [--review-file <path>] [--actions-file <path>] [--issue-link <n>=<outcome>]... [--reason <text>] | suite <manifest> --outcome green|red --passed <n> --failed <n> (size needs a readable manifest, ui an existing diff file)\n");
     exit(1);
 }
 
