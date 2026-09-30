@@ -207,3 +207,15 @@ Questions the brainstorm would have asked the owner, with the answer assumed.
 12. **Changelog?** This repository has no `.changelog/` and no `CHANGELOG.md`, so none is written.
 13. **Does this PR close #112?** Yes; the job-list line of *Done when* is confirmed by the owner in the
     next batch. `review-pr` settles the closing link (engine.md §Closing links).
+14. **Where does "a PR back in draft leaves the line" stand?** In `commands.md` §Needs input, in the
+    sentence that names the script's arguments: one pair per PR whose merge watch is armed, and a PR put
+    back in draft by `gh pr ready --undo` is left out until it is ready again (its watch keeps running on
+    `OPEN`, so "armed" alone would keep it on the line). `SKILL.md` keeps only the rule.
+15. **What when not even one linkless entry fits in 200 characters?** The line is
+    `needs input: merge +<n> more`: still a marker, never an error. It takes a PR number of about 190
+    digits, so it is a guard against a crash, not a case anyone will see.
+16. **One PR given with two issues, or a number with leading zeros?** Pairs are compared as numbers:
+    `012:7` prints `PR #12 (#7)`, and `109:91 109:92` prints two entries for PR #109, ordered by issue.
+    A PR that closes two issues is rare enough not to earn its own format.
+17. **Anything other than `<digits>:<digits>` after the repo** (`#12:7`, a bare `13`), or no arguments
+    at all: usage on stderr, exit 2, nothing on stdout, so a mistyped call never prints half a line.
