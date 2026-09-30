@@ -42,8 +42,8 @@
 
 ## Review Focus
 
-1. **A hand-edited `tier` that is not a tier** (`true`, `["light"]`, `"heavy"`, `"loopedBack"`) must not fatal `launch` with a `TypeError`; the run reads as `full`. Task 1's `fromManifest()` dataset pins it.
-2. **An unknown `tier` beside a legacy `light: true`** reads as `full`, not `medium`: a present `tier` decides alone (spec *Assumptions* 12). Task 1's dataset pins it.
+1. **A hand-edited `tier` that is not `medium` or `light`** (`true`, `["light"]`, `"heavy"`, `"loopedBack"`, `"full"`) must not fatal `launch` with a `TypeError`; `launch` halts naming the value (spec *Assumptions* 4, owner decision after the plan review). `DispatchCliTest`'s tier halt dataset pins it; behind the halt, Task 1's `fromManifest()` dataset still reads it as `full`.
+2. **An unknown `tier` beside a legacy `light: true`** halts too, rather than reading as `medium`: a present `tier` decides alone (spec *Assumptions* 12). The halt dataset carries `light: true` in every case.
 3. **A manifest in flight with `light: true` and a Bounded spec, relaunched after this lands**, starts on `medium` and answers `tier: medium`, so its agents do not change. Task 2's legacy launch case pins it.
 4. **A `launch` answer whose `tier` names a non-tier entry** (`retry`) halts the script before any agent instead of reading one entry as a table. Task 2's halt dataset pins it.
 5. **`--light` before the item on the kickoff command line**, an order a session may build, parses the same as after it. Task 3's kickoff dataset pins it.

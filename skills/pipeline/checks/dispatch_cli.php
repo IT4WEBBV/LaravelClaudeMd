@@ -121,6 +121,16 @@ function dispatch_cli_agents_problem(array $manifest): ?string
     return $problem === null ? null : "the manifest's agents override is invalid: {$problem}";
 }
 
+/** A `tier` kickoff cannot have written (`../references/manifest.md`): present, and not `medium` or `light`; or null. */
+function dispatch_cli_tier_problem(array $manifest): ?string
+{
+    if (! array_key_exists('tier', $manifest) || in_array($manifest['tier'], [AgentTier::Medium->value, AgentTier::Light->value], true)) {
+        return null;
+    }
+
+    return "the manifest's tier is invalid: " . json_encode($manifest['tier']) . ' is not medium or light';
+}
+
 function dispatch_cli_returned(string $manifestPath, string $diffPath): array
 {
     $before = manifest_read(dispatch_cli_files($manifestPath)['before']);
@@ -173,7 +183,8 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
     }
     $problem = dispatch_cli_invalid($manifest)
         ?? dispatch_cli_mode_problem('launch starts autoflow runs', $manifest)
-        ?? dispatch_cli_agents_problem($manifest);
+        ?? dispatch_cli_agents_problem($manifest)
+        ?? dispatch_cli_tier_problem($manifest);
     if ($problem !== null) {
         return pipeline_halt($problem);
     }

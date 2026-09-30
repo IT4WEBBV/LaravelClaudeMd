@@ -21,7 +21,7 @@ enum AgentTier: string
     case Medium = 'medium';
     case Light = 'light';
 
-    /** The manifest's `tier`; else `medium` for a legacy `light: true`; else `full`. A `tier` that is not one of the three reads as `full`, the heavier side. */
+    /** The manifest's `tier`; else `medium` for a legacy `light: true`; else `full`. `launch` halts on a `tier` that is not `medium` or `light` (`dispatch_cli_tier_problem()`); behind it, one that is not a tier reads as `full`, the heavier side. */
     public static function fromManifest(array $manifest): self
     {
         if (array_key_exists('tier', $manifest)) {

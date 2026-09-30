@@ -259,6 +259,34 @@ it('halts a launch whose agents override is invalid, and leaves the manifest as 
     'a list, on a finished run' => [['cursor' => ['leg' => 'review-pr', 'status' => 'done']], [['model' => 'opus']], 'it is not an object'],
 ]);
 
+it('halts a launch whose tier is not medium or light, and leaves the manifest as it was', function (mixed $tier, string $what) {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'tier' => $tier, 'light' => true]);
+    $before = file_get_contents($fixture['manifest']);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff'], '--decision', 'Keep the guard'])['json'])
+        ->toBe(['action' => 'halt', 'reason' => "the manifest's tier is invalid: {$what} is not medium or light"]);
+    expect(file_get_contents($fixture['manifest']))->toBe($before);
+})->with([
+    'an unknown word' => ['lite', '"lite"'],
+    'full, written by hand' => ['full', '"full"'],
+    'another table entry' => ['loopedBack', '"loopedBack"'],
+    'a boolean' => [true, 'true'],
+    'a number' => [3, '3'],
+    'a list' => [['light'], '["light"]'],
+    'null' => [null, 'null'],
+]);
+
+it('launches a manifest whose tier is medium, light or absent', function (array $manifest, string $tier) {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', ...$manifest]);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json']['tier'])->toBe($tier);
+})->with([
+    'medium' => [['tier' => 'medium'], 'medium'],
+    'light' => [['tier' => 'light'], 'light'],
+    'no tier' => [[], 'full'],
+    'a legacy light: true' => [['light' => true], 'medium'],
+]);
+
 it('launches a design at the step the manifest calls for', function (?string $spec, string $step) {
     $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'design', 'status' => 'halted', 'reason' => 'x'], 'artifacts' => ['spec' => $spec, 'plan' => null, 'pr' => null, 'issue' => null]]);
     file_put_contents($fixture['dir'] . '/spec.md', "# x — design\n\n**Design size:** Architectural\n");

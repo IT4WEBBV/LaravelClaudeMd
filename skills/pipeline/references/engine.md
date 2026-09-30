@@ -229,7 +229,8 @@ change.
 | a smoke run's stub step | sonnet low | sonnet low | sonnet low | A stub does no real work. |
 
 **Which profile.** The word names the tier (`AgentTier::fromManifest()`): the manifest's `tier`,
-`medium` for a legacy `light: true`, else `full`; a `tier` that is not one of the three reads as `full`.
+`medium` for a legacy `light: true`, else `full`; `launch` halts on a `tier` that is not `medium` or
+`light`, as on an invalid `agents` override.
 The design size moves a run up, never down (`AgentTier::forDesign()`): an Architectural design runs on
 `full`, a Bounded one on the named tier, so a Bounded design with no word stays on `full`. `launch`
 starts the run on `full` once the ledger records an `escalated` entry; else, once a spec exists, on the

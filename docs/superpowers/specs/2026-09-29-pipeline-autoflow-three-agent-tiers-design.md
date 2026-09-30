@@ -63,8 +63,9 @@ enum AgentTier: string
 ```
 
 - `fromManifest()`: `self::tryFrom($manifest['tier'])` when `tier` is set, else `Medium` when the
-  manifest has a legacy `light: true`, else `Full`. A `tier` that is not one of the three reads as
-  `Full`, as a mangled `**Design size:**` header reads as Architectural: the heavier side.
+  manifest has a legacy `light: true`, else `Full`. `launch` halts on a `tier` that is not `medium` or
+  `light` (Assumption 4); behind that halt, a `tier` that is not one of the three reads as `Full`, the
+  heavier side.
 - `forDesign()` is the "up, never down" rule in one place: an Architectural design always runs on
   `full`; a Bounded design runs on the tier the word named, so a Bounded design with no word stays on
   `full`.
@@ -202,9 +203,12 @@ answer has no `tier` and halts before any agent with the agents-table reason.
    from a spec-path invocation of a Bounded spec, since the brief requires Architectural without a word.
 3. *Which tier wins when a manifest has both `tier` and a legacy `light: true`?* `tier`: it is the new
    field, and nothing writes both.
-4. *What does an unknown `tier` value do?* It reads as `full` rather than halting `launch`, the same
-   heavier-side fallback `DesignSize::fromSpec()` uses for a mangled header. The field is written only by
-   kickoff, so an unknown value means a hand edit.
+4. *What does an unknown `tier` value do?* It halts `launch` (owner decision after the plan review), as
+   an invalid `agents` override does: `dispatch_cli_tier_problem()` beside
+   `dispatch_cli_agents_problem()`. The field is written only by kickoff, so an unknown value means a hand
+   edit, and `tier` is the owner's cost choice: a typo that silently ran a cheap run on `full` would give
+   no signal. Only `medium` and `light` pass; an absent `tier` is `full`. `fromManifest()` keeps its
+   heavier-side fallback behind the halt, for the brief and `pipeline_start_profile()`.
 5. *Are `--medium --light` or a repeated flag allowed?* No: a usage error, so a typo never picks a tier
    silently.
 6. *Must `completeAgents()` check all three tier tables?* No: it checks `full` and the run's own tier,
@@ -228,16 +232,16 @@ answer has no `tier` and halts before any agent with the agents-table reason.
 
 Added by the `design:plan` step, for questions the plan needed answered:
 
-12. *What does a `tier` that is not a string do (`true`, `3`, `["light"]`, a hand edit)?* It reads as
-    `Full`, like an unknown string, instead of a `TypeError` in `launch`: `fromManifest()` hands
-    `tryFrom()` only a string. A `tier` key that is present decides alone, readable or not, so an unknown
-    `tier` beside a legacy `light: true` reads as `Full`: the new field is the one the hand edit touched,
-    and the heavier side is the safe one.
+12. *What does a `tier` that is not a string do (`true`, `3`, `["light"]`, a hand edit)?* It halts
+    `launch`, like an unknown string (Assumption 4), with the reason naming the value, never a
+    `TypeError`: `dispatch_cli_tier_problem()` compares without a cast, and `fromManifest()` hands
+    `tryFrom()` only a string, reading it as `Full` behind the halt. A `tier` key that is present decides
+    alone, readable or not, so an unknown `tier` beside a legacy `light: true` halts too: the new field is
+    the one the hand edit touched.
 13. *How does kickoff carry the tier into the manifest?* `dispatch_cli_kickoff_args()` puts an
     `AgentTier` in `$options['tier']`; `pipeline_kickoff_manifest()` writes its `value` unless it is
-    `Full`. `kickoff.php` gets no `require_once 'agents.php'`: `dispatch_cli.php` loads `agents.php`
-    before `kickoff.php`, `tests/Pest.php` does too, and `statusline.php`, which also loads
-    `kickoff.php`, never calls `pipeline_kickoff_manifest()`.
+    `Full`. `kickoff.php` requires `agents.php` itself (a PR review nit), so it loads standalone as
+    `statusline.php` does.
 14. *Where does `tier` sit in `launch`'s answer?* Right after `profile`, before `agents`:
     `DispatchCliTest` compares the whole answer with `toBe`, which checks key order, and engine.md's
     example line lists the keys in that order.
