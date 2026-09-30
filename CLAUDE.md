@@ -226,6 +226,11 @@ $data = request()->validate([
   ```
   `git status` cannot see this (it only compares against the tracking branch), and `origin/HEAD` is
   often stale: run `git remote set-head origin --auto` before trusting it.
+
+  **One exception: a `/pipeline` run's own branch.** A step of a run merges the base into the run's branch
+  when its brief says so, with `git -C <worktree> merge --no-edit origin/<base>`, and resolves the
+  conflicts itself (pipeline `engine.md` §Catching up with the base): never a rebase, never a force-push.
+  There the brief answers the hook's warning. Every other checkout keeps raise-and-wait.
 - **Update the changelog**: When creating a PR, add a changelog entry using whichever convention the project uses:
   - **Fragment-based (project has a `.changelog/unreleased/` directory):** copy `.changelog/unreleased/TEMPLATE.md` to `.changelog/unreleased/<branch-name>.md` (branch name with `/` replaced by `-`) and fill in the `<details>` block. Do **not** edit `CHANGELOG.md` directly — the release workflow rolls fragments in at release time. See `.changelog/unreleased/README.md`.
   - **Plain changelog (no `.changelog/` directory):** update the project's `CHANGELOG.md` directly with a summary of the changes. Check the latest version tag first with `git tag --sort=-v:refname | head -5` to determine the correct next version number.

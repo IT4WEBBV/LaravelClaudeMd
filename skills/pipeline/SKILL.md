@@ -102,7 +102,8 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    `done` or a halt: report it and stop. A resume starts here: `launch` starts from the cursor.
 3. **Start the saved workflow `pipeline-autoflow`** by name, with `launch`'s JSON as `args`, and wait
    for its completion notice. Starting it from this skill is the owner's opt-in; unattended runs need
-   auto permission mode or allow rules for `git push`, `gh` and `docker`.
+   auto permission mode or allow rules for `git push`, `gh` and `docker`, and the allow rules for the
+   merge of the base in its `git -C <worktree>` form (`README.md`, *Permissions for unattended runs*).
 4. **Finish.** `php "$CHECKS/dispatch_cli.php" finish <manifest> '<its return as JSON>'`, or
    `'{"action":"halt","reason":"<the error>"}'` when the workflow errored. `finish` refuses a `done`
    whose cursor is not on `review-pr`, or whose last snapshot is not `review-pr`'s resolve step's with
