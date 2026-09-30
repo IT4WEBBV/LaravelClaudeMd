@@ -83,6 +83,14 @@ and ends, steps 1–3.
   decision of the owner's for N. `ready` names the manifest (`mode: autoflow`, `artifacts.issue`
   N); a halt: report it and start nothing. Never create the worktree another way or switch
   branches in the primary checkout; other runs share it.
+- **The sibling note.** Before kickoff, list the batch's other runs in flight from §Map's open PRs,
+  and per PR its files:
+  `gh pr view <P> -R <repo> --json files --jq '[.files[].path] | join(", ")'`.
+  With at least one, kickoff gets one more `--decision`, in this form:
+  `Sibling runs in flight in this batch (orchestrate's note, not an owner decision): #<P> (issue #<M>) changes <files>; issue #<K> has no PR yet. A plan that changes these files expects a merge of the base (pipeline engine.md §Catching up with the base).`
+  A sibling still in design shows only its spec and plan; merged siblings are not listed, since the run
+  is cut from a base that holds them. The note holds nothing back and orders nothing: the run merges
+  its base when its brief says so.
 - `launch` runs with `PIPELINE_NO_OPEN=1`: the run is unattended. `done` or a halt: report it and
   start no workflow.
 - Start the workflow `pipeline-autoflow` with `launch`'s JSON as `args`, in the background, and add

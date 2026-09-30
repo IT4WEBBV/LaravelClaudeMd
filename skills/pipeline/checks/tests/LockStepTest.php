@@ -38,7 +38,10 @@ it('keeps every engine.md section a brief names', function () {
     $lines = array_merge(
         ...array_values(pipeline_leg_overrides('autoflow')),
         ...array_values(pipeline_leg_overrides('interactive')),
-        ...[[pipeline_review_scope_line(['since' => 'abc', 'base' => 'origin/main', 'commits' => 1, 'files' => []])]],
+        ...[[
+            pipeline_review_scope_line(['since' => 'abc', 'base' => 'origin/main', 'commits' => 1, 'files' => []]),
+            pipeline_catch_up_line(['worktree' => '/tmp/wt'], ['base' => 'origin/main', 'behind' => 1, 'shared' => []]),
+        ]],
     );
     preg_match_all('/§([^,):;]+)/', implode("\n", $lines), $names);
 

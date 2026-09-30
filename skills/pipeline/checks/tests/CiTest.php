@@ -102,3 +102,29 @@ it('counts the recorded CI failures in decisions, and nothing else', function ()
     expect(pipeline_ci_rounds(ci_manifest(['Keep the guard', "CI red on the PR's head commit abc123: CI / ci failed (x)"])))->toBe(1);
     expect(pipeline_ci_rounds(['branch' => 'feature/x']))->toBe(0);
 });
+
+it('answers one review round for a merge the last review did not see, before the head or the checks are read', function () {
+    $decision = "Unreviewed merge on the PR's head commit def456: a merge since the last completed review met this branch's changes in a.php, b.php";
+    $fix = ['action' => 'fix', 'verdict' => 'merge', 'files' => ['a.php', 'b.php'], 'decision' => $decision];
+    $green = ci_view([ci_run('ci', 'COMPLETED', 'SUCCESS')]);
+
+    expect(pipeline_ci_answer(ci_manifest(), $green, 'def456', true, 1, ['a.php', 'b.php']))->toBe($fix);
+    expect(pipeline_ci_answer(ci_manifest(), null, 'def456', true, 120, ['a.php', 'b.php']))->toBe($fix);
+    expect(pipeline_ci_answer(ci_manifest(), $green, 'abc123', true, 1, []))->toBe(['action' => 'ready', 'verdict' => 'green', 'sha' => 'abc123']);
+    expect(pipeline_ci_answer(ci_manifest([$decision]), $green, 'abc123', true, 1, ['a.php']))->toBe(['action' => 'ready', 'verdict' => 'green', 'sha' => 'abc123']);
+});
+
+it('counts the merge round and the CI fix round apart', function () {
+    $merge = "Unreviewed merge on the PR's head commit def456: a merge since the last completed review met this branch's changes in a.php";
+    $ci = "CI red on the PR's head commit abc123: CI / ci failed (https://github.com/acme/app/actions/runs/11/job/ci)";
+    $red = ci_view([ci_run('ci', 'COMPLETED', 'FAILURE')]);
+
+    expect(pipeline_merge_rounds(ci_manifest(['Keep the guard'])))->toBe(0);
+    expect(pipeline_merge_rounds(ci_manifest([$ci])))->toBe(0);
+    expect(pipeline_merge_rounds(ci_manifest([$merge])))->toBe(1);
+    expect(pipeline_merge_rounds(['branch' => 'feature/x']))->toBe(0);
+    expect(pipeline_ci_rounds(ci_manifest([$merge])))->toBe(0);
+
+    expect(pipeline_ci_answer(ci_manifest([$merge]), $red, 'abc123', true, 1, ['a.php']))->toMatchArray(['action' => 'fix', 'verdict' => 'red', 'decision' => $ci]);
+    expect(pipeline_ci_answer(ci_manifest([$ci]), $red, 'abc123', true, 1, ['a.php']))->toMatchArray(['action' => 'fix', 'verdict' => 'merge']);
+});

@@ -14,6 +14,9 @@ const PIPELINE_CI_PUSH_POLLS = 3;
 /** How the gate's failure record starts in `decisions`; one such decision is the run's fix round spent. */
 const PIPELINE_CI_RED = "CI red on the PR's head commit ";
 
+/** How the gate's unreviewed-merge record starts in `decisions`; one such decision is the run's merge round spent. */
+const PIPELINE_MERGE_UNREVIEWED = "Unreviewed merge on the PR's head commit ";
+
 /**
  * One `statusCheckRollup` item: a check run is pending until it completes, then green on success,
  * neutral or skipped; a commit status is green on success and pending while pending or expected.
@@ -75,10 +78,15 @@ function pipeline_ci_verdict(array $rollup): array
  * `decisions` through `launch --from review-pr --decision`), or `halt` (`finish`'s input). `$view` is
  * `gh pr view <pr> --json headRefOid,statusCheckRollup`, null when gh could not read it; `$head` the
  * worktree's `HEAD`, which GitHub's head must be before its checks count; `$workflows` whether the
- * worktree has GitHub Actions workflows; `$poll` this read's number, from 1.
+ * worktree has GitHub Actions workflows; `$poll` this read's number, from 1; `$unreviewed` the files where
+ * a merge since the last completed review met the branch's changes, which get one review round before
+ * the PR or its checks are read.
  */
-function pipeline_ci_answer(array $manifest, ?array $view, string $head, bool $workflows, int $poll): array
+function pipeline_ci_answer(array $manifest, ?array $view, string $head, bool $workflows, int $poll, array $unreviewed = []): array
 {
+    if ($unreviewed !== [] && pipeline_merge_rounds($manifest) === 0) {
+        return pipeline_ci_unreviewed($head, $unreviewed);
+    }
     $last = $poll >= PIPELINE_CI_POLLS;
     if ($view === null) {
         return $last
@@ -127,8 +135,30 @@ function pipeline_ci_halt(string $reason, array $read): array
     return ['action' => 'halt', 'leg' => 'review-pr', 'reason' => $reason, ...$read];
 }
 
+/** A merge the last review did not see is a `fix` of its own: a scoped `review-pr` round, once per run. */
+function pipeline_ci_unreviewed(string $head, array $files): array
+{
+    return [
+        'action' => 'fix',
+        'verdict' => 'merge',
+        'files' => $files,
+        'decision' => PIPELINE_MERGE_UNREVIEWED . "{$head}: a merge since the last completed review met this branch's changes in " . implode(', ', $files),
+    ];
+}
+
 /** The fix rounds this run has had: the decisions the gate's failure record starts. */
 function pipeline_ci_rounds(array $manifest): int
 {
-    return count(array_filter($manifest['decisions'] ?? [], fn (string $decision) => str_starts_with($decision, PIPELINE_CI_RED)));
+    return pipeline_decisions_starting($manifest, PIPELINE_CI_RED);
+}
+
+/** The merge rounds this run has had: the decisions the gate's unreviewed-merge record starts. */
+function pipeline_merge_rounds(array $manifest): int
+{
+    return pipeline_decisions_starting($manifest, PIPELINE_MERGE_UNREVIEWED);
+}
+
+function pipeline_decisions_starting(array $manifest, string $prefix): int
+{
+    return count(array_filter($manifest['decisions'] ?? [], fn (string $decision) => str_starts_with($decision, $prefix)));
 }

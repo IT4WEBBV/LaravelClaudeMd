@@ -61,6 +61,7 @@ function pipeline_leg_overrides(string $mode): array
         ],
         'handoff:run' => [
             'Invoke `handoff pr`. The PR opens draft and references the issue without a closing keyword (engine.md §Closing links). Set `artifacts.pr`.',
+            'The spec and the plan are `artifacts.spec` and `artifacts.plan` (Pointers above): give `handoff pr` those two paths and skip its own detection from the last commits or the newest files, which a merge of the base empties or crowds (engine.md §Catching up with the base).',
         ],
         'implement:run' => [
             'Bring the dev stack up first, without asking (engine.md §Dev-stack readiness).',
@@ -101,18 +102,20 @@ function pipeline_leg_overrides(string $mode): array
 
 /**
  * `$step` is given in `autoflow` (the workflow script names it) and derived from the ledger in `interactive`.
- * `$git` runs git in the worktree; only `review-pr`'s review step asks it, for its scope (engine.md §Scoped re-review).
+ * `$git` runs git in the worktree: `review-pr`'s review step asks it for its scope (engine.md §Scoped
+ * re-review), a step that writes to the branch for the base state (engine.md §Catching up with the base).
  */
 function pipeline_brief(array $manifest, string $leg, string $manifestPath, ?string $step = null, ?callable $git = null): string
 {
     $step ??= pipeline_step($manifest, $leg);
     $scope = $git !== null && "{$leg}:{$step}" === 'review-pr:review' ? pipeline_review_scope($manifest, $git) : null;
+    $catchUp = $git !== null && in_array("{$leg}:{$step}", PIPELINE_CATCH_UP_STEPS, true) ? pipeline_base_state($manifest, $git) : null;
 
     return implode("\n\n", [
         pipeline_brief_role($manifest, $leg, $step),
         pipeline_brief_pointers($manifest, $manifestPath, $leg, $step),
         pipeline_brief_state($manifest, $leg),
-        pipeline_brief_overrides($manifest, $leg, $step, $scope),
+        pipeline_brief_overrides($manifest, $leg, $step, $scope, $catchUp),
         pipeline_brief_return($leg, $step, (string) $manifest['mode']),
     ]) . "\n";
 }
@@ -195,9 +198,12 @@ function pipeline_brief_state(array $manifest, string $leg): string
     return "## Settled decisions and state\n\n" . implode("\n", $lines);
 }
 
-function pipeline_brief_overrides(array $manifest, string $leg, string $step, ?array $scope = null): string
+function pipeline_brief_overrides(array $manifest, string $leg, string $step, ?array $scope = null, ?array $catchUp = null): string
 {
-    $lines = pipeline_leg_overrides((string) $manifest['mode'])["{$leg}:{$step}"];
+    $lines = [
+        ...($catchUp === null ? [] : [pipeline_catch_up_line($manifest, $catchUp)]),
+        ...pipeline_leg_overrides((string) $manifest['mode'])["{$leg}:{$step}"],
+    ];
     $ledger = pipeline_ledger($manifest);
 
     $plan = pipeline_plan_path((string) ($manifest['artifacts']['spec'] ?? ''));
@@ -285,6 +291,60 @@ function pipeline_review_base(array $ledger): ?string
     return $bases === [] ? null : end($bases)['reviewed_sha'];
 }
 
+/** The run's base as a ref: `origin/<manifest base>`, else what `origin/HEAD` names, or null when neither resolves. */
+function pipeline_base_ref(array $manifest, callable $git): ?string
+{
+    return isset($manifest['base'])
+        ? "origin/{$manifest['base']}"
+        : (pipeline_git_lines($git, ['symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD'])[0] ?? null);
+}
+
+/** The steps that write to the branch, and so catch up with its base first (`../references/engine.md` §Catching up with the base). */
+const PIPELINE_CATCH_UP_STEPS = ['design:run', 'design:spec', 'design:plan', 'review-plan:resolve', 'implement:run', 'review-pr:resolve'];
+
+/** The run's spec and plan as git names them: relative to the worktree. */
+function pipeline_design_files(array $manifest): array
+{
+    $worktree = rtrim((string) $manifest['worktree'], '/') . '/';
+    $paths = array_filter([$manifest['artifacts']['spec'] ?? null, $manifest['artifacts']['plan'] ?? null]);
+
+    return array_map(fn (string $path) => str_starts_with($path, $worktree) ? substr($path, strlen($worktree)) : $path, array_values($paths));
+}
+
+/**
+ * Whether a step must merge the base first (`../references/engine.md` §Catching up with the base), or null
+ * for no: the branch is not behind, the base moved only in files the branch's code does not touch, or any
+ * git call failed (a run that cannot tell carries on). A branch that holds no code yet, nothing or only its
+ * spec and plan, merges on any movement: a design reads current code. `$git` runs git in the worktree, as
+ * `pipeline_git_run()` does; the base is fetched first.
+ *
+ * @return array{base: string, behind: int, shared: list<string>}|null
+ */
+function pipeline_base_state(array $manifest, callable $git): ?array
+{
+    $base = pipeline_base_ref($manifest, $git);
+    if ($base === null) {
+        return null;
+    }
+    $name = substr($base, strlen('origin/'));
+    if ($git(['fetch', '-q', 'origin', "+refs/heads/{$name}:refs/remotes/origin/{$name}"])[0] !== 0) {
+        return null;
+    }
+    $behind = (int) (pipeline_git_lines($git, ['rev-list', '--count', "HEAD..{$base}"])[0] ?? 0);
+    if ($behind === 0) {
+        return null;
+    }
+    $ours = pipeline_git_lines($git, ['diff', '--name-only', '--no-renames', "{$base}...HEAD"]);
+    $theirs = pipeline_git_lines($git, ['diff', '--name-only', '--no-renames', "HEAD...{$base}"]);
+    if ($ours === null || $theirs === null) {
+        return null;
+    }
+    $own = array_diff($ours, pipeline_design_files($manifest));
+    $shared = array_values(array_intersect($own, $theirs));
+
+    return $own === [] || $shared !== [] ? ['base' => $base, 'behind' => $behind, 'shared' => $shared] : null;
+}
+
 /**
  * What a review of the PR after a completed one reads (`../references/engine.md` §Scoped re-review), or null
  * for the whole PR: no base, a base HEAD does not contain, a base ref that does not resolve, or any git call
@@ -298,9 +358,7 @@ function pipeline_review_scope(array $manifest, callable $git): ?array
     if ($since === null || $git(['merge-base', '--is-ancestor', $since, 'HEAD'])[0] !== 0) {
         return null;
     }
-    $base = isset($manifest['base'])
-        ? "origin/{$manifest['base']}"
-        : (pipeline_git_lines($git, ['symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD'])[0] ?? null);
+    $base = pipeline_base_ref($manifest, $git);
     if ($base === null) {
         return null;
     }
@@ -362,6 +420,25 @@ function pipeline_merge_files(string $merge, callable $git): ?array
     return $files;
 }
 
+/**
+ * A writing step's first override when `pipeline_base_state()` asks for a merge (`../references/engine.md`
+ * §Catching up with the base). The commands are literal: the allow rules in `README.md` match this form.
+ */
+function pipeline_catch_up_line(array $manifest, array $state): string
+{
+    ['base' => $base, 'behind' => $behind, 'shared' => $shared] = $state;
+    $git = 'git -C ' . rtrim((string) $manifest['worktree'], '/');
+    $ahead = $behind === 1 ? '1 commit ahead' : "{$behind} commits ahead";
+    $why = $shared === []
+        ? 'and this branch holds only its design'
+        : 'and changed files this branch changes too (' . implode(', ', array_map(fn (string $file) => "`{$file}`", $shared)) . ')';
+
+    return "Catch up with the base first (engine.md §Catching up with the base): `{$base}` is {$ahead} {$why}. "
+        . "Before any other work run `{$git} merge --no-edit {$base}`, as its own command in exactly that form. "
+        . "On a conflict, resolve each file keeping both sides' intent, `{$git} add <file>`, and conclude with `{$git} commit --no-edit`. "
+        . "Only where both sides cannot be kept: `{$git} merge --abort` and return `halted`, quoting the conflicting hunks. "
+        . 'Never rebase, never force-push. A denied command is a halt naming it; do not reshape it. Record the merge as that section says.';
+}
 /** The review-pr review step's target once a review of the PR has completed (`../references/engine.md` §Scoped re-review). */
 function pipeline_review_scope_line(array $scope): string
 {

@@ -102,7 +102,8 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    `done` or a halt: report it and stop. A resume starts here: `launch` starts from the cursor.
 3. **Start the saved workflow `pipeline-autoflow`** by name, with `launch`'s JSON as `args`, and wait
    for its completion notice. Starting it from this skill is the owner's opt-in; unattended runs need
-   auto permission mode or allow rules for `git push`, `gh` and `docker`.
+   auto permission mode or allow rules for `git push`, `gh` and `docker`, and the allow rules for the
+   merge of the base in its `git -C <worktree>` form (`README.md`, *Permissions for unattended runs*).
 4. **Finish.** `php "$CHECKS/dispatch_cli.php" finish <manifest> '<its return as JSON>'`, or
    `'{"action":"halt","reason":"<the error>"}'` when the workflow errored. `finish` refuses a `done`
    whose cursor is not on `review-pr`, or whose last snapshot is not `review-pr`'s resolve step's with
@@ -112,7 +113,7 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    `poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll); echo "$answer" | grep -q '"action":"wait"'; do sleep 30; poll=$((poll + 1)); done; echo "$answer"`.
    **`ready`:** `gh pr ready <pr>`. The manifest already says done; when `gh pr ready` is denied the
    PR stays draft and no halt is written: put the denial in the report, and the owner runs
-   `gh pr ready` by hand. **`fix`:** the diff as in step 2, then
+   `gh pr ready` by hand. **`fix`** (a red CI, or a merge the last review did not see): the diff as in step 2, then
    `launch <manifest> "<manifest stem>.diff" --from review-pr --decision "<its decision>"`, and steps
    3–5 again. **`halt`:** `finish <manifest> '<the answer>'`, then as any halt; on a `mismatch` GitHub's
    head and the worktree's `HEAD` differ: once they match (push the branch, or reconcile it when GitHub

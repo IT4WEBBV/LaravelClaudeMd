@@ -580,8 +580,9 @@ there, and `brief` refuses the other step. On a loop-back the script reruns:
 
 ### What a Bounded design commits
 
-Two commits, spec then plan, so `handoff pr` finds both in the last two commits exactly as it does
-for an Architectural design. They are named as `writing-plans` names them, the spec at
+Two commits, spec then plan, as an Architectural design makes them. `handoff`'s brief names both from
+the manifest, so a merge commit between or after them hides neither (§Catching up with the base).
+They are named as `writing-plans` names them, the spec at
 `docs/superpowers/specs/<date>-<slug>-design.md` and the plan beside it at
 `docs/superpowers/plans/<date>-<slug>.md` (`pipeline_plan_path()`), so a design that grows finds its plan.
 
@@ -870,6 +871,7 @@ runs (#77), while `review-pr:review` reads the diff, not CI.
 
 | Verdict on the head commit | Answer |
 |---|---|
+| `merge`: a merge since the last completed review met the branch's changes (`autoflow`) | `fix` the first time in a run, before the PR is read; after that round the gate goes on to the rows below |
 | `mismatch`: GitHub's head is not the worktree's `HEAD` | `wait`; `halt` at the third read, naming both shas: a push GitHub shows within seconds, and one it does not show by then did not land |
 | `green`: every check finished `SUCCESS`, `NEUTRAL` or `SKIPPED` | `ready` |
 | `none`: no check at all | `ready`; with `.github/workflows/*.yml` or `*.yaml` in the worktree only from the third read, since GitHub registers a push's checks seconds after it |
@@ -900,8 +902,24 @@ poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll
   re-reviewing: run the loop again by hand on the halted manifest (`ci` is read-only and refuses only a
   retired mode, a missing PR or a worktree whose `HEAD` git cannot read) rather than `launch`, which would
   re-run `review-pr:review`.
+- **A merge the review did not see** (#124). The finish step is a run's last, so a merge it makes
+  (§Catching up with the base), conflict resolutions included, would reach a ready PR unreviewed. In
+  `autoflow`, `ci` computes `pipeline_review_scope()` and hands its `files` to the gate: after `finish`
+  recorded `done` the scope's base is the review that just completed, so the files are exactly what a
+  merge since that review met. When there are any, the gate answers `fix` with verdict `merge`, the files
+  and the decision `Unreviewed merge on the PR's head commit <sha>: a merge since the last completed
+  review met this branch's changes in <files>` (`<sha>` is the worktree's `HEAD`), before it reads the PR
+  or its checks. The session does what it does for a red: the same `launch --from review-pr --decision
+  "<its decision>"` and a new workflow. That review is scoped, reads those files whole (§Scoped
+  re-review), and records a `reviewed_sha` that contains the merge, so the gate's next read finds nothing
+  unreviewed. Once per run, counted as the CI round is and apart from it: a run may have one of each. A
+  further unreviewed merge neither halts nor loops; the gate goes on to CI, and the PR body's
+  `## Base merges` line is its record. The round fires on a clean merge of a shared file as on a
+  conflict: git 2.33 cannot tell the two apart afterwards, and a textual merge of a file both sides
+  changed is what a review is for.
 - **In `interactive`** the finish step runs the same loop, `gh pr ready` on `ready`, and shows any other
-  answer to the human; there is no automatic round.
+  answer to the human; there is no automatic round, and no merge round: the human resolves the review
+  and sees the merge as it is made.
 - **The merge watch stays on `state`** (§After the merge): once the PR is ready, CI on its head has
   settled.
 
@@ -977,7 +995,9 @@ and the dispatch prompt is one line naming that file; in `autoflow` the step pri
 - **the settled decisions** (`decisions`) and the manifest state the step needs, including §Suite
   reuse's last suite tree and the permitted design size on `design`;
 - **the overrides for that leg and step** from `pipeline_leg_overrides()`, pointing at the section of
-  this file that holds each rule, e.g. *"leave the PR draft"* (§Who takes the PR out of draft);
+  this file that holds each rule, e.g. *"leave the PR draft"* (§Who takes the PR out of draft); on a
+  step that writes to the branch, first among them the order to merge the base when the branch fell
+  behind it (§Catching up with the base);
 - **the return contract**: which keys the step may write and which statuses it may return;
 - **nothing a station does not ask for.** No test policy, proof format or process of anyone's own
   invention.
@@ -1111,6 +1131,80 @@ php -r 'require $argv[1] . "/suite.php";
     desyncs vendor, migrations and assets, and a wrong red would be filed as pre-existing.
 - **Failure to compute the key** (`pipeline_git` throws) is a machinery failure. Run the suite; never
   assume reuse.
+
+## Catching up with the base — a run merges its base into its own branch
+
+A run keeps its own branch current with its base by a plain merge, and does not halt on "behind". Why
+(#124): in one `/orchestrate` batch on IT4WEBBV/Deploy (#456–#461, 2026-09-29/30) a run fell behind its
+base four times, and each time it halted for an owner answer and a relaunch. The global `CLAUDE.md` told
+every step not to merge on its own initiative, no brief said who merges or when, and a step that noticed
+improvised: a rebase in one run, a halt in the next.
+
+**Code decides whether, the step merges.** On a step that writes to the branch (`PIPELINE_CATCH_UP_STEPS`
+in `../checks/brief.php`: `design`'s steps, both resolve steps and `implement`), `pipeline_base_state()`
+fetches the base (`origin/<manifest base>`, else `origin/HEAD`) and compares:
+
+| The branch | The base | The brief |
+|---|---|---|
+| is not behind | | no line |
+| holds code | moved only in files the branch does not change | no line: CI tests the PR's merge ref |
+| holds code | moved in a file the branch changes | the line, naming the shared files |
+| holds nothing, or only its spec and plan | moved at all | the line: a design is written by reading the code, so it reads current code |
+
+Any git call that fails gives no line: a run that cannot tell carries on, and an offline fetch is no
+reason to stop. The fetch runs from PHP, as kickoff's does (`pipeline_kickoff_base()`): it moves only
+`refs/remotes/origin/<base>`, never the working tree, which is why `brief` may fetch where it may not
+merge (a merge run from PHP would hide the command from the permission layer and change the tree
+`brief` reads). With an unreachable remote `brief` waits on git's network timeout, once per writing
+step, and then prints the brief without the line. The review steps do not merge (a reviewer that
+resolves a conflict reviews its own work), nor does `handoff` or `verify-ui`. Both modes get the line.
+
+**The line is the step's first override** and carries the command:
+`git -C <worktree> merge --no-edit origin/<base>`, run as its own command in exactly that form, because a
+permission rule matches a command as typed (`README.md`, *Permissions for unattended runs*). A denied
+command is a halt naming it, never a reshaped command.
+
+- **The merge comes first**, on the clean tree the previous step left, then the step's own work.
+- **Outside the review's and the plan's bounds.** The merge and its conflict resolutions are the
+  base's changes, not the step's: they fall outside a resolve step's *"Change nothing the review did
+  not name"* (§Resolving a review), and a file only the merge touched is no plan gap and no
+  `plan-insufficient` for `implement`.
+- **Conflicts.** Resolve each file keeping both sides' intent, leave no conflict marker behind,
+  `git -C <worktree> add <file>`, and conclude with `git -C <worktree> commit --no-edit`
+  (`git merge --continue` needs an editor, which a step does not have). Where keeping both sides is a
+  product decision, the two changes wanting opposite behaviour: `git -C <worktree> merge --abort` and
+  return `halted`, quoting the conflicting hunks. After `handoff` the reason goes into the PR body as
+  for any halt (§Failure policy). The owner's answer comes back as a `--decision` on the relaunch, and
+  that step's brief asks for the merge again.
+- **The suite.** Nothing new: a merge changes the tree, so §Suite reuse finds no green run for it and
+  the step's next full run covers the merged tree. `implement` merges before its first plan step;
+  `review-pr`'s finish step runs the suite after its merge. A design step's merge runs none: the branch
+  has no code of its own to test.
+- **The record.** When `artifacts.pr` is set, add one line per merge to the PR body, under a
+  `## Base merges` heading created once: the base and its sha, the commit count, and per conflicted file
+  how it was resolved (*clean* when there was none). Edit the body as §Failure policy does
+  (`gh pr view --json body` into a file, append, `gh pr edit --body-file`), never blanking it. A resolve
+  step also names the merge in its entry's `actions`. Before a PR exists the merge commit is the record.
+  A branch without a commit of its own fast-forwards: no merge commit, nothing to record.
+- **No rebase and no force-push, anywhere in a run.** §Scoped re-review treats a rewritten history as
+  "review everything again".
+
+**No boundary check verifies that a step merged.** The state is recomputed at every writing step's
+brief, so a step that skipped the merge leaves the next one the same line. A merge made by `implement` or
+a design step is reviewed with the rest of the diff; one made by the finish step gets its own review
+round at the gate (§The CI gate, *A merge the review did not see*).
+
+**`handoff` takes the spec and the plan from the manifest.** `handoff pr` finds them in the last two
+commits, and `git log --name-only` lists no files for a merge commit: a merge by `design:plan` between
+the spec commit and the plan commit, or by `review-plan`'s resolve step directly before `handoff`,
+leaves its spec empty. Its fallback takes the newest file by date and asks on several of one date,
+which a merged batch base supplies, and a question in an unattended step is a halt. So `handoff:run`'s
+brief names `artifacts.spec` and `artifacts.plan` and tells the step to skip the detection.
+
+**What this does not catch.** A base that changed only files the branch does not touch is not merged,
+even where the branch's code depends on them: the blind spot §Scoped re-review names, covered by CI on
+the merge ref. A design grown after code exists (a plan gap) is measured by the branch's own files, not
+by the files the grown plan names; the step that writes that code catches up at its next brief.
 
 ## Scoped re-review — a review of the PR after a completed one reads what changed since
 

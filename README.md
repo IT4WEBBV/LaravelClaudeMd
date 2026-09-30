@@ -69,6 +69,39 @@ the other machine on its own:
 - `edit` — the repo owning the file being written, once per repo per session.
 - `checkout` — drops cached verdicts after a branch switch.
 
+### Permissions for unattended runs
+
+A `/pipeline` run merges its base into its own branch when its brief says so (pipeline `engine.md`
+§Catching up with the base). A denial in a background step is final, so allow the three commands in
+`~/.claude/settings.json`: user level, so they reach every project on the machine, and a per-machine
+step like the hooks:
+
+```json
+"permissions": { "allow": [
+  "Bash(git -C * merge --no-edit origin/*)",
+  "Bash(git -C * merge --abort)",
+  "Bash(git -C * commit --no-edit)"
+] }
+```
+
+The form matters: a rule matches the command as typed, so a project's `Bash(git merge:*)` does not cover
+`git -C <worktree> merge`, and a chained command is matched part by part. The brief prints these
+commands in exactly this form and tells the step to run each as its own command. A `*` in a Bash rule
+matches any text, spaces included, and a command that matches an allow rule is decided there, before the
+auto-mode classifier sees it (Claude Code docs, *permissions* §Wildcard patterns and *permission-modes*
+§How the classifier evaluates actions).
+
+Claude Code warns at startup about an allow rule with a `*` before the subcommand, and
+`git -C * merge …` has that shape: the warning is expected, and the rules stay. What the docs leave open
+is whether a rule that draws the warning still matches; the first batch after this lands shows it, and a
+denial still halts the step with the command named. If the rules turn out inert, the form that avoids
+the warning is `cd <worktree> && git merge --no-edit origin/<base>` with
+`Bash(git merge --no-edit origin/*)`. That is a change of the brief line (`pipeline_catch_up_line()`)
+and of these rules together, not a rule to swap by hand.
+
+`git -C <worktree> add <file>` has no rule here: no `git add` rule matches the `-C` form either, and
+those adds pass because the classifier allows them, as it does in every step that stages a file.
+
 The pipeline skill's suite needs `node` on PATH: `AutoflowScriptTest` replays the autoflow Workflow
 script under it, and fails rather than skips without it, so a machine without `node` has a red suite.
 

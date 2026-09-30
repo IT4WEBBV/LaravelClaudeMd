@@ -857,6 +857,40 @@ it('refuses a ci it cannot parse', function (array $arguments) {
     'an unknown flag' => [['--wait', '3']],
 ]);
 
+/**
+ * A finished run on PR 7 in a real repo: after the review at its recorded commit, the finish step merged a
+ * main that changed a file the branch changes. gh is a fake that cannot read the PR.
+ */
+function ci_merge_fixture(string $mode, array $decisions = []): array
+{
+    $dir = rereview_repo(['shared.php' => "a\nb\nc\nd\ne\nf\ng\n"]);
+    $reviewed = rereview_commit($dir, ['shared.php' => "A\nb\nc\nd\ne\nf\ng\n"]);
+    rereview_main_moves($dir, ['shared.php' => "a\nb\nc\nd\ne\nf\nG\n"]);
+    $head = rereview_merge($dir);
+    $fixture = dispatch_fixture([
+        'mode' => $mode, 'worktree' => $dir, 'cursor' => ['leg' => 'review-pr', 'status' => 'done'],
+        'artifacts' => ['spec' => null, 'plan' => null, 'pr' => 7, 'issue' => null],
+        'gate_ledger' => [rereview_entry('continued', $reviewed)], 'decisions' => $decisions,
+    ]);
+    mkdir($fixture['dir'] . '/bin');
+    file_put_contents($fixture['dir'] . '/bin/gh', "#!/bin/sh\necho 'HTTP 502: Bad Gateway' >&2\nexit 1\n");
+    chmod($fixture['dir'] . '/bin/gh', 0755);
+
+    return [...$fixture, 'head' => $head, 'env' => ['PATH' => $fixture['dir'] . '/bin:' . getenv('PATH')]];
+}
+
+it('answers the merge round for an autoflow run whose finish step merged a shared file, once, and never for an interactive run', function () {
+    $flow = ci_merge_fixture('autoflow');
+    $before = file_get_contents($flow['manifest']);
+    $decision = "Unreviewed merge on the PR's head commit {$flow['head']}: a merge since the last completed review met this branch's changes in shared.php";
+
+    expect(ci_gate($flow)['json'])->toBe(['action' => 'fix', 'verdict' => 'merge', 'files' => ['shared.php'], 'decision' => $decision]);
+    expect(file_get_contents($flow['manifest']))->toBe($before);
+
+    expect(ci_gate(ci_merge_fixture('autoflow', [$decision]))['json'])->toBe(['action' => 'wait', 'verdict' => 'unreadable']);
+    expect(ci_gate(ci_merge_fixture('interactive'))['json'])->toBe(['action' => 'wait', 'verdict' => 'unreadable']);
+});
+
 function kickoff_issue(array $overrides = []): array
 {
     return ['number' => 69, 'title' => 'Pipeline: kickoff as one command', 'html_url' => 'https://github.com/acme/app/issues/69', 'pull_request' => null, ...$overrides];
@@ -1246,4 +1280,31 @@ it('scopes an interactive run\'s re-review the same way', function () {
 
     expect(dispatch_cli(['next', $fixture['manifest']])['json'])->toMatchArray(['action' => 'dispatch', 'leg' => 'review-pr', 'step' => 'review']);
     expect(file_get_contents($fixture['brief']))->toContain("a review of this PR completed at `{$reviewed}`");
+});
+
+it('prints the catch-up line first in the brief of a writing step behind its base, in both modes, and briefs without it when the fetch fails', function () {
+    $behind = function (): string {
+        $dir = base_repo(['shared.php' => "base\n"]);
+        rereview_commit($dir, ['shared.php' => "feature\n"]);
+        base_moves($dir, ['shared.php' => "main\n"]);
+
+        return $dir;
+    };
+    $line = fn (string $dir) => "## Overrides\n\n- Catch up with the base first (engine.md §Catching up with the base): `origin/main` is 1 commit ahead and changed files this branch changes too (`shared.php`). Before any other work run `git -C {$dir} merge --no-edit origin/main`, as its own command in exactly that form.";
+
+    $dir = $behind();
+    $flow = dispatch_fixture(['mode' => 'autoflow', 'worktree' => $dir, 'cursor' => ['leg' => 'implement', 'status' => 'pending']]);
+    expect(dispatch_cli(['brief', $flow['manifest'], 'implement', 'run'])['stdout'])->toContain($line($dir));
+
+    $dir = $behind();
+    $interactive = dispatch_fixture(['mode' => 'interactive', 'worktree' => $dir, 'cursor' => ['leg' => 'implement', 'status' => 'pending']]);
+    expect(dispatch_cli(['next', $interactive['manifest']])['json'])->toMatchArray(['action' => 'dispatch', 'leg' => 'implement', 'step' => 'run']);
+    expect(file_get_contents($interactive['brief']))->toContain($line($dir));
+
+    $dir = $behind();
+    pipeline_git($dir, ['remote', 'set-url', 'origin', dirname($dir) . '/moved.git']);
+    $offline = dispatch_fixture(['mode' => 'autoflow', 'worktree' => $dir, 'cursor' => ['leg' => 'implement', 'status' => 'pending']]);
+    expect(dispatch_cli(['brief', $offline['manifest'], 'implement', 'run'])['stdout'])
+        ->toContain('`implement` leg, `run` step')
+        ->not->toContain('Catch up with the base');
 });
