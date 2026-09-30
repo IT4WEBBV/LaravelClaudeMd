@@ -71,12 +71,16 @@ it('permits the design size the invocation allowed, naming the word', function (
     'a legacy light: true' => [['light' => true], '- design size: the Bounded path is permitted (`medium`)'],
 ]);
 
-it('tells design to confirm by reading, probe only to choose, and leave the Expected lines to implement', function () {
+it('tells design to confirm by reading, probe to choose or to check a claim, and leave the Expected lines to implement', function () {
+    $reads = 'Do not build or run the plan\'s code, in a scratch copy or anywhere else: confirm the signatures and APIs it relies on by reading, `php -l` or grep; `implement` proves the plan\'s Expected lines (engine.md §What design proves).';
+    $probe = 'An exception, to choose an approach: when the choice between approaches hinges on whether one of them works at all, answer that question with a throwaway probe (a few lines run on their own, never the plan\'s code, never the suite) and write the question and what the probe showed into the spec.';
+    $claim = 'An exception, to check a claim: when the spec or the plan relies on what existing code does, which reading cannot show, answer that one yes/no question with one throwaway command (a `php -r` or tinker one-liner, or one existing test by filter; never the suite, never the plan\'s code, no new file), bringing the dev stack up first when the command needs it (engine.md §Dev-stack readiness), and write `Probed: <claim>: <what it showed> (<command>)` on one line beside the task that relies on it, or beside the claim in the spec when this step writes no plan.';
+    $exemplars = 'Plans and specs committed before 2026-09-14 are not exemplars for test or proof policy, and no plan\'s `Verified before writing` header is part of the format.';
+
     foreach ([['autoflow', 'spec'], ['interactive', 'run']] as [$mode, $step]) {
         expect(pipeline_brief(brief_manifest('design', ['mode' => $mode]), 'design', '/tmp/m.json', $step))
-            ->toContain('Do not build or run the plan\'s code, in a scratch copy or anywhere else: confirm the signatures and APIs it relies on by reading, `php -l` or grep; `implement` proves the plan\'s Expected lines (engine.md §What design proves).')
-            ->toContain('The one exception: when the choice between approaches hinges on whether one of them works at all, answer that question with a throwaway probe (a few lines run on their own, never the plan\'s code, never the suite) and write the question and what the probe showed into the spec.')
-            ->toContain('Plans and specs committed before 2026-09-14 are not exemplars for test or proof policy, and no plan\'s `Verified before writing` header is part of the format.')
+            ->toContain("- {$reads}\n- {$probe}\n- {$claim}\n- {$exemplars}\n")
+            ->not->toContain('The one exception')
             ->not->toContain('for test or proof policy.');
     }
 });
@@ -97,10 +101,13 @@ it('splits autoflow\'s design into a spec step that stops at the spec and a plan
         ->toContain('`design` leg, `plan` step')
         ->toContain('- Read the committed spec (`artifacts.spec`) cold, and the code it points at, and invoke `superpowers:writing-plans` on it; do not re-design what the spec settles (engine.md §Design size).')
         ->toContain('- Where the plan needs an answer the spec does not give, add the question and the answer you assumed to the spec\'s `## Assumptions` and commit that before the plan, so `/critique plan` audits it.')
-        ->toContain('Do not build or run the plan\'s code')
-        ->toContain('Plans and specs committed before 2026-09-14 are not exemplars')
+        ->toContain(
+            '- Do not build or run the plan\'s code, in a scratch copy or anywhere else: confirm the signatures and APIs it relies on by reading, `php -l` or grep; `implement` proves the plan\'s Expected lines (engine.md §What design proves).' . "\n"
+            . '- An exception, to check a claim: when the spec or the plan relies on what existing code does, which reading cannot show, answer that one yes/no question with one throwaway command (a `php -r` or tinker one-liner, or one existing test by filter; never the suite, never the plan\'s code, no new file), bringing the dev stack up first when the command needs it (engine.md §Dev-stack readiness), and write `Probed: <claim>: <what it showed> (<command>)` on one line beside the task that relies on it, or beside the claim in the spec when this step writes no plan.' . "\n"
+            . '- Plans and specs committed before 2026-09-14 are not exemplars'
+        )
         ->toContain('- Commit the plan. Set `artifacts.plan`.')
-        ->not->toContain('throwaway probe')
+        ->not->toContain('to choose an approach')
         ->not->toContain('Invoke `superpowers:brainstorming`');
     expect(pipeline_brief(brief_manifest('design'), 'design', '/tmp/m.json', 'run'))
         ->toContain('- Commit the spec, then the plan: two commits. Set `artifacts.spec` and `artifacts.plan`.');
