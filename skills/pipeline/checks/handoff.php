@@ -120,8 +120,7 @@ function pipeline_handoff(array $manifest, callable $git, callable $gh): array
 
     $issue = isset($manifest['artifacts']['issue']) ? (int) $manifest['artifacts']['issue'] : null;
     $base = $manifest['base'] ?? null;
-    $title = pipeline_handoff_title($git(['show', "HEAD:{$spec}"])[1], $branch, $issue);
-    $pr = $existing ?? pipeline_handoff_create($branch, $base, $title, pipeline_handoff_body($spec, $plan, $issue), $gh);
+    $pr = $existing ?? pipeline_handoff_create($branch, $base, pipeline_handoff_title($git(['show', "HEAD:{$spec}"])[1], $branch, $issue), pipeline_handoff_body($spec, $plan, $issue), $gh);
     $aligned = $existing === null ? [] : pipeline_handoff_align($existing, $base, $spec, $plan, $issue, $gh);
 
     return [

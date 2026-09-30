@@ -81,7 +81,7 @@ a per-machine step like the hooks:
   "Bash(git -C * merge --no-edit origin/*)",
   "Bash(git -C * merge --abort)",
   "Bash(git -C * commit --no-edit)",
-  "Bash(php * dispatch_cli.php handoff *)"
+  "Bash(php */dispatch_cli.php handoff *)"
 ] }
 ```
 
@@ -106,7 +106,7 @@ those adds pass because the classifier allows them, as it does in every step tha
 The `handoff` step pushes the branch and calls gh from inside one command,
 `php <checks>/dispatch_cli.php handoff <manifest>`, as `kickoff` creates the worktree and edits the board
 from inside one `php` call. The push is a run's first outward write, so its rule is listed above with
-the merge rules: `Bash(php * dispatch_cli.php handoff *)`. The brief prints the command bare, with no
+the merge rules: `Bash(php */dispatch_cli.php handoff *)`. The brief prints the command bare, with no
 `cd … &&` in front, which is the form the rule matches. Without the rule a denial halts the step with
 the command named; nothing is pushed by then, and a resume after the rule is added runs the command
 again.

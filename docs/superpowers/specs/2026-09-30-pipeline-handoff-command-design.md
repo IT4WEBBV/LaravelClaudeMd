@@ -261,7 +261,7 @@ the replays that use it.
   reads *beyond what the `handoff` command and `work-on` do*.
 - **`README.md`**, *Permissions for unattended runs*: the command pushes and calls gh from inside one
   `php … dispatch_cli.php handoff <manifest>` call, as `kickoff` creates the worktree and edits the
-  board; its rule, `Bash(php * dispatch_cli.php handoff *)`, is listed in the `permissions.allow` block
+  board; its rule, `Bash(php */dispatch_cli.php handoff *)`, is listed in the `permissions.allow` block
   beside the merge rules, and a denial of that call halts the step with the command named.
 
 ### What does not change
@@ -372,7 +372,9 @@ Each is a question the brainstorm would have put to the owner, with the answer a
    act in it is idempotent.
 6. **Which PRs are adopted?** An open PR whose head is the run's branch, when it is a draft. A ready
    one halts with the invariant check's words; a closed or merged one is not the run's PR, and a new
-   one is created.
+   one is created. That holds for the listing, which shows open PRs only: a closed or merged PR the
+   manifest itself records in `artifacts.pr` halts (design step 3), since a run that names a closed PR
+   is inconsistent and a second PR opened in silence is #118 again.
 7. **Is an existing PR's body rewritten?** No, only added to, and only when it lacks the spec path, the
    plan path or any reference to the issue. Later legs write into that body.
 8. **Is an existing PR's title changed?** No.
