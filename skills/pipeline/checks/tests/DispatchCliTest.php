@@ -182,6 +182,7 @@ it('launches from the cursor with the ledger\'s loop-backs, the design size and 
         'tables' => pipeline_routing_tables(),
         'profile' => 'medium',
         'tier' => 'medium',
+        'escalated' => false,
         'agents' => pipeline_agent_table([]),
     ]);
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-plan', 'status' => 'pending']);
@@ -222,6 +223,7 @@ it('hands the script its agents with the manifest\'s override laid over them, th
     expect($start['agents']['light']['review-plan:review'])->toBe(['model' => 'opus', 'effort' => 'xhigh']);
     expect($start['profile'])->toBe('light');
     expect($start['tier'])->toBe('light');
+    expect($start['escalated'])->toBeFalse();
 });
 
 it('starts a run on full once its ledger records an escalation, whatever the spec and the tier say', function () {
@@ -234,6 +236,7 @@ it('starts a run on full once its ledger records an escalation, whatever the spe
     expect($start['size'])->toBe('Bounded');
     expect($start['profile'])->toBe('full');
     expect($start['tier'])->toBe('light');
+    expect($start['escalated'])->toBeTrue();
 });
 
 it('starts a legacy light: true manifest with a Bounded spec on medium, the former light agents, and names medium as its tier', function () {

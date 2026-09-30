@@ -15,7 +15,9 @@ export const meta = {
 // The routing tables are launch's: `tables` in its start answer, built by pipeline_routing_tables() from
 // the functions interactive mode uses. So are the agents: `agents` (pipeline_agent_table()), the
 // profile the run starts on (pipeline_start_profile()) and `tier`, the tier its invocation named, so
-// the script names no model or effort, and no tier but `full` (engine.md §Agents per step).
+// the script names no model or effort, and no tier but `full` (engine.md §Agents per step). And so is
+// `escalated`, whether the ledger records an escalation (pipeline_escalated()): the script seeds its
+// own from it, so a resume keeps `full` and the one exemption as a run does.
 // meta.phases repeats the legs as labels only (meta must be a pure
 // literal). AutoflowScriptTest replays this script on launch's answer with agent() faked.
 const COPIED = { design: { size: { type: 'string', enum: ['Bounded', 'Architectural'] } }, implement: { ui: { type: 'boolean' } } }
@@ -145,6 +147,7 @@ if (!complete(args.tables)) return halt(args.startLeg ?? 'launch', 'args carry n
 const { legs, steps, loopTarget, allowed, bound, bounded } = args.tables
 if (!legs.includes(args.startLeg) || !('review-plan' in loopTarget)) return halt(args.startLeg ?? 'launch', 'args are not a launch start answer') // a plan gap is charged to loops['review-plan']
 if (!completeAgents(args.agents, args.profile, args.tier, steps)) return halt(args.startLeg, 'args carry no complete agents table: re-run launch from checks that have pipeline_agent_table()')
+if (typeof args.escalated !== 'boolean') return halt(args.startLeg, 'args carry no escalated flag: re-run launch from checks that answer it')
 const agents = args.agents
 const tier = args.tier
 
@@ -152,7 +155,7 @@ const loops = { ...Object.fromEntries(Object.keys(loopTarget).map(gate => [gate,
 let ui = args.ui
 let size = args.size
 let profile = args.profile
-let exempted = false
+let escalated = args.escalated
 let leg = args.startLeg
 let from = args.startStep
 let last
@@ -169,7 +172,7 @@ while (leg) {
     if (result.status !== 'continued') break
     if (leg === 'design') {
       size = result.size
-      profile = size === 'Bounded' && !exempted ? tier : 'full' // up, never down: escalation is one way, in the run as on a resume
+      profile = size === 'Bounded' && !escalated ? tier : 'full' // up, never down: escalation is one way, in the run as on a resume
     }
   }
   if (result.status === 'halted') return halt(leg, result.reason)
@@ -183,9 +186,9 @@ while (leg) {
   if (!gap && result.status !== 'looped-back') return halt(leg, `unknown status ${result.status}`)
   const target = gap ? 'design' : loopTarget[leg]
   if (!target) return halt(leg, `no loop-back from ${leg}`)
-  const counted = !(gap && size === 'Bounded' && !exempted) // a Bounded escalation is not a loop-back; escalation is one-way, so once per run
+  const counted = !(gap && size === 'Bounded' && !escalated) // a Bounded escalation is not a loop-back; escalation is one-way, so once per run
   if (!counted) {
-    exempted = true
+    escalated = true
     profile = 'full' // an escalation: the grow-form design and every step after it run on full
   }
   const gate = gap ? 'review-plan' : leg

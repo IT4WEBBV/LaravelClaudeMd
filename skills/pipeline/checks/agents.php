@@ -157,7 +157,7 @@ function pipeline_start_profile(array $manifest, DesignSize $size): string
     $tier = AgentTier::fromManifest($manifest);
 
     return match (true) {
-        in_array('escalated', array_column(pipeline_ledger($manifest), 'outcome'), true) => AgentTier::Full->value,
+        pipeline_escalated(pipeline_ledger($manifest)) => AgentTier::Full->value,
         ! empty($manifest['artifacts']['spec']) => $tier->forDesign($size)->value,
         default => $tier->value,
     };

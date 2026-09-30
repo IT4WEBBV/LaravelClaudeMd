@@ -68,6 +68,12 @@ function pipeline_reset_at(array $ledger): string
     return $resetAt === [] ? '' : max($resetAt);
 }
 
+/** Whether the ledger records a `design-size` escalation: the run is on `full` from there on, a resume included (`../references/engine.md` §Agents per step). */
+function pipeline_escalated(array $ledger): bool
+{
+    return in_array('escalated', array_column($ledger, 'outcome'), true);
+}
+
 /**
  * The gate legs that have run, as `pipeline_can_navigate`'s `$doneLegs`. A gate counts once it has
  * a `continued` entry — but only one newer than the latest `design-size` escalation or plan gap (a
