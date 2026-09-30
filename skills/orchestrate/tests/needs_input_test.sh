@@ -100,4 +100,12 @@ refuses acme/app '#12:7'
 refuses acme/app 12:7 13
 refuses
 
+# The skill carries the rule where a PR becomes ready (Step 5) and where it stops waiting (Step 6);
+# the commands name the script.
+for step in 5 6; do
+  grep "^$step\. " "$HERE/../SKILL.md" | grep -F '`needs input:`' >/dev/null \
+    || fail "SKILL.md step $step does not carry \`needs input:\`"
+done
+grep -F 'needs_input.py' "$HERE/../references/commands.md" >/dev/null || fail "commands.md does not name needs_input.py"
+
 echo "PASS needs_input.py"
