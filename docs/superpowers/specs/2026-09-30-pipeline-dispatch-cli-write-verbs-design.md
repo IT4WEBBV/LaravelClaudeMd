@@ -377,3 +377,35 @@ Each is a question the brainstorm would have put to the owner, with the answer a
     against hand-written manifests, which stay legal input. One replay is added that writes only through
     `record`.
 19. **Is a changelog entry needed?** No: this repo has no `.changelog/` directory and no `CHANGELOG.md`.
+
+Added by the plan step, where the plan needed an answer the design above does not give:
+
+20. **Where does the map of a run's files live, now that `brief.php` names two of them?** In
+    `manifest.php`, as `manifest_files()`, with `review` and `actions` beside `brief`, `before` and
+    `diff`. `brief.php` cannot load `dispatch_cli.php` (loading it runs a command), so
+    `dispatch_cli_files()` goes and its callers use `manifest_files()`.
+21. **How does a fact git could not give reach the pure function?** As `null` (`head`, `annotations`).
+    `dispatch_cli.php` asks git for every fact on any status but `halted`, and `pipeline_record()`
+    refuses only when the step at hand needs the one that is `null`. So a repo without a resolvable base
+    still records every step except a review.
+22. **Is `--proof`'s existence one of `$facts`?** No. The proof page lives outside the repo, so it is a
+    plain `is_file()` in `dispatch_cli.php`, beside the reads of the two files.
+23. **Must the two files be at the paths the brief prints?** No. `record` takes the path it is given and
+    checks that it is a file and not older than the snapshot. The brief prints the two paths beside the
+    manifest, and a review step's brief names that file as the only one it writes.
+24. **What does "removes `artifacts.plan`" write?** The key is unset, not set to `null`. Every reader
+    treats both alike (`empty()`, `?? null`).
+25. **Does the thin `verify-ui` entry carry `leg`?** No: `gate`, `cycle`, `at`, `outcome`, as
+    `manifest.md` defines the shape. The stamp table's *"an entry's `gate`, `leg`"* holds for every other
+    entry.
+26. **Is `record` literally the step's last command?** It is its last write. The read-only commands the
+    script's prompt asks for (`size`, `ui`, the proof page's `open`) run after it; `size` must, because
+    it reads `artifacts.spec` from the manifest. `## Return` says so in its first sentence.
+27. **How do the override lines get the literal `suite` command and the two file paths?**
+    `pipeline_leg_overrides()` takes the manifest path as a second argument, and
+    `pipeline_brief_overrides()` passes it on.
+28. **Are the issue-link outcomes an enum too?** Yes, `IssueLinkOutcome`, beside `ActionDisposition`.
+29. **What if the result cannot be encoded as JSON (a review file with invalid UTF-8)?** `record` refuses
+    before it writes. `manifest_write()` would otherwise replace the manifest with an empty line.
+30. **What is `entry` in the answer?** The index of the ledger entry this record appended or completed;
+    `null` when it touched none.
