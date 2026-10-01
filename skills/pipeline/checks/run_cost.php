@@ -199,3 +199,22 @@ function pipeline_run_cost_lines(array $steps): array
         sprintf('run: %.2fM weighted over %d steps in %.1f min; largest step peak %dk (%s)', array_sum(array_column($steps, 'cost')) / 1e6, count($steps), pipeline_run_seconds($steps) / 60, intdiv($largest['peak'], 1000), $largest['label']),
     ];
 }
+
+/**
+ * What `run_cost_cli.php` files into the run's proof page for one workflow (`proof_add_cost()`): the transcript dir's
+ * name, which keys the entry, the workflow's span, and per step the figures it prints.
+ *
+ * @param list<array{label: string, calls: int, cost: float, peak: int, models: list<string>, start: ?float, end: ?float, wall: float, waiting: float}> $steps
+ * @return array{workflow: string, span: float, steps: list<array{label: string, models: list<string>, cost: float, calls: int, peak: int, wall: float, waiting: float}>}
+ */
+function pipeline_run_cost_record(string $workflow, array $steps): array
+{
+    return [
+        'workflow' => $workflow,
+        'span' => pipeline_run_seconds($steps),
+        'steps' => array_map(fn (array $step): array => [
+            'label' => $step['label'], 'models' => $step['models'], 'cost' => $step['cost'], 'calls' => $step['calls'],
+            'peak' => $step['peak'], 'wall' => $step['wall'], 'waiting' => $step['waiting'],
+        ], array_values($steps)),
+    ];
+}

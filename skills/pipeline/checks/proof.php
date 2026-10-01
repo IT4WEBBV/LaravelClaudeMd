@@ -398,10 +398,13 @@ function proof_write_run(string $dir, array $run, string $now): array
     return $run;
 }
 
-/** `run.json`'s text: pretty-printed, slashes unescaped, one trailing newline. */
+/**
+ * `run.json`'s text: pretty-printed, slashes unescaped, one trailing newline. A float keeps its fraction (`780.0`), so a
+ * filed `cost` reads back as the floats `run_cost_cli.php` filed.
+ */
 function proof_run_json(array $run): string
 {
-    return json_encode($run, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+    return json_encode($run, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION) . "\n";
 }
 
 /**
