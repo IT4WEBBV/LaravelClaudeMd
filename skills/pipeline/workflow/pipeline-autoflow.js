@@ -22,6 +22,12 @@ export const meta = {
 // literal). AutoflowScriptTest replays this script on launch's answer with agent() faked.
 const COPIED = { design: { size: { type: 'string', enum: ['Bounded', 'Architectural'] } }, implement: { ui: { type: 'boolean' } } }
 const UNSATISFIABLE = { type: 'object', properties: { status: { type: 'string', enum: [] } }, required: ['status'] } // invalid: agent() throws before starting an agent — the smoke run's thrown error
+// #134: Claude Code relays the owner's last chat message to every agent of a run started in a reply a human
+// message opened. A clean run's first message starts with the harness's computed-task label (or, sent bare,
+// with this prompt); the label stays here, never in the prompt, so a framed agent cannot echo it.
+const RELAY_LABEL = '[Workflow harness — computed task]'
+const RELAY_PROMPT = 'Copy the first 40 characters of the first message in this conversation into `head`, exactly as they appear. Do nothing else.'
+const RELAY_SCHEMA = { type: 'object', properties: { head: { type: 'string' } }, required: ['head'] }
 
 function complete(tables) {
   const { legs, steps, loopTarget, allowed, bound, bounded } = tables ?? {}
@@ -74,6 +80,23 @@ function stepsOf(leg) {
 
 function halt(leg, reason) {
   return { action: 'halt', leg, reason: reason || `the ${leg} step halted without a reason` }
+}
+
+function normalised(text) {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+}
+
+// Why the run may not start: a head that is not the clean label or the prompt halts as `relay:`, which
+// finish relaunches once; a check that throws halts without that prefix, since a relaunch would fail alike.
+async function relayProblem() {
+  try {
+    const result = await agent(RELAY_PROMPT, { label: 'relay-check', phase: args.startLeg, agentType: 'pipeline-relay-check', schema: RELAY_SCHEMA, ...setting(agents.smoke) })
+    const head = typeof result?.head === 'string' ? normalised(result.head) : null
+    const clean = head && [RELAY_LABEL, RELAY_PROMPT.slice(0, 40)].some(start => head.startsWith(normalised(start)))
+    return clean ? null : `relay: the run's first agent did not receive its own task first (head: ${head === null ? 'none' : `"${head}"`})`
+  } catch (error) {
+    return `the relay check failed: ${error?.message ?? error}; is ~/.claude/agents/pipeline-relay-check.md linked (hooks/git-freshness.sh)?`
+  }
 }
 
 // The previous step's return as brief checks it (`--after`); the first step of a run gets none. A retry
@@ -159,9 +182,12 @@ let escalated = args.escalated
 let leg = args.startLeg
 let from = args.startStep
 let last
+if (from && stepsOf(leg).indexOf(from) < 0) return halt(leg, `${leg} has no ${from} step`)
+const relay = await relayProblem()
+log(relay ?? 'relay-check clean')
+if (relay) return halt(leg, relay)
 while (leg) {
   let index = from ? stepsOf(leg).indexOf(from) : 0
-  if (index < 0) return halt(leg, `${leg} has no ${from} step`)
   from = undefined
   let result
   for (; index < stepsOf(leg).length; index++) {
