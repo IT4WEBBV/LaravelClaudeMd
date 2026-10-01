@@ -87,7 +87,8 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
         ],
         'verify-ui:run' => [
             'Bring the dev stack up if it is down. Invoke `browser-verification`.',
-            'Write the proof page (engine.md §The proof store) and post the text-only record comment; the path `write` printed goes to `record` as `--proof`.',
+            'Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` (a first version), and a `state` on every shot; before shots only when the spec names a before state to show, captured on the base, each immediately followed in `shots` by its after shot; `git switch <branch>` before any after shot and before returning, whatever the status, and `git rev-parse --abbrev-ref HEAD` names the branch before the page is written; a defect found is shot as `defect`, and a later pass carries the earlier defect shots forward beside its own. `repo`, `branch` and `pr` are the ones in the `run.json` beside `artifacts.proof`.',
+            'Post the text-only record comment; the path `write` printed goes to `record` as `--proof`.',
             'Return `continued`, or `looped-back` when the check fails.',
         ],
         'review-pr:review' => [
@@ -103,12 +104,12 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
             $autoflow ? 'On a loop-back, stop there: no suite.' : 'On a loop-back, stop there: no suite, no `gh pr ready`.',
             'Run the suite unless engine.md §Suite reuse finds this tree green, and record the run: ' . $suite . '.',
             'Reconcile the closing links (engine.md §Closing links): each related issue\'s outcome goes to `record` as an `--issue-link`.',
-            'When `artifacts.proof` is set, rewrite the proof page with the final open questions and ledger.',
+            'Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` as the finished work stands, the suite line under `checks`, the final open questions and ledger; `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, and a run without `artifacts.proof` gets its page from this write, with `repo` (the GitHub name), `branch` and `pr` from the PR.',
             $writeActions,
             ($autoflow
                 ? 'Push your commits and leave the PR draft; the session that launched the run marks it ready after the CI gate (engine.md §The CI gate).'
                 : 'Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`; show any other answer to the human.')
-            . ' After `record`, the last action is `proof_cli.php open` on `artifacts.proof` (engine.md §The proof store).',
+            . ' After `record`, the last action is `proof_cli.php open` on the path `write` printed (engine.md §The proof store).',
         ],
     ];
 }
