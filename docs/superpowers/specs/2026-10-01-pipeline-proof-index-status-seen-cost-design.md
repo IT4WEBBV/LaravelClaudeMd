@@ -331,6 +331,31 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
     owner's after the merge, beside #141's.
 15. **Does the index keep its Shots column?** Yes; the issue adds columns and removes none.
 
+Added by the plan step, for what the plan needed and the design above leaves open:
+
+16. **What does a filing write as the status of a run that has none?** `ProofRunStatus::of($run)`, which is
+    Running for both cases Assumption 4 names (`handoff`'s first page, a run whose PR is not finished) and
+    Merged or Closed for an old run whose `prState` says so: filing never changes what a status-less run reads as.
+17. **Does every `done` answer carry `proof`?** Only `dispatch_cli_done()`'s, the one that records a run done
+    (`finish`, `returned`). `next` and `launch` on a run that was already done keep answering `{"action":"done"}`:
+    nothing is about to run `gh pr ready` after them.
+18. **How are `updatedAt` values compared?** As times (`strtotime()` in PHP, `Date.parse()` in the index script),
+    not as strings: the store holds offsets `+02:00` and `Z` side by side, and both orders must agree.
+19. **How does a page served from a directory URL derive its seen key?** A trailing `index.html` is stripped from
+    `location.pathname` before the last two segments are taken, each percent-decoded; `php -S` serves
+    `<run>/` and `<run>/index.html` alike.
+20. **What does an empty store's index render?** As today, `No runs recorded.` alone: no filter, no table, no
+    script.
+21. **What does an amendment that cannot write say?** `cannot write the run at <dir>`, returned as the problem; no
+    PHP warning reaches stdout, so `dispatch_cli.php`'s answer stays one JSON line. `status` with no page is
+    `no page given`.
+22. **Which reason does the prune pass keep?** A run that stays Halted keeps its reason; any other status drops it
+    (`ProofRunStatus::stored()` writes `reason` only for Halted). A `--reason` given with another status is ignored.
+23. **Does `named()` get a second copy?** No: `ProofShotState::named()` and the new `ProofRunStatus::named()` share
+    one trait, `ProofNamedCases`, in `proof.php`.
+24. **How does the prune pass ask `gh`?** As an argv array through `proc_open()` (`gh pr view <pr> --repo
+    <nameWithOwner> --json state,isDraft`), as `dispatch_cli_pr_view()` does, instead of today's shell string.
+
 ## Relation to other work
 
 - **#141** (merged) gives every run a page from `handoff`, the merge this spec's store keys rely on, and the
