@@ -847,4 +847,7 @@ Append to the PR body (`gh pr view <pr> --json body --jq .body > "$TMPDIR/body.m
   step transcript whose first line is `[Workflow harness — user request]`. The first session after the
   merge on each machine may halt its first run with *the relay check failed: …* when the agent
   definition was linked after Claude Code read `~/.claude/agents` (spec *Assumptions* 13); a resume from
-  a new session runs.
+  a new session runs. For whoever runs these: the relay-check agent's own transcript (`agent-*.jsonl`
+  under the run's `wf_*` dir) shows both what it was sent and what it returned, so a false clean (a
+  framed check that returns the computed task's first 40 characters) is visible without waiting for a
+  framed step.
