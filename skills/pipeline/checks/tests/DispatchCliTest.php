@@ -134,7 +134,7 @@ it('records a finished run as done and does not re-dispatch it', function () {
         'gate_ledger' => [[...$open, 'actions' => [], 'outcome' => 'continued']],
     ]);
 
-    expect(dispatch_cli(['returned', $fixture['manifest'], $fixture['diff']])['json'])->toBe(['action' => 'done']);
+    expect(dispatch_cli(['returned', $fixture['manifest'], $fixture['diff']])['json'])->toBe(['action' => 'done', 'proof' => null]);
     expect(manifest_read($fixture['manifest'])['cursor']['status'])->toBe('done');
     expect(dispatch_cli(['next', $fixture['manifest']])['json'])->toBe(['action' => 'done']);
 });
@@ -584,7 +584,7 @@ it('finishes only after a review-pr resolve step whose return holds', function (
     expect(manifest_read($fixture['manifest'])['cursor'])->toMatchArray(['leg' => 'review-pr', 'status' => 'halted']);
 
     dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => ['leg' => 'review-pr', 'status' => 'continued'], 'gate_ledger' => [[...$open, 'actions' => [], 'outcome' => 'continued']]]);
-    expect($finish())->toBe(['action' => 'done']);
+    expect($finish())->toBe(['action' => 'done', 'proof' => null]);
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-pr', 'status' => 'done']);
 });
 
@@ -1299,4 +1299,67 @@ it('prints the catch-up line first in the brief of a writing step behind its bas
     expect(dispatch_cli(['brief', $offline['manifest'], 'implement', 'run'])['stdout'])
         ->toContain('`implement` leg, `run` step')
         ->not->toContain('Catch up with the base');
+});
+
+/** `dispatch_fixture()`'s artifacts with the run's proof page. */
+function dispatch_proof_artifacts(string $page): array
+{
+    return ['artifacts' => ['spec' => null, 'plan' => null, 'pr' => null, 'issue' => null, 'proof' => $page]];
+}
+
+it('marks the proof page halted with the reason when finish records a halt', function () {
+    $page = proof_test_page();
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'implement', 'status' => 'pending'], ...dispatch_proof_artifacts($page)]);
+
+    $result = dispatch_cli(['finish', $fixture['manifest'], '{"action":"halt","leg":"implement","reason":"the suite stayed red"}']);
+
+    expect($result['stdout'])->toBe("{\"action\":\"halt\",\"reason\":\"the suite stayed red\"}\n");
+    expect(proof_read_run(dirname($page))['status'])->toBe(['state' => 'halted', 'reason' => 'the suite stayed red']);
+    expect(file_get_contents($page))->toContain('pill-halted');
+});
+
+it('marks a resumed run\'s proof page running again when launch starts it', function () {
+    $page = proof_test_page(['status' => ['state' => 'halted', 'reason' => 'CI red']]);
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'implement', 'status' => 'halted', 'reason' => 'CI red'], ...dispatch_proof_artifacts($page)]);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']])['json']['action'])->toBe('start');
+    expect(proof_read_run(dirname($page))['status'])->toBe(['state' => 'running']);
+});
+
+it('marks the proof page running when next dispatches a step', function () {
+    $page = proof_test_page(['status' => ['state' => 'halted', 'reason' => 'stub']]);
+    $fixture = dispatch_fixture(dispatch_proof_artifacts($page));
+
+    expect(dispatch_cli(['next', $fixture['manifest']])['json']['action'])->toBe('dispatch');
+    expect(proof_read_run(dirname($page))['status'])->toBe(['state' => 'running']);
+});
+
+it('leaves every page alone when the manifest names none', function () {
+    $page = proof_test_page(['status' => ['state' => 'ready']]);
+    $before = file_get_contents(dirname($page) . '/run.json');
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'implement', 'status' => 'pending']]);
+
+    expect(dispatch_cli(['finish', $fixture['manifest'], '{"action":"halt","reason":"x"}'])['stdout'])->toBe("{\"action\":\"halt\",\"reason\":\"x\"}\n");
+    expect(file_get_contents(dirname($page) . '/run.json'))->toBe($before);
+});
+
+it('records the halt and keeps its answer one JSON line when the page it names cannot be amended', function () {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'implement', 'status' => 'pending'], ...dispatch_proof_artifacts('/nonexistent/Deploy/pr-5-logs/index.html')]);
+
+    expect(dispatch_cli(['finish', $fixture['manifest'], '{"action":"halt","reason":"x"}']))->toMatchArray(['code' => 0, 'stdout' => "{\"action\":\"halt\",\"reason\":\"x\"}\n"]);
+    expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'implement', 'status' => 'halted', 'reason' => 'x']);
+});
+
+it('names the proof page in the done answer, so the session can mark it ready', function () {
+    $page = proof_test_page();
+    $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
+    $fixture = dispatch_fixture(['cursor' => ['leg' => 'review-pr', 'status' => 'pending'], 'gate_ledger' => [$open], ...dispatch_proof_artifacts($page)]);
+    dispatch_cli(['next', $fixture['manifest']]);
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [
+        ...$m,
+        'cursor' => [...$m['cursor'], 'status' => 'continued'],
+        'gate_ledger' => [[...$open, 'actions' => [], 'outcome' => 'continued']],
+    ]);
+
+    expect(dispatch_cli(['returned', $fixture['manifest'], $fixture['diff']])['json'])->toBe(['action' => 'done', 'proof' => $page]);
 });

@@ -147,7 +147,7 @@ it('completes the open review from the actions file, and finish accepts the run'
         'issue_links' => [['issue' => 52, 'outcome' => 'closes'], ['issue' => 122, 'outcome' => 'closes']],
         'outcome' => 'continued',
     ]);
-    expect(dispatch_cli(['finish', $fixture['manifest'], '{"action":"done"}'])['json'])->toBe(['action' => 'done']);
+    expect(dispatch_cli(['finish', $fixture['manifest'], '{"action":"done"}'])['json'])->toBe(['action' => 'done', 'proof' => null]);
 });
 
 it('sets the spec and removes the plan for an Architectural spec step, and refuses a spec that is not committed', function () {
