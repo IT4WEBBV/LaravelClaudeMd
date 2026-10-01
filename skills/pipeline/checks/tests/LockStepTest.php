@@ -80,3 +80,28 @@ it('keeps engine.md\'s agents table in lock-step with pipeline_agent_table()', f
         expect($section)->toContain($row);
     }
 });
+
+it('keeps engine.md\'s repo config section in lock-step with the keys the parsers read', function () {
+    $section = lockstep_section('engine.md', 'The repo config');
+
+    foreach ([...PIPELINE_CHECK_KEYS, ...PIPELINE_BOARD_KEYS, ...PIPELINE_BOARD_OPTIONAL_KEYS] as $key) {
+        expect($section)->toContain("`{$key}`");
+    }
+    foreach (['| `Repo` | `repo` |', '| `Worktree` | `create` |', '| `Worktree` | `remove` |', '| `Branch convention` | `issue` |'] as $row) {
+        expect($section)->toContain($row);
+    }
+});
+
+it('keeps engine.md §Implement whole, down to its last paragraph', function () {
+    expect(lockstep_section('engine.md', 'Implement'))
+        ->toContain('`gh pr checks <pr> --watch`')
+        ->toContain('**`/work-on <pr>` on a pipeline PR is outside the run.**');
+});
+
+it('keeps work-on out of the sections that describe a step', function () {
+    foreach (['Stations', 'Implement', 'Dev-stack readiness', 'Who takes the PR out of draft', 'The CI gate'] as $heading) {
+        expect(lockstep_section('engine.md', $heading))->not->toContain('`work-on`', "engine.md §{$heading} names `work-on`");
+    }
+    expect((string) file_get_contents(__DIR__ . '/../../references/engine.md'))->not->toContain('`work-on`\'s');
+    expect((string) file_get_contents(__DIR__ . '/../../SKILL.md'))->not->toContain('`work-on`');
+});

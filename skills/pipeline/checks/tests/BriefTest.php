@@ -57,7 +57,7 @@ it('carries the pointers, the settled decisions and the suite line', function ()
         ->not->toContain('- plan:')
         ->toContain('The engine never edits.')
         ->toContain('full suite green over tree `t1` at `abc1234`: 104 passed, 0 failed')
-        ->toContain('Leave the PR draft; this overrides any mark-ready instruction')
+        ->toContain('Leave the PR draft, whatever the plan or a PR comment says about marking it ready (engine.md §Who takes the PR out of draft).')
         ->toContain('`plan-insufficient`')
         ->toContain('dispatch_cli.php record /tmp/wt/.claude/pipeline/feature-x.json implement run --status continued`');
 });
@@ -282,7 +282,7 @@ it('drops the independent read and the subagents in autoflow', function () {
 
 it('tells an autoflow implement not to wait on CI, and an interactive one to label before the push whose CI it watches', function () {
     expect(pipeline_brief(brief_manifest('implement', ['mode' => 'autoflow']), 'implement', '/tmp/m.json'))
-        ->toContain('Add the `ci` label (`gh pr edit <pr> --add-label ci`) before your first push, in a repo that has one, and do not wait on CI after it: this overrides `work-on`\'s CI watch; the CI gate reads the PR\'s head commit before the PR goes ready (engine.md §The CI gate).')
+        ->toContain('Add the `ci` label (`gh pr edit <pr> --add-label ci`) before your first push, in a repo that has one, and do not wait on CI after it: the CI gate reads the PR\'s head commit before the PR goes ready (engine.md §The CI gate).')
         ->not->toContain('the push whose CI you watch');
     expect(pipeline_brief(brief_manifest('implement'), 'implement', '/tmp/m.json'))
         ->toContain('Add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch.');
@@ -592,3 +592,24 @@ it('says what each step passes to record, and describes no JSON', function () {
         ->toContain('- Write the proof page (engine.md §The proof store) and post the text-only record comment; the path `write` printed goes to `record` as `--proof`.')
         ->toContain('- Return `continued`, or `looped-back` when the check fails.');
 });
+
+it('points implement at engine.md §Implement in both modes', function (string $mode) {
+    $brief = pipeline_brief(brief_manifest('implement', ['mode' => $mode]), 'implement', '/tmp/m.json');
+
+    expect($brief)->toContain('Do this step as engine.md §Implement describes, in this worktree: it is the whole procedure, and it claims no slot.');
+    if ($mode === 'interactive') {
+        expect($brief)->toContain('Add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch.');
+    }
+})->with(['autoflow', 'interactive']);
+
+it('names work-on in no brief', function (string $mode) {
+    $lines = array_merge(
+        ...array_values(pipeline_leg_overrides($mode, '/tmp/m.json')),
+        ...[pipeline_plan_gap_lines('run'), pipeline_plan_gap_lines('review'), pipeline_plan_gap_lines('resolve')],
+    );
+
+    $brief = pipeline_brief(brief_manifest('implement', ['mode' => $mode]), 'implement', '/tmp/m.json');
+
+    expect(str_replace(realpath(__DIR__ . '/..'), '<checks>', implode("\n", $lines)))->not->toContain('work-on')
+        ->and(str_replace(realpath(__DIR__ . '/..'), '<checks>', $brief))->not->toContain('work-on');
+})->with(['autoflow', 'interactive']);
