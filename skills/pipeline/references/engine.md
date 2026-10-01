@@ -534,10 +534,10 @@ Leg names are exactly `pipeline_legs()`: `design, review-plan, handoff, implemen
 |---|---|---|---|---|
 | **design** *(compound)* | `superpowers:brainstorming`, then `superpowers:writing-plans` for an **Architectural** design (one leg — brainstorming already tail-calls writing-plans; two legs would double-run it); for a **Bounded** design, brainstorming's Bounded path with no `writing-plans` (§Design size) | human drives the brainstorm dialogue; if brainstorming classifies Bounded without `medium` or `light`, the pipeline asks (§Design size); re-invoke `/pipeline` to continue | two steps (`pipeline_steps()`): a **spec** agent turns a tight brief into a spec **and must write the questions it would have asked plus its assumed answers into the spec**, so `/critique plan` audits exactly those assumptions; a fresh **plan** agent reads the committed spec cold and writes the plan. A Bounded design is the spec step alone (§Design size, *`autoflow`'s design*). The brief says which path is permitted: Bounded only with `medium` or `light`, otherwise Architectural | writes spec + plan pointers; the size is the spec's `**Design size:**` header, never stored |
 | **review-plan** | `/critique plan` | reviewer writes a review; you read it and decide | two steps (`pipeline_step`): a **review** agent invokes `/critique plan` (in `autoflow` it applies `/critique plan`'s procedure itself: it cannot start a reviewer) and appends the review verbatim as an open `plan-approval` entry; a fresh **resolve** agent acts on it (§Resolving a review) | feeds the plan-approval gate; the project-vs-package call arrives as part of the review |
-| **handoff** | `dispatch_cli.php handoff <manifest>` | the same command, run by the dispatched agent | pushes the branch (never forced), opens the **draft PR** or adopts the open draft the branch already has, with `--base` on a run on a base; English title `Implement: <the spec's heading> (issue: #N)` and a body that names the spec and the plan; references the issue **without a closing keyword**, `Part of #N` (§Closing links) — this PR carries no implementation yet; sets the board Component where the repo's `## Board` names a `component-default`; posts no comment | the command records the PR# pointer itself, through `record`'s code |
+| **handoff** | `dispatch_cli.php handoff <manifest>` | the same command, run by the dispatched agent | pushes the branch (never forced), opens the **draft PR** or adopts the open draft the branch already has, with `--base` on a run on a base; English title `Implement: <the spec's heading> (issue: #N)` and a body that names the spec and the plan; references the issue **without a closing keyword**, `Part of #N` (§Closing links) — this PR carries no implementation yet; sets the board Component where the repo's `## Board` names a `component-default`; posts no comment; files the run's **proof page** (§The proof store) | the command records the PR# pointer and the proof page itself, through `record`'s code |
 | **implement** | no skill: §Implement, in the current worktree (no slot) — read the item, the spec and the plan, validate the names the plan relies on, execute it test-first, running the suite and `static-analysis` after each step and `format` once before the push (§Mechanical checks); the `ci` label before the first push. **Leaves the PR draft** (below); in `autoflow` it does not wait on CI (§The CI gate). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
-| **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, writes the run's page to the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — the payload carries `nameWithOwner`, `pr` and `issue` so the page can link back to both — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
-| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | a **review** agent invokes `/critique pr` (in `autoflow` it applies `/critique pr`'s procedure itself) and appends an open `pr-review` entry; the **finish** step (its resolve step) acts on it, runs the suite unless reused, reconciles closing links (§Closing links), rewrites the proof page, runs `gh pr ready`, and opens the page last (§The proof store). In `autoflow` the finish step leaves the PR draft, and the invoking session runs the CI gate and `gh pr ready` after `finish` (§The CI gate, §Who takes the PR out of draft) | feeds the PR-review gate; writes `issue_links` onto the entry; when the run has a proof page (`ui` fired), re-runs `checks/proof_cli.php write` with the finalised open questions and gate ledger |
+| **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, adds the shots to the run's page in the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — a `state` on every shot, and a first client summary and explainer — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
+| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | a **review** agent invokes `/critique pr` (in `autoflow` it applies `/critique pr`'s procedure itself) and appends an open `pr-review` entry; the **finish** step (its resolve step) acts on it, runs the suite unless reused, reconciles closing links (§Closing links), rewrites the proof page, runs `gh pr ready`, and opens the page last (§The proof store). In `autoflow` the finish step leaves the PR draft, and the invoking session runs the CI gate and `gh pr ready` after `finish` (§The CI gate, §Who takes the PR out of draft) | feeds the PR-review gate; writes `issue_links` onto the entry; re-runs `checks/proof_cli.php write` with the client summary, the explainer, the finalised open questions and gate ledger |
 
 **`handoff` in order.** `record`'s own checks first (the manifest, this step's snapshot), so a refusal
 pushes nothing. Then, read-only: `artifacts.spec` and `artifacts.plan` exist at `HEAD`, the worktree is on
@@ -547,7 +547,7 @@ more than one, or a gh that cannot answer is a halt, still with nothing pushed. 
 `gh pr create --draft --head <branch> [--base <base>]` read back through the same listing, or, on an
 existing PR, `gh pr edit --base` when its base differs and `gh pr edit --body` when its body lacks the
 spec, the plan or the issue: a body is only added to and a title never changed. The Component is two
-idempotent board calls, and its failure is a note. The command records `continued` with the PR, or
+idempotent board calls, and its failure is a note. Then the page: the command files the run's proof page (§The proof store), and a page it cannot file is a note. The command records `continued` with the PR and the page, or
 `halted` with the reason, through `record`'s code; a record refused once the PR is open names the PR, and
 the next run adopts it instead of opening a second one (#118). Every outward act is idempotent: after any
 failure, running the step again is the repair.
@@ -864,15 +864,32 @@ they are; they are not exemplars for it (§What a leg brief consists of).
 attachments exist only via drag-drop in the web UI. So a leg that claims to attach visual proof
 to a PR cannot do it, and the claim previously made here was unimplementable.
 
-`verify-ui` instead writes a self-contained page to `~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`
-— keyed by repo *and* run, because a PR number collides across the repos that share this store
-as readily as a branch name ever did. The run segment is the PR number, which is what a reader
-has in hand when they come looking, plus the branch's topic so the directory still names
-something; a run that opened no PR keeps its branch slug, and `proof_cli.php write` adopts that
-directory once a PR appears. The page carries Problem, Solution, the annotated screenshots, the
-scope-qualified check result and any open questions, and links out to the PR and the issue.
-`review-pr` rewrites it once more to finalise open questions and the ledger. A store-wide
-`index.html` is the join from a PR back to its page.
+**Every run that reaches `handoff` has a page**, a self-contained one at
+`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/` — keyed by repo *and* run, because a PR number collides
+across the repos that share this store as readily as a branch name ever did. The run segment is the PR
+number, which is what a reader has in hand when they come looking, plus the branch's topic so the
+directory still names something; a run that opened no PR keeps its branch slug, and filing adopts that
+directory once a PR appears. Three steps write the page, and every write is **merged** over the run as
+filed, key by key at the top level: a key the payload carries replaces the stored one whole (a list is
+replaced, never appended to; `[]` empties one), and a key it leaves out is kept.
+
+1. **`handoff` files the page** from what it knows: `nameWithOwner` and `repo` from the PR's URL,
+   `branch`, `mode`, `worktree`, `pr`, `prState`, `issue`, the `base` the PR goes into, and the title
+   `PR #<n>: <the spec's heading>` cut to 70 characters, which fills only a run that has no title. It
+   records the page as `artifacts.proof`. A page it cannot file is a note in its answer, never a halt.
+   Its page shows the client summary and the explainer as *Pending*.
+2. **`verify-ui`** (a UI run) adds the shots and a first client summary and explainer.
+3. **The finish step** (`review-pr`'s resolve step, every run) writes the client summary and the
+   explainer as the finished work stands, the suite line under `checks`, and the final open questions
+   and ledger.
+
+An agent's write takes `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, so it
+lands in the directory `handoff` filed; a run without `artifacts.proof` gets its page from that write,
+with `repo` (the GitHub name), `branch` and `pr` from the PR.
+The page opens with the **client summary** (Dutch, for the hour registration, with a copy button), then
+**In plain language** (the problem and the solution for a reader who knows nothing about the issue), the
+headline and the technical Problem and Solution, **Tests this PR adds**, the shots, the checks, the open
+questions and the ledger. A store-wide `index.html` is the join from a PR back to its page.
 
 **The payload** that `proof_cli.php write` files. This table is the schema. **An existing `run.json`
 is not an example**: runs that copied the previous run's payload grew its title from 84 to 596
@@ -881,18 +898,37 @@ characters in five runs.
 | Field | What it holds |
 |---|---|
 | `repo`, `nameWithOwner`, `branch`, `pr`, `issue`, `prState`, `mode` | where the run belongs; `nameWithOwner` makes the PR and issue references links |
+| `worktree`, `base` | the run's worktree and the branch its PR goes into, filed by `handoff`; every write diffs `origin/<base>...HEAD` there for `addedTests` |
 | `title` | **required, at most 70 characters.** The run's name: page heading, browser tab, store index. `PR #430: service logs that follow`, not a sentence of findings |
-| `headline` | one or two sentences: what was verified and the outcome. Rendered as the lead under the title |
-| `problem`, `solution` | prose; blank lines become paragraphs |
+| `clientSummary` | **required on every agent `write`.** One to three Dutch sentences for the hour registration: what the client gets, in the client's words, at most 400 characters. No `#<number>`, no backtick, and not the branch name (whole, or the part after its first `/`, as a word of its own) |
+| `explainer` | **required on every agent `write`.** `{problem, solution}`: a paragraph each, in English, for a reader who knows nothing about the issue; blank lines become paragraphs |
+| `headline` | one or two sentences: what was verified and the outcome. Rendered as the lead under the explainer |
+| `problem`, `solution` | the technical account; prose, blank lines become paragraphs |
 | `checks` | `tests`, `staticAnalysis` (scope-qualified), `format`, `suppressions` (list) |
 | `openQuestions` | list, carried verbatim |
 | `ledger` | list of `{gate, outcome, note}` |
-| `shots` | list of `{title, caption, route, badges}`. `title` is at most 70 characters and names the state shown ("Unreachable swarm"); `caption` says what the shot proves and has no limit |
-| `shotSources` | absolute paths of the screenshots, in `shots` order; ingested into the run's `shots/` |
+| `shots` | list of `{title, caption, route, badges, state}`. `title` is at most 70 characters and names the state shown ("Unreachable swarm"); `caption` says what the shot proves and has no limit. `state` is **required**: `before`, `after` or `defect`, the ribbon on the shot; a `before` directly followed by an `after` renders as one pair. A badge's `note` also shows on hover |
+| `shotSources` | absolute paths of the screenshots, in `shots` order, `null` for a shot carried forward with its `file`; ingested into the run's `shots/` as `<NN>-<route>-<hash>.png`, so a new shot never overwrites a carried one |
+| `addedTests` | **the store's, never a payload's**: per test file, the cases the branch adds (`added`, tagged *new*) or changes (`changed`), extracted at every write by git in `worktree`; kept as filed when git cannot answer. A payload's `addedTests`, `schema`, `createdAt` and `updatedAt` are ignored |
 
-`write` refuses a payload whose `title` is missing or whose `title` or shot title is too long. It
-prints `proof: payload rejected` and the problems on stderr, prints no page path, and files nothing.
-Fix the payload and write again. Runs filed before `title` existed are named by their branch.
+**Before, after and defect shots.** `verify-ui` takes before shots only when the spec names a before
+state to show: it checks out the base detached in the run's worktree (`git checkout --detach
+origin/<base>`), captures them, and checks the branch out again (`git switch <branch>`) before any after
+shot and before the pass returns, whatever its status; before it writes the page, `git rev-parse
+--abbrev-ref HEAD` names the branch. Pairing is positional: in `shots` each before shot is immediately
+followed by its after shot, so shoot the before shots on the base, then the after shots in the same order,
+and interleave them in the payload. When the base cannot render the state (a migration it does not
+expect), the before shot is left out and that is an open question, never a halt. A pass that finds a
+defect shoots it as `defect`; the next pass carries the earlier defect shots forward (their `file`,
+`null` in `shotSources`) beside its own.
+
+`write` judges the run as it will be filed, the payload merged over the stored run, and refuses one
+whose `title` is missing or longer than 70 characters, whose shot title is too long, whose shot has no
+valid `state` or neither a `file` nor a source in `shotSources`, or whose `clientSummary` or
+`explainer` breaks the rules above. It prints `proof: payload rejected` and the problems on stderr, prints no page path, and files nothing. Fix the payload and write
+again. The page `handoff` files is judged on the title and shot rules only. Runs filed before `title`
+existed are named by their branch; runs filed before the client summary (`schema` 1) render without the
+summary, explainer and tests sections.
 
 **The PR still gets a comment, and it is load-bearing.** The manifest is reconstructable from
 git + gh (`manifest.md` §reconstruction), so the only durable evidence that this non-skippable
@@ -906,15 +942,14 @@ compatible with the non-goal "no persistent state not reconstructable from git +
 
 **The finished page opens itself — once, at the end.** The finish step's last action, after its final
 `write`, is `php checks/proof_cli.php open <page>`, passing the path that `write` printed on stdout.
-`write` runs at least twice per run — `verify-ui` builds the page, `review-pr` finalises it — so
+`handoff` files the page and `write` runs once or twice after it — `verify-ui` adds the shots, `review-pr` finalises it — so
 opening from `write` would open the same page two or more times; a separate subcommand invoked once,
 at completion, is the only shape that opens once. A run that **halts** after the page exists opens it
 on the same rule: the session that holds the run (in `autoflow`, the invoking session after `finish`) runs `proof_cli.php open <artifacts.proof>` when that pointer is set, because a halted run is exactly the one a human is about to go looking at: one
 `open`, at whatever turns out to be the run's last action.
 
-**A run with no page opens nothing.** A backend-only run never triggers `ui`, so `verify-ui` never
-ran, no `write` happened and there is no path to pass. `open` given a missing path — or none — logs
-and returns 0; it is a silent no-op, never an error.
+**A run with no page opens nothing.** A run that halted before `handoff` has none. `open` given a
+missing path — or none — logs and returns 0; it is a silent no-op, never an error.
 
 **Opening is cosmetic, weaker than every other proof policy.** Failing to *capture* proof halts a
 run; failing to *file* it logs and continues; failing to *open* it does neither — `open` returns 0

@@ -33,11 +33,12 @@ this summary:
 - **Mechanical checks** — `implement` also runs a repo's PHPStan check after each step and its Pint
   check once before the push, when the repo declares them in a committed `## Checks` block
   (`references/engine.md` §Mechanical checks). Opt-in: repos that have not declared them are unaffected.
-- **Visual proof** — when `pipeline_triggers(...)['ui']` fires, `verify-ui` writes a durable page to
-  `~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/index.html` and the PR gets a text-only record comment
+- **Visual proof** — every run that reaches `handoff` has a durable page at
+  `~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/index.html`: `handoff` files it, `verify-ui` adds the
+  screenshots when `pipeline_triggers(...)['ui']` fires (and the PR gets a text-only record comment), and
+  the finish step writes the Dutch client summary and the plain-language explainer
   (`references/engine.md` §The proof store). The finished page **opens in the browser once**, as the
   run's last action; `PIPELINE_NO_OPEN=1` suppresses that for headless and unattended runs.
-  Backend-only runs have no page and are unaffected.
 - **Cost per run** — after every `autoflow` run the invoking session reports two outputs with the
   result: `checks/run_cost_cli.php` (cost weighted per model and wall time per step, the run's span, the largest
   step peak) and `checks/run_audit.php` (whether `ui` and each gate's ledger agree with what the steps
