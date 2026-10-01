@@ -37,6 +37,7 @@ require_once __DIR__ . '/kickoff.php';
 require_once __DIR__ . '/gh.php';
 require_once __DIR__ . '/handoff.php';
 require_once __DIR__ . '/ci.php';
+require_once __DIR__ . '/proof_store.php';
 
 /** git in the run's worktree, for the scope of a re-review of the PR (`pipeline_review_scope()`). */
 function dispatch_cli_git(array $manifest): Closure
@@ -882,9 +883,9 @@ function dispatch_cli_suite_command(array $arguments): ?array
 
 /**
  * The whole `handoff` step (`../references/engine.md` §Stations): `record`'s checks before anything
- * leaves the machine, then `pipeline_handoff()` over the snapshot `record` builds on, then the step's one
- * write through `dispatch_cli_record()`, for a halt as for the PR. A record refused once the PR is open
- * names the PR: the next run adopts it (#118).
+ * leaves the machine, then `pipeline_handoff()` over the snapshot `record` builds on, then the proof page
+ * (`dispatch_cli_handoff_page()`), then the step's one write through `dispatch_cli_record()`, for a halt as
+ * for the PR. A record refused once the PR is open names the PR: the next run adopts it (#118).
  */
 function dispatch_cli_handoff(string $manifestPath): array
 {
@@ -910,11 +911,32 @@ function dispatch_cli_handoff(string $manifestPath): array
             ? [...$recorded, 'reason' => $reason]
             : dispatch_cli_refuse("{$recorded['reason']}; the step halted on: {$reason}");
     }
-    $recorded = $record(['status' => LegStatus::Continued->value, 'pr' => (string) $done['pr']]);
+    $page = dispatch_cli_handoff_page($done['page']);
+    $recorded = $record([
+        'status' => LegStatus::Continued->value,
+        'pr' => (string) $done['pr'],
+        ...($page['proof'] === null ? [] : ['proof' => $page['proof']]),
+    ]);
 
     return $recorded['action'] === 'recorded'
-        ? [...$recorded, ...$done]
+        ? [...$recorded, ...array_diff_key($done, ['page' => true]), 'notes' => [...$done['notes'], ...$page['notes']], 'proof' => $page['proof']]
         : dispatch_cli_refuse("{$recorded['reason']}; PR #{$done['pr']} is open and the next run of this step adopts it");
+}
+
+/**
+ * Files the run's proof page under `proof_validate_run()` alone: the prose is the finish step's. Never a halt: a
+ * page that cannot be filed is a note, and the step records without one.
+ *
+ * @param array{payload: array, defaults: array} $page
+ * @return array{proof: ?string, notes: list<string>}
+ */
+function dispatch_cli_handoff_page(array $page): array
+{
+    $filed = proof_store_file($page['payload'], date('c'), proof_validate_run(...), $page['defaults']);
+
+    return $filed['page'] === null
+        ? ['proof' => null, 'notes' => ['the proof page was not filed: ' . implode('; ', $filed['problems'])]]
+        : ['proof' => $filed['page'], 'notes' => []];
 }
 
 /** `handoff <manifest>`; null is a usage error. */

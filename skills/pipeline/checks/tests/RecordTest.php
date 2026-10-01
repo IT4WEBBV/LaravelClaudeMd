@@ -242,7 +242,7 @@ it('refuses a flag the step\'s row does not list, naming the ones it does, and a
     $before = record_before('handoff');
 
     expect(pipeline_record($before, $before, 'handoff', 'run', ['status' => 'continued', 'pr' => '7', 'plan' => 'docs/plan.md'], record_facts()))
-        ->toBe('--plan is not a flag of handoff run with --status continued, which takes --pr');
+        ->toBe('--plan is not a flag of handoff run with --status continued, which takes --pr, --proof');
     expect(pipeline_record($before, $before, 'handoff', 'run', ['status' => 'continued'], record_facts()))
         ->toBe('handoff run with --status continued needs --pr');
     expect(pipeline_record($before, $before, 'implement', 'run', ['status' => 'continued', 'pr' => '7'], record_facts()))
@@ -289,4 +289,15 @@ it('starts from the snapshot: a second record replaces the first, the suite is k
 it('names the content triggers that fired, and never ui', function () {
     expect(pipeline_annotations(['package' => true, 'migration' => false, 'auth' => true, 'ui' => true]))->toBe(['package', 'auth']);
     expect(pipeline_annotations(['package' => false, 'migration' => false, 'auth' => false, 'ui' => true]))->toBe([]);
+});
+
+it('records handoff\'s PR, and the page it filed when it filed one', function () {
+    $before = record_before('handoff');
+
+    $with = pipeline_record($before, $before, 'handoff', 'run', record_given('handoff', 'run', 'continued', ['proof' => '/proofs/app/pr-7-x/index.html']), record_facts());
+    $without = pipeline_record($before, $before, 'handoff', 'run', record_given('handoff', 'run', 'continued'), record_facts());
+
+    expect($with['artifacts'])->toMatchArray(['pr' => 7, 'proof' => '/proofs/app/pr-7-x/index.html']);
+    expect($without['artifacts']['pr'])->toBe(7);
+    expect($without['artifacts'])->not->toHaveKey('proof');
 });

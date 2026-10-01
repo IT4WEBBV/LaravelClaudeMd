@@ -71,3 +71,24 @@ it('keeps git\'s and gh\'s words JSON-safe, and names the exit code when they sa
     expect(pipeline_handoff_words('', 128))->toBe('exit 128');
     expect(json_encode(pipeline_handoff_words("HTTP 502 \xff", 1)))->not->toBeFalse();
 });
+
+it('takes the page heading from the spec, less its design suffix, else the branch', function () {
+    expect(pipeline_handoff_heading("# Logs that follow — design\n\nbody", 'feature'))->toBe('Logs that follow');
+    expect(pipeline_handoff_heading('no heading', 'feature/logs'))->toBe('feature/logs');
+});
+
+it('builds the page handoff files from the manifest and the PR, the title as a default', function () {
+    $manifest = ['branch' => 'feature/logs', 'mode' => 'autoflow', 'worktree' => '/tmp/wt/', 'artifacts' => ['issue' => 125]];
+    $pr = ['number' => 7, 'url' => 'https://github.com/acme/app/pull/7', 'baseRefName' => 'main'];
+
+    expect(pipeline_handoff_proof($manifest, $pr, 'Logs that follow'))->toBe([
+        'payload' => [
+            'nameWithOwner' => 'acme/app', 'repo' => 'app', 'branch' => 'feature/logs', 'mode' => 'autoflow',
+            'worktree' => '/tmp/wt', 'pr' => 7, 'prState' => 'OPEN', 'issue' => 125, 'base' => 'main',
+        ],
+        'defaults' => ['title' => 'PR #7: Logs that follow'],
+    ]);
+    expect(pipeline_handoff_proof([...$manifest, 'base' => 'feature/integration', 'artifacts' => ['issue' => null]], $pr, 'x')['payload'])
+        ->toMatchArray(['base' => 'feature/integration'])->not->toHaveKey('issue');
+    expect(mb_strlen(pipeline_handoff_proof($manifest, $pr, str_repeat('a long heading ', 10))['defaults']['title']))->toBeLessThanOrEqual(PROOF_TITLE_MAX);
+});

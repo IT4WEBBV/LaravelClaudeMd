@@ -25,7 +25,7 @@ function dispatch_cli(array $arguments, array $env = []): array
         [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
         $pipes,
         null,
-        [...getenv(), 'PIPELINE_NO_OPEN' => '0', ...$env],
+        [...getenv(), 'PIPELINE_NO_OPEN' => '0', 'PIPELINE_PROOF_ROOT' => sys_get_temp_dir() . '/pipeline-proofs-' . uniqid(), ...$env],
     );
     $stdout = stream_get_contents($pipes[1]);
     fclose($pipes[1]);
