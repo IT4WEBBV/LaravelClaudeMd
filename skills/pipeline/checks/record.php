@@ -44,7 +44,7 @@ function pipeline_record_table(): array
         'design:plan' => ['continued' => $row(['plan']), ...$halted],
         'review-plan:review' => $review,
         'review-plan:resolve' => ['continued' => $row(['actions-file']), 'looped-back' => $row(['actions-file']), ...$halted],
-        'handoff:run' => ['continued' => $row(['pr']), ...$gap, ...$halted],
+        'handoff:run' => ['continued' => $row(['pr'], ['proof']), ...$gap, ...$halted],
         'implement:run' => ['continued' => $row(), ...$gap, ...$halted],
         'verify-ui:run' => ['continued' => $row(['proof']), 'looped-back' => $row([], ['proof']), ...$gap, ...$halted],
         'review-pr:review' => $review,
@@ -89,7 +89,7 @@ function pipeline_record(array $before, array $current, string $leg, string $ste
         $leg === 'design' => pipeline_record_design($manifest, $step, $flags, $facts),
         $step === 'review' => pipeline_record_review($manifest, $leg, $flags['review-file'], $facts),
         $step === 'resolve' => pipeline_record_resolve($manifest, $leg, $status, $flags),
-        $leg === 'handoff' => pipeline_record_pr($manifest, $flags['pr']),
+        $leg === 'handoff' => pipeline_record_pr($manifest, $flags),
         $leg === 'verify-ui' => pipeline_record_verified($manifest, $status, $flags, $facts),
         default => $manifest,
     };
@@ -255,11 +255,18 @@ function pipeline_record_issue_links(array $given): array|string
     return $links;
 }
 
-function pipeline_record_pr(array $manifest, string $pr): array|string
+/** `handoff`: the PR, and the proof page it filed when it filed one. */
+function pipeline_record_pr(array $manifest, array $flags): array|string
 {
-    return ctype_digit($pr)
-        ? [...$manifest, 'artifacts' => [...($manifest['artifacts'] ?? []), 'pr' => (int) $pr]]
-        : "--pr {$pr} is not a PR number";
+    if (! ctype_digit($flags['pr'])) {
+        return "--pr {$flags['pr']} is not a PR number";
+    }
+
+    return [...$manifest, 'artifacts' => [
+        ...($manifest['artifacts'] ?? []),
+        'pr' => (int) $flags['pr'],
+        ...array_intersect_key($flags, ['proof' => true]),
+    ]];
 }
 
 /** `verify-ui`: the proof page when given, and the thin entry that carries the loop bound (`../references/manifest.md` §gate_ledger). */

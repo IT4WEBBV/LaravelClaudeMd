@@ -8,6 +8,11 @@
  * person, and never invites a reply.
  */
 
+require_once __DIR__ . '/proof.php';
+require_once __DIR__ . '/proof_tests.php';
+
+const PROOF_PENDING = "<p class=\"pending\">Pending: written by the step that finishes the run.</p>\n";
+
 function proof_e(string $value): string
 {
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -16,9 +21,11 @@ function proof_e(string $value): string
 function proof_render_styles(): string
 {
     return <<<'CSS'
-:root { --bg:#fff; --fg:#18181b; --muted:#71717a; --line:#e4e4e7; --card:#fafafa; --accent:#dc2626; }
+:root { --bg:#fff; --fg:#18181b; --muted:#71717a; --line:#e4e4e7; --card:#fafafa; --accent:#dc2626;
+  --before:#71717a; --after:#16a34a; --defect:var(--accent); }
 @media (prefers-color-scheme: dark) {
-  :root { --bg:#18181b; --fg:#f4f4f5; --muted:#a1a1aa; --line:#3f3f46; --card:#27272a; --accent:#ef4444; }
+  :root { --bg:#18181b; --fg:#f4f4f5; --muted:#a1a1aa; --line:#3f3f46; --card:#27272a; --accent:#ef4444;
+    --before:#a1a1aa; --after:#22c55e; }
 }
 * { box-sizing:border-box; }
 body { margin:0; padding:2rem 1.5rem 4rem; background:var(--bg); color:var(--fg);
@@ -30,11 +37,11 @@ h2 { font-size:1rem; text-transform:uppercase; letter-spacing:.05em; color:var(-
   margin:2.5rem 0 .75rem; padding-bottom:.4rem; border-bottom:1px solid var(--line); }
 .meta { color:var(--muted); font-size:.875rem; margin-bottom:.5rem; }
 .meta code { background:var(--card); padding:.1rem .35rem; border-radius:.25rem; }
-.shot { position:relative; display:block; margin:0 0 .5rem; border:1px solid var(--line); border-radius:.5rem; overflow:hidden; }
-.shot img { width:100%; display:block; }
+.shot { position:relative; display:block; margin:0 0 .5rem; cursor:zoom-in; }
+.shot img { width:100%; display:block; border:1px solid var(--line); border-radius:.5rem; }
 .badge { position:absolute; width:26px; height:26px; border-radius:50%; background:var(--accent);
   color:#fff; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center;
-  box-shadow:0 2px 6px rgba(0,0,0,.35); transform:translate(-50%,-50%); }
+  box-shadow:0 2px 6px rgba(0,0,0,.35); transform:translate(-50%,-50%); cursor:help; }
 figure { margin:0 0 2rem; }
 figcaption { color:var(--muted); font-size:.875rem; margin-bottom:.5rem; }
 ol.legend { padding-left:1.25rem; }
@@ -46,6 +53,31 @@ td, th { text-align:left; padding:.4rem .6rem; border-bottom:1px solid var(--lin
 .flag { color:var(--accent); font-weight:600; }
 details { margin-top:1rem; }
 summary { cursor:pointer; color:var(--muted); }
+h3 { font-size:.95rem; margin:1.25rem 0 .4rem; }
+.section-head { display:flex; align-items:center; justify-content:space-between; gap:1rem;
+  margin:2.5rem 0 .75rem; padding-bottom:.4rem; border-bottom:1px solid var(--line); }
+.section-head h2 { margin:0; padding:0; border:0; }
+button.copy { font:inherit; font-size:.8rem; padding:.2rem .7rem; border:1px solid var(--line); border-radius:.35rem;
+  background:var(--card); color:var(--fg); cursor:pointer; }
+.pending { color:var(--muted); font-style:italic; }
+.tag { display:inline-block; margin-left:.4rem; padding:0 .4rem; border:1px solid var(--line); border-radius:.25rem;
+  color:var(--muted); font-size:.75rem; font-weight:600; }
+.tag-added { color:var(--after); border-color:var(--after); }
+.ribbon { position:absolute; top:.6rem; left:.6rem; padding:.1rem .55rem; border-radius:.25rem; color:#fff;
+  font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.ribbon-before { background:var(--before); }
+.ribbon-after { background:var(--after); }
+.ribbon-defect { background:var(--defect); }
+.badge .tip { display:none; position:absolute; top:calc(100% + 6px); left:50%; transform:translateX(-50%);
+  width:max-content; max-width:16rem; padding:.35rem .55rem; border-radius:.3rem; background:var(--fg); color:var(--bg);
+  font-size:12px; font-weight:400; line-height:1.4; text-align:left; z-index:2; }
+.badge:hover .tip, .badge:focus .tip { display:block; }
+.pair { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+@media (max-width:700px) { .pair { grid-template-columns:1fr; } }
+dialog.zoom { padding:0; border:0; max-width:95vw; max-height:95vh; overflow:auto; background:var(--bg); }
+dialog.zoom::backdrop { background:rgba(0,0,0,.75); }
+dialog.zoom .shot { width:max-content; margin:0; cursor:zoom-out; }
+dialog.zoom .shot img { width:auto; max-width:none; }
 CSS;
 }
 
@@ -64,49 +96,186 @@ function proof_render_prose(string $text): string
     return $out;
 }
 
+/** The Dutch client summary for the hour registration, with its copy button; pending until a step writes it. */
+function proof_render_summary(array $run): string
+{
+    $summary = trim((string) ($run['clientSummary'] ?? ''));
+    if ($summary === '') {
+        return "<h2>Client summary</h2>\n" . PROOF_PENDING;
+    }
+
+    return "<div class=\"section-head\"><h2>Client summary</h2><button type=\"button\" class=\"copy\" data-copy=\"client-summary\">Copy</button></div>\n"
+        . '<p lang="nl" id="client-summary">' . proof_e($summary) . "</p>\n";
+}
+
+/** The problem and the solution for a reader who knows nothing about the issue; pending until a step writes them. */
+function proof_render_explainer(array $run): string
+{
+    $explainer = $run['explainer'] ?? null;
+    $written = is_array($explainer)
+        && trim((string) ($explainer['problem'] ?? '')) !== ''
+        && trim((string) ($explainer['solution'] ?? '')) !== '';
+
+    return "<h2>In plain language</h2>\n" . ($written
+        ? "<h3>The problem</h3>\n" . proof_render_prose((string) $explainer['problem'])
+            . "<h3>The solution</h3>\n" . proof_render_prose((string) $explainer['solution'])
+        : PROOF_PENDING);
+}
+
+/** @param list<array{file: string, cases: list<array{name: string, change: string}>}> $files */
+function proof_render_tests(array $files): string
+{
+    if ($files === []) {
+        return "<h2>Tests this PR adds</h2>\n<p class=\"meta\">This PR adds or changes no test cases.</p>\n";
+    }
+    $out = "<h2>Tests this PR adds</h2>\n";
+    foreach ($files as $file) {
+        $out .= '<h3><code>' . proof_e((string) $file['file']) . "</code></h3>\n<ul class=\"tests\">\n";
+        foreach ($file['cases'] as $case) {
+            $change = ProofTestChange::from((string) $case['change']);
+            $out .= '<li>' . proof_e((string) $case['name']) . ' <span class="tag tag-' . $change->value . '">' . $change->label() . "</span></li>\n";
+        }
+        $out .= "</ul>\n";
+    }
+
+    return $out;
+}
+
+/**
+ * The page's one script: the copy button (the clipboard API, else a selected textarea and `execCommand('copy')`,
+ * which works over `file://`) and the zoom (a click on a shot shows a copy of it at natural size in the dialog;
+ * Escape, the backdrop or the zoomed shot closes it).
+ */
+function proof_render_script(): string
+{
+    return <<<'JS'
+(function () {
+  var dialog = document.getElementById('zoom');
+  function fallback(text) {
+    var area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    var copied = document.execCommand('copy');
+    area.remove();
+    if (!copied) { throw new Error('copy failed'); }
+  }
+  function copyText(text) {
+    try {
+      return navigator.clipboard.writeText(text).catch(function () { fallback(text); });
+    } catch (error) {
+      return new Promise(function (resolve) { fallback(text); resolve(); });
+    }
+  }
+  function flash(button, label) {
+    button.textContent = label;
+    setTimeout(function () { button.textContent = 'Copy'; }, 2000);
+  }
+  function zoom(shot) {
+    dialog.replaceChildren(shot.cloneNode(true));
+    dialog.showModal();
+  }
+  document.addEventListener('click', function (event) {
+    var button = event.target.closest('[data-copy]');
+    if (button) {
+      copyText(document.getElementById(button.dataset.copy).textContent)
+        .then(function () { flash(button, 'Copied'); }, function () { flash(button, 'Copy failed'); });
+      return;
+    }
+    if (dialog.open) {
+      if (event.target === dialog || event.target.closest('#zoom .shot')) { dialog.close(); }
+      return;
+    }
+    var shot = event.target.closest('.shot');
+    if (shot) { zoom(shot); }
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter' && !dialog.open && event.target.classList && event.target.classList.contains('shot')) {
+      zoom(event.target);
+    }
+  });
+})();
+JS;
+}
+
 function proof_render_shots(array $shots): string
 {
     if ($shots === []) {
         return '';
     }
 
-    $out = "<h2>Visual result</h2>\n";
-    foreach ($shots as $shot) {
-        $badges = '';
-        $legend = '';
-        foreach ($shot['badges'] ?? [] as $badge) {
-            $badges .= sprintf(
-                '<span class="badge" style="top:%s%%;left:%s%%">%s</span>',
-                proof_e((string) (0 + ($badge['topPct'] ?? 0))),
-                proof_e((string) (0 + ($badge['leftPct'] ?? 0))),
-                proof_e((string) ($badge['num'] ?? '')),
-            );
-            // Carry the badge's own number onto the list marker. The <ol> would otherwise
-            // renumber from 1 per figure, so a run that numbers its badges continuously across
-            // shots — which nothing forbids — renders a "5" on the image above a "1." in the
-            // legend, and the two stop referring to each other.
-            $marker = is_numeric($badge['num'] ?? null)
-                ? ' value="' . proof_e((string) (int) $badge['num']) . '"'
-                : '';
+    return "<h2>Visual result</h2>\n" . implode('', array_map(
+        fn (array $row) => count($row) === 2
+            ? "<div class=\"pair\">\n" . proof_render_shot($row[0]) . proof_render_shot($row[1]) . "</div>\n"
+            : proof_render_shot($row[0]),
+        proof_shot_rows(array_values($shots)),
+    ));
+}
 
-            $legend .= '<li' . $marker . '><strong>' . proof_e((string) ($badge['title'] ?? '')) . '</strong> — '
-                . proof_e((string) ($badge['note'] ?? '')) . "</li>\n";
-        }
-
-        $caption = empty($shot['caption'])
-            ? ''
-            : '<span class="caption">' . proof_e((string) $shot['caption']) . '</span>';
-
-        $out .= "<figure>\n"
-            . '<figcaption><strong>' . proof_e((string) ($shot['title'] ?? '')) . '</strong> — <code>'
-            . proof_e((string) ($shot['route'] ?? '')) . '</code>' . $caption . "</figcaption>\n"
-            . '<span class="shot"><img alt="' . proof_e((string) ($shot['title'] ?? '')) . '" src="'
-            . proof_e((string) ($shot['file'] ?? '')) . '">' . $badges . "</span>\n"
-            . ($legend === '' ? '' : "<ol class=\"legend\">\n{$legend}</ol>\n")
-            . "</figure>\n";
+/**
+ * The shots by row: a `before` directly followed by an `after` share one, every other shot has its own.
+ * Pairing is positional; no field names the pair.
+ *
+ * @return list<list<array>>
+ */
+function proof_shot_rows(array $shots): array
+{
+    $rows = [];
+    $i = 0;
+    while ($i < count($shots)) {
+        $paired = ($shots[$i]['state'] ?? null) === ProofShotState::Before->value
+            && ($shots[$i + 1]['state'] ?? null) === ProofShotState::After->value;
+        $width = $paired ? 2 : 1;
+        $rows[] = array_slice($shots, $i, $width);
+        $i += $width;
     }
 
-    return $out;
+    return $rows;
+}
+
+/** One shot: its caption, the image with its ribbon and badges (each holding its note), and the legend below. */
+function proof_render_shot(array $shot): string
+{
+    $badges = '';
+    $legend = '';
+    foreach ($shot['badges'] ?? [] as $badge) {
+        $title = proof_e((string) ($badge['title'] ?? ''));
+        $note = proof_e((string) ($badge['note'] ?? ''));
+        $badges .= sprintf(
+            '<span class="badge" style="top:%s%%;left:%s%%" tabindex="0">%s<span class="tip" role="tooltip">%s — %s</span></span>',
+            proof_e((string) (0 + ($badge['topPct'] ?? 0))),
+            proof_e((string) (0 + ($badge['leftPct'] ?? 0))),
+            proof_e((string) ($badge['num'] ?? '')),
+            $title,
+            $note,
+        );
+        // Carry the badge's own number onto the list marker. The <ol> would otherwise
+        // renumber from 1 per figure, so a run that numbers its badges continuously across
+        // shots — which nothing forbids — renders a "5" on the image above a "1." in the
+        // legend, and the two stop referring to each other.
+        $marker = is_numeric($badge['num'] ?? null)
+            ? ' value="' . proof_e((string) (int) $badge['num']) . '"'
+            : '';
+
+        $legend .= '<li' . $marker . '><strong>' . $title . '</strong> — ' . $note . "</li>\n";
+    }
+
+    $state = is_string($shot['state'] ?? null) ? ProofShotState::tryFrom($shot['state']) : null;
+    $ribbon = $state === null ? '' : '<span class="ribbon ribbon-' . $state->value . '">' . $state->label() . '</span>';
+    $caption = empty($shot['caption'])
+        ? ''
+        : '<span class="caption">' . proof_e((string) $shot['caption']) . '</span>';
+
+    return "<figure>\n"
+        . '<figcaption><strong>' . proof_e((string) ($shot['title'] ?? '')) . '</strong> — <code>'
+        . proof_e((string) ($shot['route'] ?? '')) . '</code>' . $caption . "</figcaption>\n"
+        . '<span class="shot" role="button" tabindex="0" title="Zoom"><img alt="' . proof_e((string) ($shot['title'] ?? '')) . '" src="'
+        . proof_e((string) ($shot['file'] ?? '')) . '">' . $ribbon . $badges . "</span>\n"
+        . ($legend === '' ? '' : "<ol class=\"legend\">\n{$legend}</ol>\n")
+        . "</figure>\n";
 }
 
 function proof_render_checks(array $checks): string
@@ -234,6 +403,13 @@ function proof_render_run(array $run): string
 
     $body = "<h1>" . proof_e($title) . "</h1>\n<p class=\"meta\">{$meta}</p>\n";
 
+    // A run filed before schema 2 renders as it did: pending lines on a finished old page would claim work is
+    // outstanding.
+    $current = (int) ($run['schema'] ?? 1) >= 2;
+    if ($current) {
+        $body .= proof_render_summary($run) . proof_render_explainer($run);
+    }
+
     if (! empty($run['headline'])) {
         $body .= '<p class="lead">' . proof_e((string) $run['headline']) . "</p>\n";
     }
@@ -245,10 +421,14 @@ function proof_render_run(array $run): string
         $body .= "<h2>Solution</h2>\n" . proof_render_prose((string) $run['solution']);
     }
 
+    if ($current) {
+        $body .= proof_render_tests($run['addedTests'] ?? []);
+    }
     $body .= proof_render_shots($run['shots'] ?? []);
     $body .= proof_render_checks($run['checks'] ?? []);
     $body .= proof_render_list('Open questions', $run['openQuestions'] ?? []);
     $body .= proof_render_ledger($run['ledger'] ?? []);
+    $body .= "<dialog class=\"zoom\" id=\"zoom\"></dialog>\n<script>\n" . proof_render_script() . "\n</script>\n";
 
     $styles = proof_render_styles();
 

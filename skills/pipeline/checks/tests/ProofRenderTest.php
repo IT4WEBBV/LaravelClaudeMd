@@ -86,7 +86,7 @@ it('renders a self-contained page with only relative image paths', function () {
     // the PR and issue references are absolute precisely because the page opens over file://.
     expect($html)->not->toContain('src="http');
     expect($html)->not->toContain('<link ');
-    expect($html)->not->toContain('<script');
+    expect($html)->not->toContain('<script src');
 });
 
 it('places numbered badges from percentage positions and lists them in a legend', function () {
@@ -117,7 +117,7 @@ it('carries each badge number onto its legend marker, so a continuously-numbered
         ]],
     ]));
 
-    expect($html)->toContain('class="badge" style="top:85%;left:4%">5<');
+    expect($html)->toContain('class="badge" style="top:85%;left:4%" tabindex="0">5<');
     expect($html)->toContain('<li value="5">');
 });
 
@@ -248,4 +248,115 @@ it('shows the PR number and state for a run that has one', function () {
     expect($html)->toContain('412');
     expect($html)->toContain('MERGED');
     expect($html)->not->toContain('prune manually');
+});
+
+/** A run as filed from now on: schema 2, with the prose and a test list. */
+function proof_current_run(array $overrides = []): array
+{
+    return proof_fixture_run([
+        'schema' => 2,
+        'clientSummary' => 'Bij elke bestelregel staat nu een overzicht van de producten.',
+        'explainer' => ['problem' => 'An order row did not say what was ordered.', 'solution' => 'Each row now lists its products.'],
+        'addedTests' => [['file' => 'tests/Feature/OrdersTest.php', 'cases' => [['name' => 'shows the grid', 'change' => 'added'], ['name' => 'test_totals', 'change' => 'changed']]]],
+        ...$overrides,
+    ]);
+}
+
+it('opens with the Dutch client summary and its copy button, then the explainer, above the technical account', function () {
+    $html = proof_render_run(proof_current_run());
+
+    expect($html)->toContain('<p lang="nl" id="client-summary">Bij elke bestelregel staat nu een overzicht van de producten.</p>');
+    expect($html)->toContain('<button type="button" class="copy" data-copy="client-summary">Copy</button>');
+    expect($html)->toContain("<h2>In plain language</h2>\n<h3>The problem</h3>\n<p>An order row did not say what was ordered.</p>");
+    expect($html)->toContain("<h3>The solution</h3>\n<p>Each row now lists its products.</p>");
+    expect(strpos($html, 'id="client-summary"'))->toBeLessThan(strpos($html, 'In plain language'));
+    expect(strpos($html, 'In plain language'))->toBeLessThan(strpos($html, '<p class="lead">'));
+    expect(strpos($html, '<p class="lead">'))->toBeLessThan(strpos($html, '<h2>Problem</h2>'));
+});
+
+it('lists the tests the PR adds per file, tagged new or changed, and says so when there are none', function () {
+    $html = proof_render_run(proof_current_run());
+
+    expect($html)->toContain("<h2>Tests this PR adds</h2>\n<h3><code>tests/Feature/OrdersTest.php</code></h3>");
+    expect($html)->toContain('<li>shows the grid <span class="tag tag-added">new</span></li>');
+    expect($html)->toContain('<li>test_totals <span class="tag tag-changed">changed</span></li>');
+    expect(strpos($html, 'Tests this PR adds'))->toBeLessThan(strpos($html, '<h2>Checks</h2>'));
+    expect(proof_render_run(proof_current_run(['addedTests' => []])))->toContain('This PR adds or changes no test cases.');
+});
+
+it('marks the summary and the explainer pending on the page handoff files, with no copy button', function () {
+    $run = proof_current_run();
+    unset($run['clientSummary'], $run['explainer']);
+    $html = proof_render_run($run);
+
+    expect(substr_count($html, '<p class="pending">Pending: written by the step that finishes the run.</p>'))->toBe(2);
+    expect($html)->not->toContain('data-copy=');
+});
+
+it('renders a run filed before this change as before: no summary, explainer, tests or pending lines', function () {
+    // Shaped like _proofs/Asimo/pr-210: schema 1, shots without a state.
+    $html = proof_render_run(proof_fixture_run([
+        'schema' => 1,
+        'shots' => [['file' => 'shots/01-klant-dashboard.png', 'title' => 'Hero house number list', 'route' => '/klant/dashboard',
+            'badges' => [['num' => 1, 'topPct' => 46, 'leftPct' => 37, 'title' => 'No stale empty line', 'note' => 'The list starts at -1.']]]],
+    ]));
+
+    foreach (['Client summary', 'In plain language', 'Tests this PR adds', 'Pending:', 'class="ribbon'] as $absent) {
+        expect($html)->not->toContain($absent);
+    }
+    expect($html)->toContain('<h2>Problem</h2>')->toContain('<h2>Visual result</h2>');
+});
+
+it('puts a ribbon on each shot by its state', function () {
+    $html = proof_render_run(proof_current_run(['shots' => [
+        ['file' => 'shots/01.png', 'title' => 'Old', 'route' => '/', 'state' => 'defect', 'badges' => []],
+        ['file' => 'shots/02.png', 'title' => 'Lone before', 'route' => '/', 'state' => 'before', 'badges' => []],
+    ]]));
+
+    expect($html)->toContain('<span class="ribbon ribbon-defect">Defect</span>');
+    expect($html)->toContain('<span class="ribbon ribbon-before">Before</span>');
+    expect($html)->not->toContain('class="pair"');
+});
+
+it('pairs a before shot directly followed by an after shot in one row, and only those', function () {
+    $shot = fn (string $title, string $state) => ['file' => "shots/{$title}.png", 'title' => $title, 'route' => '/', 'state' => $state, 'badges' => []];
+    $html = proof_render_run(proof_current_run(['shots' => [$shot('b1', 'before'), $shot('a1', 'after'), $shot('a2', 'after'), $shot('b2', 'before'), $shot('d1', 'defect')]]));
+
+    expect(substr_count($html, '<div class="pair">'))->toBe(1);
+    expect(proof_shot_rows([$shot('b1', 'before'), $shot('a1', 'after'), $shot('a2', 'after'), $shot('b2', 'before'), $shot('d1', 'defect')]))
+        ->toBe([[$shot('b1', 'before'), $shot('a1', 'after')], [$shot('a2', 'after')], [$shot('b2', 'before')], [$shot('d1', 'defect')]]);
+});
+
+it('holds each badge\'s note in a focusable tooltip, and keeps the legend', function () {
+    $html = proof_render_run(proof_current_run(['shots' => [[
+        'file' => 'shots/01.png', 'title' => 'Orders', 'route' => '/orders', 'state' => 'after',
+        'badges' => [['num' => 1, 'topPct' => 10, 'leftPct' => 20, 'title' => 'Grid', 'note' => 'Was: nothing']],
+    ]]]));
+
+    expect($html)->toContain('<span class="badge" style="top:10%;left:20%" tabindex="0">1<span class="tip" role="tooltip">Grid — Was: nothing</span></span>');
+    expect($html)->toContain('<li value="1"><strong>Grid</strong> — Was: nothing</li>');
+});
+
+it('carries the zoom dialog and the copy script inline', function () {
+    $html = proof_render_run(proof_current_run());
+
+    expect($html)->toContain('<dialog class="zoom" id="zoom"></dialog>');
+    expect($html)->toContain('navigator.clipboard.writeText');
+    expect($html)->toContain("document.execCommand('copy')");
+    expect($html)->toContain('showModal()');
+    expect($html)->not->toContain('<script src');
+    expect(proof_render_index([]))->not->toContain('<script');
+});
+
+it('escapes the summary, the explainer, the test names and their files', function () {
+    $html = proof_render_run(proof_current_run([
+        'clientSummary' => 'Klant <b>"blij"</b> & tevreden',
+        'explainer' => ['problem' => '<script>x</script>', 'solution' => 'a < b'],
+        'addedTests' => [['file' => 'tests/<i>X</i>Test.php', 'cases' => [['name' => 'shows <em>it</em>', 'change' => 'added']]]],
+    ]));
+
+    expect($html)->toContain('Klant &lt;b&gt;&quot;blij&quot;&lt;/b&gt; &amp; tevreden');
+    expect($html)->toContain('&lt;script&gt;x&lt;/script&gt;')->toContain('a &lt; b');
+    expect($html)->toContain('tests/&lt;i&gt;X&lt;/i&gt;Test.php')->toContain('shows &lt;em&gt;it&lt;/em&gt;');
+    expect($html)->not->toContain('<script>x</script>');
 });

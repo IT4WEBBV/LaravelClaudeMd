@@ -14,26 +14,7 @@
  * `open` is weaker still: it is cosmetic, so every one of its paths logs and returns 0.
  */
 
-require_once __DIR__ . '/proof.php';
-require_once __DIR__ . '/proof_render.php';
-
-/**
- * Downscale to at most 1600px wide. PNG is kept rather than JPEG: JPEG artefacts on UI text
- * are exactly the kind of difference a proof page must not introduce.
- */
-function proof_cli_ingest_shot(string $source, string $destination): bool
-{
-    if (! is_file($source) || ! copy($source, $destination)) {
-        return false;
-    }
-
-    $size = @getimagesize($destination);
-    if (is_array($size) && $size[0] > 1600) {
-        exec('sips --resampleWidth 1600 ' . escapeshellarg($destination) . ' 2>/dev/null', $out, $code);
-    }
-
-    return true;
-}
+require_once __DIR__ . '/proof_store.php';
 
 function proof_cli_write(string $payloadPath): int
 {
@@ -44,51 +25,16 @@ function proof_cli_write(string $payloadPath): int
         return 0;
     }
 
-    // Nothing is filed until the payload passes: a page written anyway would carry its title into
+    // Nothing is filed until the run as it will be filed passes: a page written anyway would carry its title into
     // the store index for good. The leg sees no page path on stdout, fixes the payload, writes again.
-    $problems = proof_validate_run($payload);
-    if ($problems !== []) {
-        fwrite(STDERR, "proof: payload rejected, nothing written:\n  - " . implode("\n  - ", $problems) . "\n");
+    $filed = proof_store_file($payload, date('c'), fn (array $run): array => [...proof_validate_run($run), ...proof_validate_prose($run)]);
+    if ($filed['page'] === null) {
+        fwrite(STDERR, "proof: payload rejected, nothing written:\n  - " . implode("\n  - ", $filed['problems']) . "\n");
 
         return 0;
     }
 
-    $root = proof_root();
-    $repo = (string) ($payload['repo'] ?? 'unknown');
-    $branch = (string) ($payload['branch'] ?? 'unknown');
-    $dir = proof_run_dir($root, $repo, $branch, $payload['pr'] ?? null);
-
-    // A run filed before the directory was keyed by PR — or filed by a write that beat the PR
-    // into existence — still lives under its branch slug. Adopt that directory rather than
-    // starting an empty one beside it, which would orphan the shots it already holds and leave
-    // the store showing the same run twice.
-    $legacy = proof_run_dir($root, $repo, $branch);
-    if ($dir !== $legacy && ! is_dir($dir) && is_dir($legacy)) {
-        rename($legacy, $dir);
-    }
-
-    if (! is_dir($dir . '/shots') && ! mkdir($dir . '/shots', 0777, true) && ! is_dir($dir . '/shots')) {
-        fwrite(STDERR, "proof: cannot create {$dir}/shots\n");
-
-        return 0;
-    }
-
-    $sources = $payload['shotSources'] ?? [];
-    unset($payload['shotSources']);
-
-    foreach (array_values($sources) as $i => $source) {
-        $name = sprintf('%02d-%s.png', $i + 1, proof_slug((string) ($payload['shots'][$i]['route'] ?? 'state')));
-        if (proof_cli_ingest_shot((string) $source, $dir . '/shots/' . $name)) {
-            $payload['shots'][$i]['file'] = 'shots/' . $name;
-        }
-    }
-
-    $run = proof_write_run($dir, $payload, date('c'));
-
-    file_put_contents($dir . '/index.html', proof_render_run($run));
-    file_put_contents($root . '/index.html', proof_render_index(proof_scan_runs($root)));
-
-    echo $dir . "/index.html\n";
+    echo $filed['page'] . "\n";
 
     return 0;
 }
@@ -98,8 +44,8 @@ function proof_cli_write(string $payloadPath): int
  *
  * Cosmetic, and weaker than every other policy in this file: failing to *capture* proof halts a
  * run and failing to *file* it logs and continues, but failing to *open* it does not even rate a
- * distinct outcome. Every path below returns 0, including "there is no page", which is the normal
- * state of a backend-only run that never triggered `verify-ui`.
+ * distinct outcome. Every path below returns 0, including "there is no page", which is the
+ * state of a run that halted before `handoff`.
  *
  * `proof_open_argv()` returns an argv **array** and `proc_open()` runs an array form without a
  * shell, so the page path — which reaches this store from a JSON payload — is passed to the opener

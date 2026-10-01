@@ -589,8 +589,13 @@ it('says what each step passes to record, and describes no JSON', function () {
     expect($brief('autoflow', 'handoff', 'run'))
         ->toContain('- Run `php ' . realpath(__DIR__ . '/..') . "/dispatch_cli.php handoff {$path}` as its own command:");
     expect($brief('autoflow', 'verify-ui', 'run'))
-        ->toContain('- Write the proof page (engine.md §The proof store) and post the text-only record comment; the path `write` printed goes to `record` as `--proof`.')
+        ->toContain('- Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` (a first version), and a `state` on every shot; before shots only when the spec names a before state to show, captured on the base, each immediately followed in `shots` by its after shot; `git switch <branch>` before any after shot and before returning, whatever the status, and `git rev-parse --abbrev-ref HEAD` names the branch before the page is written; a defect found is shot as `defect`, and a later pass carries the earlier defect shots forward beside its own. `repo`, `branch` and `pr` are the ones in the `run.json` beside `artifacts.proof`.')
+        ->toContain('- Post the text-only record comment; the path `write` printed goes to `record` as `--proof`.')
         ->toContain('- Return `continued`, or `looped-back` when the check fails.');
+    expect($brief('autoflow', 'review-pr', 'resolve'))
+        ->toContain('- Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` as the finished work stands, the suite line under `checks`, the final open questions and ledger; `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, and a run without `artifacts.proof` gets its page from this write, with `repo` (the GitHub name), `branch` and `pr` from the PR.')
+        ->toContain('After `record`, the last action is `proof_cli.php open` on the path `write` printed (engine.md §The proof store).')
+        ->not->toContain('When `artifacts.proof` is set');
 });
 
 it('points implement at engine.md §Implement in both modes', function (string $mode) {

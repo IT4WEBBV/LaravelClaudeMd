@@ -62,7 +62,7 @@ switch ($command) {
 PHP);
     chmod("{$root}/bin/gh", 0755);
 
-    return ['PATH' => "{$root}/bin:" . getenv('PATH'), 'GH_FAKE' => $root];
+    return ['PATH' => "{$root}/bin:" . getenv('PATH'), 'GH_FAKE' => $root, 'PIPELINE_PROOF_ROOT' => "{$root}/proofs"];
 }
 
 /** A PR as gh lists it: open, draft, `feature` into `main`. */
@@ -118,6 +118,12 @@ function handoff_board(): string
     return implode("\n", ['## Board', '- org: acme', '- number: 7', '- project-id: PVT_1', '- status-field-id: F_1', '- in-progress-option-id: O_1', '- component-field-id: CF_1', '- component-default: Deploy=OPT_1', '']);
 }
 
+/** The page `handoff` files for the fixture's PR #7 of acme/app on `feature`. */
+function handoff_page(array $fixture): string
+{
+    return "{$fixture['root']}/proofs/app/pr-7-feature";
+}
+
 const HANDOFF_BODY = "Implements the design in `spec.md`.\nPlan: `plan.md`.\n\nPart of #125.";
 
 it('pushes the branch, opens the draft PR and records it, and the next brief accepts the run', function () {
@@ -129,13 +135,14 @@ it('pushes the branch, opens the draft PR and records it, and the next brief acc
     expect($result['code'])->toBe(0);
     expect($result['json'])->toBe([
         'action' => 'recorded', 'leg' => 'handoff', 'step' => 'run', 'status' => 'continued', 'last_sha' => $head, 'entry' => null, 'replaced' => [],
-        'pr' => 7, 'url' => 'https://github.com/acme/app/pull/7', 'created' => true, 'notes' => [],
+        'pr' => 7, 'url' => 'https://github.com/acme/app/pull/7', 'created' => true, 'notes' => [], 'proof' => handoff_page($fixture) . '/index.html',
     ]);
     expect(pipeline_git($fixture['repo'], ['rev-parse', 'origin/feature']))->toBe($head);
     expect(handoff_calls($fixture, 'pr create'))->toBe([['pr', 'create', '--draft', '--head', 'feature', '--title', 'Implement: x (issue: #125)', '--body', HANDOFF_BODY]]);
     expect(handoff_calls($fixture, 'project item-add'))->toBe([]);
     expect(manifest_read($fixture['manifest']))->toMatchArray(['last_sha' => $head, 'cursor' => ['leg' => 'handoff', 'status' => 'continued']]);
     expect(manifest_read($fixture['manifest'])['artifacts']['pr'])->toBe(7);
+    expect(manifest_read($fixture['manifest'])['artifacts']['proof'])->toBe(handoff_page($fixture) . '/index.html');
     expect(boundary_brief($fixture, 'implement', 'run', 'handoff:run', ['--status', 'continued'])['stdout'])->toContain('`implement` leg, `run` step');
 });
 
@@ -343,3 +350,57 @@ it('records an interactive handoff without an issue, and returned routes to impl
     expect(handoff_calls($fixture, 'pr create'))->toBe([['pr', 'create', '--draft', '--head', 'feature', '--title', 'Implement: x', '--body', "Implements the design in `spec.md`.\nPlan: `plan.md`."]]);
     expect(dispatch_cli(['returned', $fixture['manifest'], $fixture['diff']])['json'])->toMatchArray(['action' => 'dispatch', 'leg' => 'implement', 'step' => 'run']);
 });
+
+it('files the run\'s page from what it knows, with the prose pending, and records it', function () {
+    // No `base` in the manifest: the page's base is the one gh lists for the PR.
+    $fixture = handoff_fixture();
+
+    expect(handoff($fixture)['json'])->toMatchArray(['status' => 'continued', 'notes' => [], 'proof' => handoff_page($fixture) . '/index.html']);
+
+    $run = proof_read_run(handoff_page($fixture));
+    expect($run)->toMatchArray([
+        'nameWithOwner' => 'acme/app', 'repo' => 'app', 'branch' => 'feature', 'mode' => 'autoflow',
+        'worktree' => $fixture['repo'], 'pr' => 7, 'prState' => 'OPEN', 'issue' => 125, 'base' => 'main',
+        'title' => 'PR #7: x', 'addedTests' => [], 'schema' => 2,
+    ]);
+    expect(file_get_contents(handoff_page($fixture) . '/index.html'))->toContain('Pending: written by the step that finishes the run.');
+    expect(file_get_contents("{$fixture['root']}/proofs/index.html"))->toContain('pr-7-feature/index.html');
+});
+
+it('merges over the page on a re-run, keeping the title a step wrote', function () {
+    $fixture = handoff_fixture();
+    mkdir(handoff_page($fixture), 0777, true);
+    file_put_contents(handoff_page($fixture) . '/run.json', json_encode(['repo' => 'app', 'branch' => 'feature', 'pr' => 7, 'title' => 'PR #7: logs that follow', 'headline' => 'Logs follow', 'schema' => 2]));
+
+    handoff($fixture);
+
+    expect(proof_read_run(handoff_page($fixture)))->toMatchArray(['title' => 'PR #7: logs that follow', 'headline' => 'Logs follow', 'base' => 'main', 'worktree' => $fixture['repo']]);
+});
+
+it('records continued without a page, and says why, when the page cannot be filed', function (Closure $arrange, string $why) {
+    $fixture = handoff_fixture();
+    $arrange($fixture);
+
+    $result = handoff($fixture);
+    chmod("{$fixture['root']}/proofs", 0755);
+
+    expect($result['code'])->toBe(0);
+    expect($result['json'])->toMatchArray(['action' => 'recorded', 'status' => 'continued', 'pr' => 7, 'proof' => null]);
+    expect($result['json']['notes'][0])->toStartWith("the proof page was not filed: {$why}");
+    expect(manifest_read($fixture['manifest'])['artifacts'])->not->toHaveKey('proof');
+})->with([
+    'a stored shot without a state' => [
+        function (array $fixture) {
+            mkdir(handoff_page($fixture), 0777, true);
+            file_put_contents(handoff_page($fixture) . '/run.json', json_encode(['repo' => 'app', 'branch' => 'feature', 'pr' => 7, 'title' => 'PR #7: x', 'shots' => [['title' => 'Log']]]));
+        },
+        'shot 1 has no state: before, after or defect',
+    ],
+    'a store root it cannot write' => [
+        function (array $fixture) {
+            mkdir("{$fixture['root']}/proofs");
+            chmod("{$fixture['root']}/proofs", 0555);
+        },
+        'cannot create',
+    ],
+]);

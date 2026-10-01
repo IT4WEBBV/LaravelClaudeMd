@@ -105,3 +105,13 @@ it('keeps work-on out of the sections that describe a step', function () {
     expect((string) file_get_contents(__DIR__ . '/../../references/engine.md'))->not->toContain('`work-on`\'s');
     expect((string) file_get_contents(__DIR__ . '/../../SKILL.md'))->not->toContain('`work-on`');
 });
+
+it('keeps engine.md §The proof store in lock-step with the fields the store files and checks', function () {
+    $section = lockstep_section('engine.md', 'The proof store');
+
+    foreach (['clientSummary', 'explainer', 'worktree', 'base', 'state', ...PROOF_STORE_KEYS, ...array_column(ProofShotState::cases(), 'value')] as $field) {
+        expect($section)->toContain("`{$field}`");
+    }
+    expect($section)->toContain('at most ' . PROOF_SUMMARY_MAX . ' characters');
+    expect($section)->toContain('`handoff` files');
+});

@@ -2,13 +2,14 @@
 
 /**
  * The `handoff` step (`../references/engine.md` §Stations): push the branch, open the draft PR or adopt
- * the one the branch has, set the board Component. The decisions are pure; `pipeline_handoff()` runs them
+ * the one the branch has, set the board Component, file the run's proof page. The decisions are pure; `pipeline_handoff()` runs them
  * over two runners, and `dispatch_cli.php handoff` records what it returns or the halt it throws.
  */
 
 require_once __DIR__ . '/board.php';
 require_once __DIR__ . '/dispatch.php';
 require_once __DIR__ . '/manifest.php';
+require_once __DIR__ . '/proof.php';
 
 /** What every read of the run's PR asks gh for. */
 const PIPELINE_HANDOFF_PR_FIELDS = 'number,url,state,isDraft,baseRefName,headRefName,body';
@@ -26,14 +27,46 @@ function pipeline_handoff_words(string $words, int $code): string
     return $words === '' ? "exit {$code}" : $words;
 }
 
-/** `Implement: <the spec's first H1, less its design suffix> (issue: #<n>)`; a spec without an H1 takes the branch. */
-function pipeline_handoff_title(string $spec, string $branch, ?int $issue): string
+/** The spec's first H1, less its design suffix; a spec without an H1 takes the branch. */
+function pipeline_handoff_heading(string $spec, string $branch): string
 {
-    $heading = preg_match('/^#[ \t]+(.+?)\s*$/m', $spec, $match) === 1
+    return preg_match('/^#[ \t]+(.+?)\s*$/m', $spec, $match) === 1
         ? preg_replace('/\s+[—-]\s+design$/u', '', $match[1])
         : $branch;
+}
 
-    return "Implement: {$heading}" . ($issue === null ? '' : " (issue: #{$issue})");
+/** `Implement: <the spec's heading> (issue: #<n>)`. */
+function pipeline_handoff_title(string $spec, string $branch, ?int $issue): string
+{
+    return 'Implement: ' . pipeline_handoff_heading($spec, $branch) . ($issue === null ? '' : " (issue: #{$issue})");
+}
+
+/**
+ * The proof page `handoff` files (`../references/engine.md` §The proof store): where the run belongs, from the
+ * manifest and the PR as gh lists it, `base` being the branch the PR now goes into. The title is a default, so a
+ * title a step wrote stays when the step runs again.
+ *
+ * @return array{payload: array, defaults: array{title: string}}
+ */
+function pipeline_handoff_proof(array $manifest, array $pr, string $heading): array
+{
+    [$owner, $repo] = array_slice(explode('/', trim((string) parse_url((string) $pr['url'], PHP_URL_PATH), '/')), 0, 2);
+    $issue = $manifest['artifacts']['issue'] ?? null;
+
+    return [
+        'payload' => [
+            'nameWithOwner' => "{$owner}/{$repo}",
+            'repo' => $repo,
+            'branch' => (string) $manifest['branch'],
+            'mode' => (string) $manifest['mode'],
+            'worktree' => rtrim((string) $manifest['worktree'], '/'),
+            'pr' => (int) $pr['number'],
+            'prState' => 'OPEN',
+            ...($issue === null ? [] : ['issue' => (int) $issue]),
+            'base' => (string) ($manifest['base'] ?? $pr['baseRefName']),
+        ],
+        'defaults' => ['title' => proof_short_title("PR #{$pr['number']}: {$heading}")],
+    ];
 }
 
 /** A new PR's body: what an empty one gains. */
@@ -105,7 +138,7 @@ function pipeline_handoff_choice(array $prs): array|string|null
  * gh from it, each `array $args → [code, out, err]`. Every outward act is idempotent, so the step can run
  * again after any failure.
  *
- * @return array{pr: int, url: string, created: bool, notes: list<string>}
+ * @return array{pr: int, url: string, created: bool, notes: list<string>, page: array{payload: array, defaults: array{title: string}}}
  *
  * @throws PipelineHandoffHalt
  */
@@ -120,7 +153,8 @@ function pipeline_handoff(array $manifest, callable $git, callable $gh): array
 
     $issue = isset($manifest['artifacts']['issue']) ? (int) $manifest['artifacts']['issue'] : null;
     $base = $manifest['base'] ?? null;
-    $pr = $existing ?? pipeline_handoff_create($branch, $base, pipeline_handoff_title($git(['show', "HEAD:{$spec}"])[1], $branch, $issue), pipeline_handoff_body($spec, $plan, $issue), $gh);
+    $specText = $git(['show', "HEAD:{$spec}"])[1];
+    $pr = $existing ?? pipeline_handoff_create($branch, $base, pipeline_handoff_title($specText, $branch, $issue), pipeline_handoff_body($spec, $plan, $issue), $gh);
     $aligned = $existing === null ? [] : pipeline_handoff_align($existing, $base, $spec, $plan, $issue, $gh);
 
     return [
@@ -128,6 +162,7 @@ function pipeline_handoff(array $manifest, callable $git, callable $gh): array
         'url' => (string) $pr['url'],
         'created' => $existing === null,
         'notes' => [...$aligned, ...pipeline_handoff_component_notes($board, $pr, $gh)],
+        'page' => pipeline_handoff_proof($manifest, $pr, pipeline_handoff_heading($specText, $branch)),
     ];
 }
 
