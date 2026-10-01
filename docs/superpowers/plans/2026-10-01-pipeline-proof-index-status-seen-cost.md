@@ -42,7 +42,7 @@ the plan argues from it, and its `## Assumptions` 16–24 are the answers this p
   - `proof: status not written: halted needs --reason <text>`
   - `proof: status not written: no page given`
   - `proof: status not written: no run at <dir>`
-  - `proof: status not written: cannot write the run at <dir>`
+  - `proof: status not written: cannot write <file>` (the first of `run.json`, the page and the store index that failed)
   - `proof: cost not filed: <problem>`
 - Page and index copy, verbatim: `Time and cost`, table heads `Step`, `Models`, `Minutes`, `Waiting on tools`,
   `Weighted cost`, `Peak context`, row `Total`; index heads `Status`, `Repo`, `PR`, `Run`, `Shots`, `Time`, `Cost`,
@@ -85,7 +85,7 @@ the code.
 1. **`updatedAt` values with different offsets** (`2026-09-30T23:30:00-05:00` beside `2026-10-01T02:00:00Z`, both in
    the real store). Expected: the newer *time* sorts first, though its string sorts second. Test in Task 3.
 2. **A page whose `run.json` cannot be written** when a command marks it (a read-only file, a moved store).
-   Expected: `status` says `cannot write the run at <dir>` on stderr and exits 0; `dispatch_cli.php finish` still
+   Expected: `status` says `cannot write <dir>/run.json` on stderr and exits 0; `dispatch_cli.php finish` still
    prints exactly its one JSON line and records the halt. Tests in Tasks 4 and 6.
 3. **Markup in a halt reason, a repo, a summary, a workflow name, a step label or a model.** Expected: escaped on the
    page and in the index; the copy button copies the summary as written (it reads `textContent`). Tests in Tasks 2
@@ -1140,7 +1140,7 @@ it('says it cannot write a run whose file is read-only, and exits 0', function (
     $result = proof_status_cli(['status', $page, 'ready']);
     chmod(dirname($page) . '/run.json', 0644);
 
-    expect($result)->toBe(['code' => 0, 'stdout' => '', 'stderr' => 'proof: status not written: cannot write the run at ' . dirname($page) . "\n"]);
+    expect($result)->toBe(['code' => 0, 'stdout' => '', 'stderr' => 'proof: status not written: cannot write ' . dirname($page) . "/run.json\n"]);
     expect(proof_read_run(dirname($page))['status'])->toBe(['state' => 'running']);
 });
 
@@ -1206,11 +1206,18 @@ function proof_store_amend(string $page, callable $change): ?string
     }
     $run = $change($run);
     $root = dirname($page, 3);
-    $written = @file_put_contents("{$dir}/run.json", proof_run_json($run)) !== false
-        && @file_put_contents("{$dir}/index.html", proof_render_run($run)) !== false
-        && @file_put_contents("{$root}/index.html", proof_render_index(proof_scan_runs($root))) !== false;
+    $files = [
+        "{$dir}/run.json" => fn (): string => proof_run_json($run),
+        "{$dir}/index.html" => fn (): string => proof_render_run($run),
+        "{$root}/index.html" => fn (): string => proof_render_index(proof_scan_runs($root)),
+    ];
+    foreach ($files as $file => $contents) {
+        if (@file_put_contents($file, $contents()) === false) {
+            return "cannot write {$file}";
+        }
+    }
 
-    return $written ? null : "cannot write the run at {$dir}";
+    return null;
 }
 
 /** Marks the run filed beside `$page` with `$status`; the reason is kept only with Halted. Null, or why not. */
@@ -1718,6 +1725,10 @@ Expected: FAIL: the brief lacks the status line; engine.md lacks `` `revision` `
 
 **`skills/pipeline/references/engine.md`:**
 
+Two of the anchors below wrap across lines in engine.md (item 2's `…on its \`ready\`,` / `**\`gh pr ready <pr>\`**`
+at about 156–157, item 3's `…the run's span in` / `minutes and the largest step peak` at about 190–191): a one-line
+`grep -F` finds neither, so edit those two by eye, not by search-and-replace.
+
 1. §`autoflow`, the first code block: after the `finish` line add the comment line
    `# → {"action":"done","proof":<artifacts.proof, or null>} | {"action":"halt","reason":…}`.
 2. §`autoflow`, the `finish` bullet: replace `the invoking session runs the CI gate and, on its \`ready\`,
@@ -1786,7 +1797,9 @@ An `interactive` run has none.
    (null: nothing to mark).` The `In \`interactive\`` bullet's `\`gh pr ready\` on \`ready\`,` becomes
    `\`gh pr ready\` on \`ready\` and then \`proof_cli.php status <page> ready\`,`.
 9. §Failure policy, the *Hard failure* bullet: after `(\`cursor.status: halted\`, \`cursor.reason\`)` insert
-   `, which also marks the proof page Halted with that reason when \`artifacts.proof\` is set (§The proof store)`.
+   `, which also marks the proof page Halted with that reason when \`artifacts.proof\` is set (§The proof store); a
+   halt nobody records (a workflow that dies before \`finish\` runs) leaves the page Running until the next
+   \`launch\`, \`write\` or recorded halt, so Running on the page is no guarantee the run is alive`.
 
 **`skills/pipeline/SKILL.md`:**
 
@@ -1906,8 +1919,61 @@ Playwright MCP, at 1440 × 900 (`browser_resize`), in light and then dark mode (
 
 Stop the `php -S` server when done.
 
-- [ ] **Step 4: Record what was checked**
+- [ ] **Step 4: A copy of the real store, over `file://` in headless Chrome**
 
-No commit when nothing changed. The screenshots and the outcome of each numbered check go into the step's report and
-the PR's record, as engine.md §Implement asks. The issue's check on the real store over `file://` in Chrome is the
-owner's, after the merge (spec *Done when*).
+The issue asks for the check on the real store. No step may write to it, and the Playwright MCP refuses `file:`, so
+this runs the new renderer over a temp copy of `~/GitProjects/_proofs` (49 runs, nine repo folders including
+`_adhoc`, runs without a PR, `+02:00` beside `Z` offsets, schema 1 beside schema 2, branch-slug directories) and opens
+it over `file://` in the installed Chrome the way the probe did. In one Bash call:
+
+```bash
+COPY="$(mktemp -d)/proofs"; PROFILE="$(mktemp -d)"; echo "$COPY $PROFILE"
+shasum ~/GitProjects/_proofs/index.html
+cp -R ~/GitProjects/_proofs "$COPY"
+PIPELINE_PROOF_ROOT="$COPY" php -d error_reporting=-1 -d display_errors=stderr -r '
+require "skills/pipeline/checks/proof_store.php";
+$root = getenv("PIPELINE_PROOF_ROOT");
+foreach (glob("{$root}/*/*/run.json") as $json) {
+    proof_render_run(proof_read_run(dirname($json)));
+}
+$dir = glob("{$root}/*/pr-*", GLOB_ONLYDIR)[0];
+$filed = proof_write_run($dir, proof_read_run($dir), date("c"));
+file_put_contents("{$dir}/index.html", proof_render_run($filed));
+file_put_contents("{$root}/index.html", proof_render_index(proof_scan_runs($root)));
+echo count(glob("{$root}/*/*/run.json")), " runs; re-filed ", substr($dir, strlen($root) + 1), "\n";
+'
+```
+
+Expected: nothing on stderr (every real run renders without a warning or deprecation), and the run count. Then, with
+`<run>` the re-filed `<repo>/<run>` it printed:
+
+```bash
+CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+dump() { gtimeout 20 "$CHROME" --headless=new --user-data-dir="$PROFILE" --dump-dom "file://$1" 2>/dev/null; }
+dump "$COPY/index.html" > "$PROFILE/before.html"
+dump "$COPY/<run>/index.html" > /dev/null
+dump "$COPY/index.html" > "$PROFILE/after.html"
+shasum ~/GitProjects/_proofs/index.html
+```
+
+Chrome stays up after `--dump-dom` when given a profile dir: `gtimeout` ends it once the DOM is printed, and
+`localStorage` survives that SIGTERM (checked in the `review-plan` resolve step). Without `gtimeout`, run each
+`dump` with `run_in_background: true` and stop Chrome once its output holds `</html>`.
+
+Expected:
+
+1. `before.html`: one row per run the first command counted; the re-filed run's row reads `New` and no other row
+   has a marker (no real run has a `revision` yet); no row is Halted or Ready (no real run has a stored status, so
+   each reads Merged, Closed or Running by its `prState`), so the rows run newest first, the mixed-offset
+   `updatedAt` values ordered as times; the filter has one option per repo among the runs.
+2. `after.html`: the same rows, the re-filed run's row without its marker.
+3. The two `shasum` lines are equal: the real store's index is untouched.
+
+`rm -rf "$COPY" "$PROFILE"` when done.
+
+- [ ] **Step 5: Record what was checked**
+
+No commit when nothing changed. The screenshots, the outcome of each numbered check of Step 3 and of Step 4 go into
+the step's report and the PR's record, as engine.md §Implement asks. The check on the live store over `file://` in
+the owner's Chrome stays the owner's, after the merge (spec *Done when*): only that one exercises the live index the
+next `write` produces.

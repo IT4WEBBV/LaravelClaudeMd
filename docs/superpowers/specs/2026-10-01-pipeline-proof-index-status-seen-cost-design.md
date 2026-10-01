@@ -53,8 +53,8 @@ refuses `file:` URLs (`Access to "file:" protocol is blocked`), which matters fo
 **How a status reaches the page.**
 
 1. **Commands write what they already know; sessions run one subcommand for the rest (chosen).** A halt
-   always passes through `dispatch_cli_halt()` (`finish` in `autoflow`, `returned` in `interactive`, `launch`'s
-   invariant check), which has the manifest and so `artifacts.proof`: it writes Halted with the reason, with
+   always passes through `dispatch_cli_halt()` (`finish` in `autoflow`, `returned` in `interactive`, `brief`'s
+   boundary check, `launch`'s invariant check), which has the manifest and so `artifacts.proof`: it writes Halted with the reason, with
    no duty for any session to forget. A resume passes through `launch` (`autoflow`) or `next` (`interactive`):
    they write Running. Ready for review and Merged/Closed follow a `gh` call no command makes (`gh pr ready`
    stays visible to the permission rules; the merge watch is a shell loop), so the session that ran it
@@ -118,9 +118,9 @@ Any other `prState` keeps the stored status.
 
 | Status | Written by | When |
 |---|---|---|
-| Running | the store, as a default | `handoff` files the page (and any filing of a run that has no status) |
+| Running | the store: the status its `prState` implies (Assumption 16) | `handoff` files the page (and any filing of a run that has no status) |
 | Running | `dispatch_cli.php launch` (on `start`) and `next` (on a dispatch) | a run starts or resumes, so a resumed halt reads Running again |
-| Halted, with the reason | `dispatch_cli_halt()`: `finish`, `returned`, `launch`'s invariant halt | the manifest records a halt |
+| Halted, with the reason | `dispatch_cli_halt()`: `finish`, `returned`, `brief`'s boundary check, `launch`'s invariant halt | the manifest records a halt |
 | Ready for review | the session that ran `gh pr ready <pr>`: the invoking session in `autoflow`, the finish step in `interactive` | right after `gh pr ready` succeeded: `proof_cli.php status <page> ready` |
 | Merged / Closed | the session holding the merge watch: §After the merge, `orchestrate` step 6 | the watch prints `MERGED` or `CLOSED`, before any teardown: `proof_cli.php status <page> merged` / `closed` |
 | any | the prune pass, from `gh` | every `write` and `prune`: `corrected()` |
@@ -233,7 +233,8 @@ standing.
   after-run report passes `artifacts.proof` to `run_cost_cli.php` when set. **§The CI gate** and **§Who takes
   the PR out of draft**: `proof_cli.php status <proof> ready` after `gh pr ready`. **§After the merge**: step 2
   writes `merged` before the teardown, step 3 writes `closed`. **§Failure policy**: a recorded halt marks the
-  page Halted by itself.
+  page Halted by itself; a halt nobody records (a workflow that dies before `finish` runs) leaves it Running until
+  the next `launch`, `write` or recorded halt, so Running is no guarantee the run is alive.
 - **`SKILL.md`**: *Visual proof* names the status and the index; *Cost per run* says the figures are filed into
   the page; *`autoflow` — how a run starts and ends* steps 5 and 6 carry the two commands.
 - **`orchestrate`**: `SKILL.md` step 5 and `references/commands.md` §Finish (`status <proof> ready` after
@@ -273,7 +274,12 @@ and serves that root with `php -S 127.0.0.1:<port> -t <root>`: one origin, as `f
 At 1440 px and in dark mode: Halted first with its reason; a Ready row New, then, after opening its page and
 going Back, seen and dropped below; a page re-filed after opening shows Updated; the filter hides the other
 repo and survives a reload; the copy button puts the summary on the clipboard. The issue's check *on the real
-store* over `file://` in the owner's Chrome is the owner's, after the merge (*Done when*).
+store* is done twice. In `implement`, on real data and the real origin without touching the store: a copy of
+`~/GitProjects/_proofs` in a temp dir, its index re-rendered by the new renderer, one run re-filed and opened over
+`file://` in the installed Chrome (`--headless=new`, a fresh `--user-data-dir`, `--dump-dom`, as the probe was),
+then the copy's index dumped with the same profile: that row has lost its `New`. Over `file://` on the live store,
+in the owner's Chrome, after the merge (*Done when*): only that one exercises the live index the next `write`
+produces.
 
 ## Done when
 
@@ -286,6 +292,8 @@ store* over `file://` in the owner's Chrome is the owner's, after the merge (*Do
 - An `autoflow` run's page shows its time and cost per step, and its index row the totals; an `interactive`
   run shows none.
 - The tests above pass; engine.md §The proof store names who writes each status.
+- Before the PR leaves draft: the new index renders a temp copy of the real store without a warning, and a run
+  re-filed in that copy and opened over `file://` in headless Chrome loses its `New` (*Testing*).
 - After the merge, outside this PR's gates: the index of the real store, opened over `file://` in Chrome, shows
   the filter, the copy button, and New/Updated/seen after opening a page.
 
@@ -295,7 +303,7 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
 
 1. **Who writes Halted?** `dispatch_cli_halt()`, the one function every recorded halt passes, when the
    manifest has `artifacts.proof`: "the session holding the run" writes it by running `finish` or `returned`,
-   which it does anyway. A halt `handoff` records before its page exists has no page to mark.
+   which it does anyway; `brief`'s boundary check and `launch`'s invariant check halt through it too. A halt `handoff` records before its page exists has no page to mark.
 2. **What clears Halted on a resume?** `launch` (on `start`) and `next` (on a dispatch) write Running. Without
    it a run resumed at `implement` would read Halted until its next `write`.
 3. **Who writes Ready, Merged and Closed?** The session that made the change, by `proof_cli.php status`, right
@@ -327,8 +335,9 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
     and the page names it *weighted*.
 13. **Is the repo filter remembered?** Yes, per browser (`proof:repo`); a convenience, wrapped in `try`/`catch`.
 14. **How is the issue's browser check done when the Playwright MCP blocks `file:`?** Over `php -S` on a temp
-    store in `implement`, one origin as `file://` is in Chrome; the check on the real store over `file://` is the
-    owner's after the merge, beside #141's.
+    store in `implement`, one origin as `file://` is in Chrome; then, still in `implement`, over `file://` in headless
+    Chrome on a temp copy of the real store (*Testing*); the check on the live store over `file://` is the owner's
+    after the merge, beside #141's.
 15. **Does the index keep its Shots column?** Yes; the issue adds columns and removes none.
 
 Added by the plan step, for what the plan needed and the design above leaves open:
@@ -346,9 +355,9 @@ Added by the plan step, for what the plan needed and the design above leaves ope
     `<run>/` and `<run>/index.html` alike.
 20. **What does an empty store's index render?** As today, `No runs recorded.` alone: no filter, no table, no
     script.
-21. **What does an amendment that cannot write say?** `cannot write the run at <dir>`, returned as the problem; no
-    PHP warning reaches stdout, so `dispatch_cli.php`'s answer stays one JSON line. `status` with no page is
-    `no page given`.
+21. **What does an amendment that cannot write say?** `cannot write <file>`, the first of `run.json`, the page and
+    the store index that failed, returned as the problem; no PHP warning reaches stdout, so `dispatch_cli.php`'s
+    answer stays one JSON line. `status` with no page is `no page given`.
 22. **Which reason does the prune pass keep?** A run that stays Halted keeps its reason; any other status drops it
     (`ProofRunStatus::stored()` writes `reason` only for Halted). A `--reason` given with another status is ignored.
 23. **Does `named()` get a second copy?** No: `ProofShotState::named()` and the new `ProofRunStatus::named()` share
