@@ -146,13 +146,17 @@ function proof_cli_refresh(array $entry): array
     if ($view['state'] === ($run['prState'] ?? null) && $status === $stored) {
         return $run;
     }
-    $refreshed = [...$run, 'prState' => $view['state'], 'status' => $status->stored(proof_status_reason($run))];
-    $problem = proof_store_amend("{$entry['dir']}/index.html", fn (array $filed): array => $refreshed);
+    $refresh = fn (array $filed): array => [
+        ...$filed,
+        'prState' => $view['state'],
+        'status' => $status->stored(proof_status_reason($filed)),
+    ];
+    $problem = proof_store_amend("{$entry['dir']}/index.html", $refresh);
     if ($problem !== null) {
         fwrite(STDERR, "proof: {$problem}\n");
     }
 
-    return $refreshed;
+    return $refresh($run);
 }
 
 function proof_cli_rmdir(string $dir): void
