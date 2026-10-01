@@ -51,6 +51,7 @@ git config --global user.email test@example.com
 export GIT_FRESHNESS_CONFIG_REPOS=""
 export GIT_FRESHNESS_SKILLS_DIR="$root/no-skills-dir"
 export GIT_FRESHNESS_WORKFLOWS_DIR="$root/no-workflows-dir"
+export GIT_FRESHNESS_AGENTS_DIR="$root/no-agents-dir"
 export GIT_FRESHNESS_STATUSLINE="$root/no-statusline/statusline-command.sh"
 # Same for the retired-vault reminder: no case may read the real home.
 export GIT_FRESHNESS_VAULT_HOME="$root/no-home"
@@ -418,6 +419,34 @@ out=$(printf '%s' "{\"session_id\":\"test-config6b\",\"cwd\":\"$root/config6\"}"
 if [ -L "$mine" ]; then fail "a machine-local file is not replaced"; else ok "a machine-local file is not replaced"; fi
 is "$(cat "$mine")" "mine" "its content is untouched"
 lacks "$out" "linked the status line" "nothing is reported"
+echo
+
+echo "case 19: session start links a skill's agent definition into the agents dir"
+cfg=$(fixture config7 1 skills/flow/SKILL.md)
+push_upstream config7 skills/flow/agents/flow-check.md "name: flow-check"
+push_upstream config7 skills/flow/agents/taken.md "taken"
+agentsdir="$root/config7/agents"
+mkdir -p "$agentsdir" "$root/config7/elsewhere"
+ln -s "$root/config7/elsewhere/taken.md" "$agentsdir/taken.md"
+out=$(printf '%s' "{\"session_id\":\"test-config7\",\"cwd\":\"$root/config7\"}" \
+    | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config7/none" GIT_FRESHNESS_AGENTS_DIR="$agentsdir" bash "$hook" session 2>/dev/null)
+is "$(readlink "$agentsdir/flow-check.md")" "$cfg/skills/flow/agents/flow-check.md" "the agent definition is linked under its file name"
+is "$(readlink "$agentsdir/taken.md")" "$root/config7/elsewhere/taken.md" "an existing entry with the same name is left alone"
+contains "$out" "linked new agent flow-check" "the new link is reported"
+lacks "$out" "linked new agent taken" "the collision is not reported as linked"
+echo
+
+echo "case 20: a missing agents dir is created; one that is a symlink gets nothing"
+cfg=$(fixture config8 1 skills/flow/agents/flow-check.md)
+missing="$root/config8/new/agents"
+printf '%s' "{\"session_id\":\"test-config8a\",\"cwd\":\"$root/config8\"}" \
+    | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config8/none" GIT_FRESHNESS_AGENTS_DIR="$missing" bash "$hook" session >/dev/null 2>&1
+is "$(readlink "$missing/flow-check.md")" "$cfg/skills/flow/agents/flow-check.md" "the missing dir is created and the definition linked"
+mkdir -p "$root/config8/realagents"
+ln -s "$root/config8/realagents" "$root/config8/agents-link"
+printf '%s' "{\"session_id\":\"test-config8b\",\"cwd\":\"$root/config8\"}" \
+    | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config8/none" GIT_FRESHNESS_AGENTS_DIR="$root/config8/agents-link" bash "$hook" session >/dev/null 2>&1
+if [ -e "$root/config8/realagents/flow-check.md" ]; then fail "nothing written through a symlinked agents dir"; else ok "nothing written through a symlinked agents dir"; fi
 echo
 
 echo "----------------------------------------"

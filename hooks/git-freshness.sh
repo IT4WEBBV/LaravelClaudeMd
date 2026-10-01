@@ -44,9 +44,11 @@
 #
 # The config repos get one more: a skill that has no symlink in ~/.claude/skills
 # yet is linked, and so is a skill's workflow script (skills/<skill>/workflow/*.js)
-# that has none in ~/.claude/workflows, and the status line script when
-# ~/.claude/statusline-command.sh does not exist, so each reaches every machine with
-# its next session instead of waiting for a manual relink. An existing entry is never replaced.
+# that has none in ~/.claude/workflows, a skill's agent definition
+# (skills/<skill>/agents/*.md) that has none in ~/.claude/agents, and the status
+# line script when ~/.claude/statusline-command.sh does not exist, so each reaches
+# every machine with its next session instead of waiting for a manual relink. An
+# existing entry is never replaced.
 #
 # Beyond that it touches nothing: your branch, your index and your working tree
 # are left alone, merges are predicted in a throwaway index, and deciding whether
@@ -67,6 +69,7 @@ max_listed_files=6      # the conflict list is a prompt, not an inventory
 config_repos="${GIT_FRESHNESS_CONFIG_REPOS-$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd:$HOME/GitProjects/DevOps-Claude-Config/DevOps-Claude-Config}"
 skills_dir="${GIT_FRESHNESS_SKILLS_DIR-$HOME/.claude/skills}"
 workflows_dir="${GIT_FRESHNESS_WORKFLOWS_DIR-$HOME/.claude/workflows}"
+agents_dir="${GIT_FRESHNESS_AGENTS_DIR-$HOME/.claude/agents}"
 statusline="${GIT_FRESHNESS_STATUSLINE-$HOME/.claude/statusline-command.sh}"
 config_fetch_seconds=5  # tighter than max_fetch_seconds: the session repo still has to fit in the hook timeout
 
@@ -437,21 +440,23 @@ link_new_skills() {
     done
 }
 
-# Link each workflow script a skill in repo $1 ships (skills/<skill>/workflow/*.js)
-# that has no entry in the workflows dir yet, so a saved workflow loads by name in
-# every project. Same rules as skills, except that a missing dir is created: it is
-# ours alone, where the skills dir is set up by hand once per machine.
-link_new_workflows() {
-    local repo=$1 script name
+# Link each file a skill in repo $1 ships under skills/<skill>/$2/*.$3 that has
+# no entry in dir $4 yet, reported as "linked new $5 <name>": workflow scripts,
+# so a saved workflow loads by name in every project, and agent definitions, so
+# a workflow's agentType resolves. Same rules as skills, except that a missing
+# dir is created: it is ours alone, where the skills dir is set up by hand once
+# per machine.
+link_new_skill_files() {
+    local repo=$1 subdir=$2 ext=$3 dir=$4 word=$5 file name
 
-    [ ! -L "$workflows_dir" ] && mkdir -p "$workflows_dir" 2>/dev/null || return 0
+    [ ! -L "$dir" ] && mkdir -p "$dir" 2>/dev/null || return 0
 
-    for script in "$repo"/skills/*/workflow/*.js; do
-        [ -f "$script" ] || continue
-        name=$(basename "$script")
-        { [ -e "$workflows_dir/$name" ] || [ -L "$workflows_dir/$name" ]; } && continue
-        ln -s "$script" "$workflows_dir/$name" 2>/dev/null \
-            && config_tags="${config_tags}${config_tags:+, }linked new workflow ${name%.js}"
+    for file in "$repo"/skills/*/"$subdir"/*."$ext"; do
+        [ -f "$file" ] || continue
+        name=$(basename "$file")
+        { [ -e "$dir/$name" ] || [ -L "$dir/$name" ]; } && continue
+        ln -s "$file" "$dir/$name" 2>/dev/null \
+            && config_tags="${config_tags}${config_tags:+, }linked new $word ${name%.$ext}"
     done
 }
 
@@ -506,7 +511,8 @@ sync_config_repos() {
         fi
 
         link_new_skills "$repo"
-        link_new_workflows "$repo"
+        link_new_skill_files "$repo" workflow js "$workflows_dir" workflow
+        link_new_skill_files "$repo" agents md "$agents_dir" agent
         link_statusline "$repo"
     done <<< "$(config_repo_list)"
 }
