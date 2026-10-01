@@ -151,8 +151,8 @@ made) becomes a note in the command's answer, `the proof page was not filed: <wh
 records `continued` without a page. When the page is filed, the command passes its path to `record`
 as `proof`: `handoff:run`'s `continued` row gains `proof` as an optional flag
 (`pipeline_record_table()`), and `pipeline_record_pr()` sets `artifacts.proof` beside `artifacts.pr`.
-The handoff's own order (§Stations, *`handoff` in order*) gains the step between the PR and the
-Component: preflight, push, PR, **page**, Component, record.
+The handoff's own order (§Stations, *`handoff` in order*) gains the step after the Component
+(Assumption 17): preflight, push, PR, Component, **page**, record.
 
 A re-run `handoff` (a plan gap, an escalation) merges over the page it filed before: identity fields
 and `addedTests` refresh, everything a later step wrote stays.
@@ -380,6 +380,12 @@ Added by the plan step, for questions the plan needed answered:
 26. **Line numbers of a test file read through `pipeline_git_run()`**, which trims its output: a PHP test
     file opens with `<?php` on line 1, so trimming moves no line. A file that opened with blank lines would
     shift its cases; that is accepted.
+
+Added by the plan review's resolve step:
+
+27. **A carried shot re-sent without its `file`** (and `null` in `shotSources`) would render as a broken
+    image. `proof_store_file()`, which holds both the merged run and the sources, refuses it:
+    `shot 1 has no file and no source: carry its file, or send its screenshot`, and files nothing.
 
 ## Relation to other work
 

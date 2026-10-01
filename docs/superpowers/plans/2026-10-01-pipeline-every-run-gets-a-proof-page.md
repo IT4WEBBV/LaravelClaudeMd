@@ -826,6 +826,20 @@ it('keeps a carried shot\'s file next to a newly ingested one, named by its cont
     expect(array_key_exists('shotSources', proof_write_stored($root)))->toBeFalse();
 });
 
+it('refuses a carried shot re-sent without its file, and keeps the stored one', function () {
+    $root = sys_get_temp_dir() . '/proof-write-' . uniqid();
+    mkdir($root);
+    file_put_contents("{$root}-one.png", 'first screenshot');
+    $defect = ['title' => 'Log stops', 'route' => '/logs', 'state' => 'defect'];
+    proof_write_cli(proof_write_payload(['shots' => [$defect], 'shotSources' => ["{$root}-one.png"]]), $root);
+
+    $result = proof_write_cli(proof_write_payload(['shots' => [$defect], 'shotSources' => [null]]), $root);
+
+    expect($result['stdout'])->not->toContain("{$root}/Deploy/");
+    expect($result['stderr'])->toContain('shot 1 has no file and no source');
+    expect(proof_write_stored($root)['shots'][0]['file'])->toStartWith('shots/01-logs-');
+});
+
 it('refuses to finalise a run filed before shot states until its shots carry them, then renders the new page', function () {
     $root = sys_get_temp_dir() . '/proof-write-' . uniqid();
     mkdir("{$root}/Deploy/pr-5-logs", 0777, true);
@@ -885,7 +899,8 @@ function proof_store_file(array $payload, string $now, callable $rules, array $d
     $root = proof_root();
     [$dir, $home] = proof_store_dirs($root, $payload);
     $run = proof_merge_run(proof_read_run($home) ?? [], $payload, $defaults);
-    $problems = $rules($run);
+    $sources = array_values($payload['shotSources'] ?? []);
+    $problems = [...$rules($run), ...proof_store_unsourced_shots($run, $sources)];
     if ($problems !== []) {
         return ['page' => null, 'problems' => $problems];
     }
@@ -895,7 +910,7 @@ function proof_store_file(array $payload, string $now, callable $rules, array $d
     if (! is_dir("{$dir}/shots") && ! @mkdir("{$dir}/shots", 0777, true) && ! is_dir("{$dir}/shots")) {
         return ['page' => null, 'problems' => ["cannot create {$dir}/shots"]];
     }
-    $run = proof_store_shots($dir, $run, array_values($payload['shotSources'] ?? []));
+    $run = proof_store_shots($dir, $run, $sources);
     $tests = proof_store_added_tests($run);
     if (is_string($tests)) {
         fwrite(STDERR, "proof: tests not extracted: {$tests}\n");
@@ -907,6 +922,24 @@ function proof_store_file(array $payload, string $now, callable $rules, array $d
     file_put_contents("{$root}/index.html", proof_render_index(proof_scan_runs($root)));
 
     return ['page' => "{$dir}/index.html", 'problems' => []];
+}
+
+/**
+ * A shot with neither a stored `file` nor a source at its position would render as a broken image: a carried
+ * shot re-sent without its `file` is refused instead.
+ *
+ * @return list<string>
+ */
+function proof_store_unsourced_shots(array $run, array $sources): array
+{
+    $problems = [];
+    foreach ($run['shots'] ?? [] as $i => $shot) {
+        if (! isset($shot['file']) && ! isset($sources[$i])) {
+            $problems[] = sprintf('shot %d has no file and no source: carry its file, or send its screenshot', $i + 1);
+        }
+    }
+
+    return $problems;
 }
 
 /**
@@ -1793,11 +1826,11 @@ In `tests/BriefTest.php`, in *says what each step passes to record, and describe
 
 ```php
     expect($brief('autoflow', 'verify-ui', 'run'))
-        ->toContain('- Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` (a first version), and a `state` on every shot; before shots only when the spec names a before state to show, captured on the base; a defect found is shot as `defect`, and a later pass carries the earlier defect shots forward beside its own. `repo`, `branch` and `pr` are the ones in the `run.json` beside `artifacts.proof`.')
+        ->toContain('- Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` (a first version), and a `state` on every shot; before shots only when the spec names a before state to show, captured on the base, each immediately followed in `shots` by its after shot; `git switch <branch>` before any after shot and before returning, whatever the status, and `git rev-parse --abbrev-ref HEAD` names the branch before the page is written; a defect found is shot as `defect`, and a later pass carries the earlier defect shots forward beside its own. `repo`, `branch` and `pr` are the ones in the `run.json` beside `artifacts.proof`.')
         ->toContain('- Post the text-only record comment; the path `write` printed goes to `record` as `--proof`.')
         ->toContain('- Return `continued`, or `looped-back` when the check fails.');
     expect($brief('autoflow', 'review-pr', 'resolve'))
-        ->toContain('- Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` as the finished work stands, the suite line under `checks`, the final open questions and ledger; `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`.')
+        ->toContain('- Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` as the finished work stands, the suite line under `checks`, the final open questions and ledger; `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, and a run without `artifacts.proof` gets its page from this write, with `repo` (the GitHub name), `branch` and `pr` from the PR.')
         ->toContain('After `record`, the last action is `proof_cli.php open` on the path `write` printed (engine.md §The proof store).')
         ->not->toContain('When `artifacts.proof` is set');
 ```
@@ -1814,14 +1847,14 @@ In `brief.php`, `pipeline_leg_overrides()`:
 - `verify-ui:run`'s second entry becomes two entries:
 
 ```php
-            'Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` (a first version), and a `state` on every shot; before shots only when the spec names a before state to show, captured on the base; a defect found is shot as `defect`, and a later pass carries the earlier defect shots forward beside its own. `repo`, `branch` and `pr` are the ones in the `run.json` beside `artifacts.proof`.',
+            'Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` (a first version), and a `state` on every shot; before shots only when the spec names a before state to show, captured on the base, each immediately followed in `shots` by its after shot; `git switch <branch>` before any after shot and before returning, whatever the status, and `git rev-parse --abbrev-ref HEAD` names the branch before the page is written; a defect found is shot as `defect`, and a later pass carries the earlier defect shots forward beside its own. `repo`, `branch` and `pr` are the ones in the `run.json` beside `artifacts.proof`.',
             'Post the text-only record comment; the path `write` printed goes to `record` as `--proof`.',
 ```
 
 - `review-pr:resolve`: `'When \`artifacts.proof\` is set, rewrite the proof page with the final open questions and ledger.',` becomes
 
 ```php
-            'Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` as the finished work stands, the suite line under `checks`, the final open questions and ledger; `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`.',
+            'Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` as the finished work stands, the suite line under `checks`, the final open questions and ledger; `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, and a run without `artifacts.proof` gets its page from this write, with `repo` (the GitHub name), `branch` and `pr` from the PR.',
 ```
 
   and the tail `' After \`record\`, the last action is \`proof_cli.php open\` on \`artifacts.proof\` (engine.md §The proof store).'`
@@ -1897,7 +1930,8 @@ replaced, never appended to; `[]` empties one), and a key it leaves out is kept.
    and ledger.
 
 An agent's write takes `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, so it
-lands in the directory `handoff` filed; a run without `artifacts.proof` gets its page from that write.
+lands in the directory `handoff` filed; a run without `artifacts.proof` gets its page from that write,
+with `repo` (the GitHub name), `branch` and `pr` from the PR.
 The page opens with the **client summary** (Dutch, for the hour registration, with a copy button), then
 **In plain language** (the problem and the solution for a reader who knows nothing about the issue), the
 headline and the technical Problem and Solution, **Tests this PR adds**, the shots, the checks, the open
@@ -1928,15 +1962,19 @@ Replace the refusal paragraph (`` `write` refuses a payload whose `title` is mis
 ```markdown
 **Before, after and defect shots.** `verify-ui` takes before shots only when the spec names a before
 state to show: it checks out the base detached in the run's worktree (`git checkout --detach
-origin/<base>`), captures them, and checks the branch out again before any after shot. When the base
-cannot render the state (a migration it does not expect), the before shot is left out and that is an
-open question, never a halt. A pass that finds a defect shoots it as `defect`; the next pass carries the
-earlier defect shots forward (their `file`, `null` in `shotSources`) beside its own.
+origin/<base>`), captures them, and checks the branch out again (`git switch <branch>`) before any after
+shot and before the pass returns, whatever its status; before it writes the page, `git rev-parse
+--abbrev-ref HEAD` names the branch. Pairing is positional: in `shots` each before shot is immediately
+followed by its after shot, so shoot the before shots on the base, then the after shots in the same order,
+and interleave them in the payload. When the base cannot render the state (a migration it does not
+expect), the before shot is left out and that is an open question, never a halt. A pass that finds a
+defect shoots it as `defect`; the next pass carries the earlier defect shots forward (their `file`,
+`null` in `shotSources`) beside its own.
 
 `write` judges the run as it will be filed, the payload merged over the stored run, and refuses one
 whose `title` is missing or longer than 70 characters, whose shot title is too long, whose shot has no
-valid `state`, or whose `clientSummary` or `explainer` breaks the rules above. It prints `proof: payload
-rejected` and the problems on stderr, prints no page path, and files nothing. Fix the payload and write
+valid `state` or neither a `file` nor a source in `shotSources`, or whose `clientSummary` or
+`explainer` breaks the rules above. It prints `proof: payload rejected` and the problems on stderr, prints no page path, and files nothing. Fix the payload and write
 again. The page `handoff` files is judged on the title and shot rules only. Runs filed before `title`
 existed are named by their branch; runs filed before the client summary (`schema` 1) render without the
 summary, explainer and tests sections.
