@@ -1075,7 +1075,7 @@ poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll
   commit <sha>: <check> failed (<link>)`, goes into `decisions` verbatim with the re-arm:
   `git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"`, then
   `launch <manifest> "<manifest stem>.diff" --from review-pr --decision "<its decision>"` and a new
-  `pipeline-autoflow` workflow. The review step reads the failing job's log and states the failure as a
+  `pipeline-autoflow` workflow, started through the detour (`../SKILL.md` §`autoflow` step 3). The review step reads the failing job's log and states the failure as a
   finding; the finish step fixes it, or shows it unrelated (the same failure on the base branch, or a
   flake whose failed jobs it reruns without waiting); then `finish`, and this gate again.
 - **`halt`** → `finish <manifest> '<the answer>'`: the answer names `review-pr` and its reason, so
