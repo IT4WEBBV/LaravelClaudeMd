@@ -103,14 +103,33 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    manifest's `base`, else the default branch), then
    `PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff"`.
    `done` or a halt: report it and stop. A resume starts here: `launch` starts from the cursor.
-3. **Start the saved workflow `pipeline-autoflow`** by name, with `launch`'s JSON as `args`, and wait
-   for its completion notice. Starting it from this skill is the owner's opt-in; unattended runs need
-   auto permission mode or allow rules for `git push`, `gh` and `docker`, and the allow rules for the
-   merge of the base in its `git -C <worktree>` form (`README.md`, *Permissions for unattended runs*).
+3. **Start the saved workflow `pipeline-autoflow` through the detour** (#134). Claude Code relays the
+   owner's last chat message to every step of a workflow started in a reply a human message opened,
+   and the steps then do that message instead of their own work; a reply a background job's notice
+   opened carries no such message. So a start takes two replies:
+   - **The launching reply** runs everything the start needs (steps 1–2; in `orchestrate` also its
+     watches, teardowns and `needs_input.py`) and ends with one background Bash, `sleep 5`
+     (`run_in_background: true`), as its **last tool call**; after it only the reply's text.
+   - **The starting reply** is the one that wait's completion notice opens. Its **first tool call** is
+     the `Workflow` call: `pipeline-autoflow` by name, with `launch`'s JSON as `args` (several runs
+     started together: several `Workflow` calls in that first block). After them only the dispatch
+     record and, in `orchestrate`, `needs_input.py` and its line; **never an `AskUserQuestion`**.
+   - A human message that opens a reply before the notice: answer it, and start the run first thing in
+     the reply the notice opens, or first in that same reply when the notice was absorbed into it.
+
+   Then wait for the workflow's completion notice. The script's first agent checks that the start was
+   clean (`references/engine.md` §`autoflow`). Starting it from this skill is the owner's opt-in;
+   unattended runs need auto permission mode or allow rules for `git push`, `gh` and `docker`, and the
+   allow rules for the merge of the base in its `git -C <worktree>` form (`README.md`, *Permissions for
+   unattended runs*).
 4. **Finish.** `php "$CHECKS/dispatch_cli.php" finish <manifest> '<its return as JSON>'`, or
    `'{"action":"halt","reason":"<the error>"}'` when the workflow errored. `finish` refuses a `done`
    whose cursor is not on `review-pr`, or whose last snapshot is not `review-pr`'s resolve step's with
    a return that holds: it records a halt and prints it instead.
+   **`relaunch: true`** (the first `relay:` halt in a row: the start was framed, no step ran): steps 2–3
+   again, with no `--from` and no `--decision`, and nothing else: no PR body entry, no proof page, no
+   question; the report gets one line, *restarted through the detour: the first start was framed*. A
+   `relay:` halt without `relaunch` is a halt like any other.
 5. **`finish` printed `done`: the CI gate** on the PR's head commit, which must be the worktree's `HEAD`
    (`references/engine.md` §The CI gate), polled in one background Bash; wait for its completion notice:
    `poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll); echo "$answer" | grep -q '"action":"wait"'; do sleep 30; poll=$((poll + 1)); done; echo "$answer"`.
@@ -125,7 +144,12 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
 6. **Report** the result with the two cost-per-run outputs above, and arm the merge watch
    (`references/engine.md` §After the merge).
 
-`~/.claude/workflows/pipeline-autoflow.js` is a symlink to `workflow/pipeline-autoflow.js`, linked by
+**Remove when** upstream fixes the relay (anthropics/claude-code#95369, #96640): the detour, the relay
+check, `agents/pipeline-relay-check.md` and the hook's agents link go together (`references/engine.md`
+§`autoflow`).
+
+`~/.claude/workflows/pipeline-autoflow.js` is a symlink to `workflow/pipeline-autoflow.js`, and
+`~/.claude/agents/pipeline-relay-check.md` one to `agents/pipeline-relay-check.md`, both linked by
 `hooks/git-freshness.sh` as it links the skills.
 
 ## Non-goals
