@@ -577,3 +577,16 @@ it('checks a smoke run too, before its stub steps (#134)', function () {
     expect($framed['labels'])->toBe([]);
     expect($framed['result'])->toBe(autoflow_relay_halt('review-plan', 'workflow harness user request the ha'));
 });
+
+it('brings a framed start to finish untouched, which relaunches it once (#134)', function () {
+    $start = autoflow_start('handoff');
+    $before = manifest_read($start['manifest']);
+    $replay = autoflow_replay($start, [], steps: true, input: ['relay' => '[Workflow harness — user request] The ha']);
+
+    expect(manifest_read($start['manifest']))->toBe($before);
+    $halt = json_encode($replay['result']);
+    expect(dispatch_cli(['finish', $start['manifest'], $halt])['json'])->toMatchArray(['action' => 'halt', 'relaunch' => true]);
+
+    $again = autoflow_replay(dispatch_cli(['launch', $start['manifest'], dirname($start['manifest'], 3) . '/pipeline.diff'])['json'], [], steps: true, input: ['relay' => '[Workflow harness — user request] The ha']);
+    expect(dispatch_cli(['finish', $start['manifest'], json_encode($again['result'])])['json'])->toBe(['action' => 'halt', 'reason' => $again['result']['reason']]);
+});
