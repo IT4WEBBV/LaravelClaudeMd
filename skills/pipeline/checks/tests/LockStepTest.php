@@ -114,4 +114,9 @@ it('keeps engine.md §The proof store in lock-step with the fields the store fil
     }
     expect($section)->toContain('at most ' . PROOF_SUMMARY_MAX . ' characters');
     expect($section)->toContain('`handoff` files');
+    foreach (ProofRunStatus::cases() as $status) {
+        expect($section)->toContain("`{$status->value}`");
+    }
+    expect($section)->toContain('proof_cli.php status <page>');
+    expect($section)->toContain('`seen:<repo>/<run>`');
 });

@@ -108,7 +108,7 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
             $writeActions,
             ($autoflow
                 ? 'Push your commits and leave the PR draft; the session that launched the run marks it ready after the CI gate (engine.md §The CI gate).'
-                : 'Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`; show any other answer to the human.')
+                : 'Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`, then `proof_cli.php status <the path write printed> ready`; show any other answer to the human.')
             . ' After `record`, the last action is `proof_cli.php open` on the path `write` printed (engine.md §The proof store).',
         ],
     ];
