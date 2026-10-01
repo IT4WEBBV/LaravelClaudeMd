@@ -151,7 +151,7 @@ const RELAY_PROMPT = 'Copy the first 40 characters of the first message in this 
 - Clean: the run goes on to its first step, which gets no `--after` flags, as today.
 - Framed, an empty head, or `null` (the agent returned nothing): `return halt(args.startLeg, ...)` with
   the reason `relay: the run's first agent did not receive its own task first (head: "<head>")`, or
-  `(head: none)`. No step has run, so the manifest is untouched and `launch`'s snapshot removal stands.
+  `(head: none)`; `<head>` is the head normalised, as the check compares it (*Assumptions* 12). No step has run, so the manifest is untouched and `launch`'s snapshot removal stands.
 - The check throws (an unknown `agentType` on a machine the hook has not linked, a schema refusal):
   `halt(args.startLeg, 'the relay check failed: <message>; is ~/.claude/agents/pipeline-relay-check.md linked (hooks/git-freshness.sh)?')`.
   No `relay:` prefix: a relaunch would fail the same way.
@@ -298,6 +298,27 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
    `run_audit.php` ignores it (no `status`, no `<leg>:<step>` label). No code change there.
 10. **Which agent setting?** `agents.smoke` (the issue), named in engine.md's table row.
 11. **Changelog?** The repo has no `CHANGELOG.md` and no `.changelog/`: none.
+
+Added by the `design:plan` step, for `/critique plan` to audit:
+
+12. **How does the halt reason quote the head?** Normalised, as the check compares it (lower case,
+    letters and digits, single spaces), not raw. A relayed message's first 40 characters often hold an
+    apostrophe or a double quote (*let's*, *'s avonds*), and the invoking session hands the workflow's
+    return to `finish` inside single quotes, so a raw head could break that command or the JSON in it.
+    The normalised head still shows which label or text came first (`workflow harness user request …`).
+    This departs from §2's raw `"<head>"`; §2 now says so.
+13. **Is an agent definition the session-start hook links known to that same session?** Not assumed.
+    Claude Code may read `~/.claude/agents` before the hook has linked `pipeline-relay-check.md`, so the
+    first session after the merge on a machine may halt its first run with *the relay check failed: …;
+    is ~/.claude/agents/pipeline-relay-check.md linked*, which `finish` never relaunches; a resume from a
+    new session then runs. The PR body says so. Not probed: answering it needs a Workflow start.
+14. **engine.md's agents table is pinned by a test.** `LockStepTest` expects the row
+    `| a smoke run's stub step | … |`; the renamed row (§4) changes that test's expected row with it.
+15. **How does the replay tell the check from a step?** By its schema, as §Testing says, and it also
+    records the check's `schema`, so the first case pins the `{head}` schema the script passes.
+16. **Does the start-step check stay inside the loop too?** No: it moves above the relay check. The
+    loop's only other `from` is a plan gap's `plan` on an Architectural design, a step that leg always
+    has.
 
 ## Relation to other work
 
