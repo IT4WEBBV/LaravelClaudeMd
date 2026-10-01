@@ -9,3 +9,19 @@ foreach (['triggers.php', 'pipeline.php', 'manifest.php', 'checks.php', 'board.p
         require_once $path;
     }
 }
+
+/**
+ * A run filed into a fresh temp store at `<store>/Deploy/pr-5-logs`, its page rendered: the page's path, as
+ * `artifacts.proof` holds it. Filed now, so the prune pass's grace period never removes it.
+ */
+function proof_test_page(array $run = []): string
+{
+    $dir = sys_get_temp_dir() . '/proof-store-' . uniqid() . '/Deploy/pr-5-logs';
+    $filed = proof_write_run($dir, [
+        'repo' => 'Deploy', 'branch' => 'feature/logs', 'pr' => 5, 'prState' => 'OPEN', 'title' => 'PR #5: logs that follow', 'schema' => 2,
+        ...$run,
+    ], date('c'));
+    file_put_contents("{$dir}/index.html", proof_render_run($filed));
+
+    return "{$dir}/index.html";
+}

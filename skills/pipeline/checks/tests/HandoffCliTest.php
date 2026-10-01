@@ -370,11 +370,11 @@ it('files the run\'s page from what it knows, with the prose pending, and record
 it('merges over the page on a re-run, keeping the title a step wrote', function () {
     $fixture = handoff_fixture();
     mkdir(handoff_page($fixture), 0777, true);
-    file_put_contents(handoff_page($fixture) . '/run.json', json_encode(['repo' => 'app', 'branch' => 'feature', 'pr' => 7, 'title' => 'PR #7: logs that follow', 'headline' => 'Logs follow', 'schema' => 2]));
+    file_put_contents(handoff_page($fixture) . '/run.json', json_encode(['repo' => 'app', 'branch' => 'feature', 'pr' => 7, 'title' => 'PR #7: logs that follow', 'headline' => 'Logs follow', 'schema' => 2, 'revision' => 2]));
 
     handoff($fixture);
 
-    expect(proof_read_run(handoff_page($fixture)))->toMatchArray(['title' => 'PR #7: logs that follow', 'headline' => 'Logs follow', 'base' => 'main', 'worktree' => $fixture['repo']]);
+    expect(proof_read_run(handoff_page($fixture)))->toMatchArray(['title' => 'PR #7: logs that follow', 'headline' => 'Logs follow', 'base' => 'main', 'worktree' => $fixture['repo'], 'revision' => 3, 'status' => ['state' => 'running']]);
 });
 
 it('records continued without a page, and says why, when the page cannot be filed', function (Closure $arrange, string $why) {

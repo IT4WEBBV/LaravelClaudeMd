@@ -171,3 +171,16 @@ it('refuses to finalise a run filed before shot states until its shots carry the
     expect($filed['stdout'])->toContain('index.html');
     expect(file_get_contents("{$root}/Deploy/pr-5-logs/index.html"))->toContain('id="client-summary"')->toContain('ribbon-after');
 });
+
+it('files revision 1 and Running first, then counts each write and never takes a payload\'s status or cost', function () {
+    $root = sys_get_temp_dir() . '/proof-write-' . uniqid();
+    proof_write_cli(proof_write_payload(), $root);
+    expect(proof_write_stored($root))->toMatchArray(['revision' => 1, 'status' => ['state' => 'running']]);
+
+    // A halt recorded since: a later agent write keeps it (spec Assumption 4).
+    file_put_contents("{$root}/Deploy/pr-5-logs/run.json", proof_run_json([...proof_write_stored($root), 'status' => ['state' => 'halted', 'reason' => 'CI red']]));
+    proof_write_cli(proof_write_payload(['revision' => 40, 'status' => ['state' => 'merged'], 'cost' => [['workflow' => 'wf_x']]]), $root);
+
+    expect(proof_write_stored($root))->toMatchArray(['revision' => 2, 'status' => ['state' => 'halted', 'reason' => 'CI red']]);
+    expect(proof_write_stored($root))->not->toHaveKey('cost');
+});

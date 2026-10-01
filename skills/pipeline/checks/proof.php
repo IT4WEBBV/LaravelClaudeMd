@@ -18,12 +18,29 @@ const PROOF_TITLE_MAX = 70;
 /** The longest a run's `clientSummary` may be: one to three sentences for an hour registration. */
 const PROOF_SUMMARY_MAX = 400;
 
-/** The keys the store owns. A payload's values for them are ignored, and `shotSources` is consumed, never stored. */
-const PROOF_STORE_KEYS = ['addedTests', 'schema', 'createdAt', 'updatedAt', 'shotSources'];
+/**
+ * The keys the store owns. A payload's values for them are ignored, and `shotSources` is consumed, never stored.
+ * `revision` counts the run's filings, `status` is where the run stands (`ProofRunStatus`), `cost` its time and cost
+ * per workflow (`proof_add_cost()`).
+ */
+const PROOF_STORE_KEYS = ['addedTests', 'schema', 'createdAt', 'updatedAt', 'shotSources', 'revision', 'status', 'cost'];
+
+/** `a, b or c`: an enum's values as a refusal names them. */
+trait ProofNamedCases
+{
+    public static function named(): string
+    {
+        $values = array_column(self::cases(), 'value');
+
+        return implode(', ', array_slice($values, 0, -1)) . ' or ' . end($values);
+    }
+}
 
 /** What a shot shows, set by the step that captured it: the ribbon on the shot. */
 enum ProofShotState: string
 {
+    use ProofNamedCases;
+
     case Before = 'before';
     case After = 'after';
     case Defect = 'defect';
@@ -36,14 +53,80 @@ enum ProofShotState: string
             self::Defect => 'Defect',
         };
     }
+}
 
-    /** `before, after or defect`: the states as a refusal names them. */
-    public static function named(): string
+/**
+ * Where a run stands, on its page and in the store index (`../references/engine.md` §The proof store, *who writes
+ * each status*). `run.json` holds it as `status: {state, reason}`, the reason only with Halted.
+ */
+enum ProofRunStatus: string
+{
+    use ProofNamedCases;
+
+    case Running = 'running';
+    case Halted = 'halted';
+    case Ready = 'ready';
+    case Merged = 'merged';
+    case Closed = 'closed';
+
+    public function label(): string
     {
-        $values = array_column(self::cases(), 'value');
-
-        return implode(', ', array_slice($values, 0, -1)) . ' or ' . end($values);
+        return match ($this) {
+            self::Running => 'Running',
+            self::Halted => 'Halted',
+            self::Ready => 'Ready for review',
+            self::Merged => 'Merged',
+            self::Closed => 'Closed',
+        };
     }
+
+    /** The index's attention order: a halted run first, then one ready for review, then the rest. */
+    public function group(): int
+    {
+        return match ($this) {
+            self::Halted => 0,
+            self::Ready => 1,
+            default => 2,
+        };
+    }
+
+    /** The stored status, else what an older run's `prState` implies: MERGED, CLOSED, else Running. */
+    public static function of(array $run): self
+    {
+        return self::tryFrom((string) ($run['status']['state'] ?? '')) ?? match ($run['prState'] ?? null) {
+            'MERGED' => self::Merged,
+            'CLOSED' => self::Closed,
+            default => self::Running,
+        };
+    }
+
+    /**
+     * What `gh` says the PR is, over this stored status (the prune pass). Merged, closed and an open ready PR are
+     * GitHub's to say; an open draft keeps Running or Halted, which GitHub cannot see, and turns anything else back
+     * into Running (a PR put back in draft by `gh pr ready --undo`). Any other state keeps the stored status.
+     */
+    public function corrected(string $prState, bool $isDraft): self
+    {
+        return match (true) {
+            $prState === 'MERGED' => self::Merged,
+            $prState === 'CLOSED' => self::Closed,
+            $prState === 'OPEN' && ! $isDraft => self::Ready,
+            $prState === 'OPEN' => in_array($this, [self::Running, self::Halted], true) ? $this : self::Running,
+            default => $this,
+        };
+    }
+
+    /** As `run.json` holds it: the reason only with Halted. */
+    public function stored(string $reason = ''): array
+    {
+        return $this === self::Halted ? ['state' => $this->value, 'reason' => $reason] : ['state' => $this->value];
+    }
+}
+
+/** Why the run halted, as its stored status says; empty for any other status. */
+function proof_status_reason(array $run): string
+{
+    return ProofRunStatus::of($run) === ProofRunStatus::Halted ? (string) ($run['status']['reason'] ?? '') : '';
 }
 
 /**
@@ -161,6 +244,40 @@ function proof_merge_run(array $stored, array $payload, array $defaults = []): a
     return [...array_diff_key($defaults, $owned), ...$stored, ...array_diff_key($payload, $owned)];
 }
 
+/**
+ * `$run` with one workflow's time and cost filed (`pipeline_run_cost_record()`): it replaces the entry of the same
+ * `workflow`, else it is appended, so filing the same transcript dir twice changes nothing and a resume or a CI fix
+ * round adds its own.
+ */
+function proof_add_cost(array $run, array $record): array
+{
+    $cost = array_values($run['cost'] ?? []);
+    $at = array_search($record['workflow'], array_column($cost, 'workflow'), true);
+    if ($at === false) {
+        $cost[] = $record;
+    } else {
+        $cost[$at] = $record;
+    }
+
+    return [...$run, 'cost' => $cost];
+}
+
+/**
+ * The run's time and cost: its workflows' summed spans (the idle hours between a halt and its resume are not the
+ * run's time) and the summed weighted cost of every step.
+ *
+ * @return array{seconds: float, cost: float}
+ */
+function proof_cost_totals(array $cost): array
+{
+    $steps = array_merge([], ...array_column($cost, 'steps'));
+
+    return [
+        'seconds' => (float) array_sum(array_column($cost, 'span')),
+        'cost' => (float) array_sum(array_column($steps, 'cost')),
+    ];
+}
+
 /** At most `PROOF_TITLE_MAX` characters: cut at the last word boundary that fits, with `…`. */
 function proof_short_title(string $title): string
 {
@@ -258,6 +375,9 @@ function proof_read_run(string $dir): ?array
  * `$now` is a parameter rather than a call to `time()` so the round-trip is testable without
  * a clock and a run's timestamps can be made to match the leg that produced them.
  *
+ * Every filing counts in `revision`, which the index compares with the revision a browser last opened. A run without
+ * a status gets the one its PR state implies (`ProofRunStatus::of()`); a stored one is never reset by a filing.
+ *
  * @return array the run as written, including the fields this function fills in
  */
 function proof_write_run(string $dir, array $run, string $now): array
@@ -270,13 +390,18 @@ function proof_write_run(string $dir, array $run, string $now): array
     $run['schema'] = 2;
     $run['createdAt'] = $existing['createdAt'] ?? $now;
     $run['updatedAt'] = $now;
+    $run['revision'] = (int) ($existing['revision'] ?? 0) + 1;
+    $run['status'] ??= ProofRunStatus::of($run)->stored();
 
-    file_put_contents(
-        rtrim($dir, '/') . '/run.json',
-        json_encode($run, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
-    );
+    file_put_contents(rtrim($dir, '/') . '/run.json', proof_run_json($run));
 
     return $run;
+}
+
+/** `run.json`'s text: pretty-printed, slashes unescaped, one trailing newline. */
+function proof_run_json(array $run): string
+{
+    return json_encode($run, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
 }
 
 /**
