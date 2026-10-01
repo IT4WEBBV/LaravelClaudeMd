@@ -348,6 +348,39 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
 16. **Does `handoff` prune the store?** No: pruning asks `gh` once per stored run, which a mechanical
     step should not pay; the next agent `write` prunes as today.
 
+Added by the plan step, for questions the plan needed answered:
+
+17. **Where in `handoff` is the page filed?** After the Component, not between the PR and the Component:
+    `pipeline_handoff()` returns the page's payload beside the PR, and `dispatch_cli_handoff()` files it
+    before it records, so the step's two runners (git, gh) stay its only seams. Neither act ever halts, so
+    the order has no consequence. §Stations' order reads: preflight, push, PR, Component, page, record.
+18. **How does a re-run `handoff` keep a stored title?** Its title is a *default*:
+    `proof_merge_run($stored, $payload, $defaults)` fills a default key only where the stored run lacks it.
+    `pipeline_handoff_proof()` returns `{payload, defaults}`, the title in `defaults`.
+19. **What does the `handoff` answer gain?** `proof`: the page path, or null when nothing was filed; a
+    filing failure adds its note to `notes`. The page's payload itself is not in the answer.
+20. **Is the branch name matched inside words?** No: as a word of its own (no letter or digit on either
+    side), case-insensitive. Matched inside words, a topic like `ui` would refuse every summary with
+    *gebruiker* or *uit* in it, which no rephrasing in Dutch avoids. This narrows Assumption 10.
+21. **How does a carried shot sit in `shotSources`?** `shotSources` stays positional, in `shots` order; a
+    shot carried forward with its `file` has `null` at its position. A source that is not a file is skipped
+    and its shot keeps the `file` it had, as today.
+22. **Do pages filed before this change gain anything?** The zoom and the badge tooltips: the script and the
+    dialog are on every run page, being presentation. "Renders as before" means the same sections: no
+    summary, explainer or tests section, no pending line, no ribbon.
+23. **Which rules does filing apply, and how are they passed?** A callable: `proof_store_file($payload,
+    $now, $rules, $defaults)`. `write` passes `proof_validate_run()` plus `proof_validate_prose()`,
+    `handoff` `proof_validate_run(...)` alone.
+24. **What if the store cannot be written during `handoff`?** The same note as any filing failure
+    (`the proof page was not filed: cannot create <dir>/shots`); the answer stays one JSON line, since the
+    store's directory calls are silenced and checked rather than left to print a PHP warning on stdout.
+25. **Do the tests reach the real store?** No: the test helper `dispatch_cli()` sets a throwaway
+    `PIPELINE_PROOF_ROOT` by default, and the `handoff` fixture sets its own, so no current or future CLI
+    test that reaches `handoff` writes to `~/GitProjects/_proofs`.
+26. **Line numbers of a test file read through `pipeline_git_run()`**, which trims its output: a PHP test
+    file opens with `<?php` on line 1, so trimming moves no line. A file that opened with blank lines would
+    shift its cases; that is accepted.
+
 ## Relation to other work
 
 - **#142** builds on `clientSummary` (its per-row copy button) and on every run having a page. It also
