@@ -7,6 +7,7 @@
  *
  *   php proof_cli.php write <payload.json>
  *   php proof_cli.php open [<page.html>]
+ *   php proof_cli.php status <page.html> <running|halted|ready|merged|closed> [--reason <text>]
  *   php proof_cli.php prune
  *
  * Never exits non-zero for a store problem. Failing to *file* proof must not halt a run;
@@ -80,25 +81,78 @@ function proof_cli_open(string $path): int
 }
 
 /**
- * Refresh one run's PR state from `gh`. A failure returns null and the stored state is kept:
- * a stale `OPEN` simply means the run is not pruned this pass, which is the safe direction.
+ * `status <page> <status> [--reason <text>]`: what a session knows and no command does, right after it made it so:
+ * `ready` after `gh pr ready`, `merged` or `closed` when the merge watch answers (`../references/engine.md` §The
+ * proof store). Like every store path it logs and returns 0.
  */
-function proof_cli_pr_state(array $run): ?string
+function proof_cli_status(array $arguments): int
+{
+    $page = (string) ($arguments[0] ?? '');
+    $state = (string) ($arguments[1] ?? '');
+    $reason = ($arguments[2] ?? null) === '--reason' ? trim((string) ($arguments[3] ?? '')) : '';
+    $status = ProofRunStatus::tryFrom($state);
+
+    $problem = match (true) {
+        $status === null => "unknown status '{$state}': " . ProofRunStatus::named(),
+        $status === ProofRunStatus::Halted && $reason === '' => 'halted needs --reason <text>',
+        default => proof_store_status($page, $status, $reason),
+    };
+    if ($problem !== null) {
+        fwrite(STDERR, "proof: status not written: {$problem}\n");
+    }
+
+    return 0;
+}
+
+/**
+ * `gh`'s answer on the run's PR, or null when there is none to ask about or `gh` cannot answer: the stored state then
+ * stands, and a stale `OPEN` only means the run is not pruned this pass, which is the safe direction. An argv array,
+ * never a shell string.
+ *
+ * @return array{state: string, isDraft: bool}|null
+ */
+function proof_cli_pr_view(array $run): ?array
 {
     if (empty($run['pr']) || empty($run['nameWithOwner'])) {
         return null;
     }
+    $argv = ['gh', 'pr', 'view', (string) $run['pr'], '--repo', (string) $run['nameWithOwner'], '--json', 'state,isDraft'];
+    $process = @proc_open($argv, [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes);
+    if (! is_resource($process)) {
+        return null;
+    }
+    $out = (string) stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    $view = proc_close($process) === 0 ? json_decode($out, true) : null;
 
-    $command = sprintf(
-        'gh pr view %s --repo %s --json state --jq .state 2>/dev/null',
-        escapeshellarg((string) $run['pr']),
-        escapeshellarg((string) $run['nameWithOwner']),
-    );
+    return is_array($view) && is_string($view['state'] ?? null) && $view['state'] !== ''
+        ? ['state' => $view['state'], 'isDraft' => (bool) ($view['isDraft'] ?? false)]
+        : null;
+}
 
-    exec($command, $output, $code);
-    $state = trim(implode('', $output));
+/**
+ * The run as `gh` sees its PR: its `prState` and its status corrected (`ProofRunStatus::corrected()`), amended into the
+ * store when either changed, which re-renders its page so the page and the index agree.
+ */
+function proof_cli_refresh(array $entry): array
+{
+    $run = $entry['run'];
+    $view = proof_cli_pr_view($run);
+    if ($view === null) {
+        return $run;
+    }
+    $stored = ProofRunStatus::of($run);
+    $status = $stored->corrected($view['state'], $view['isDraft']);
+    if ($view['state'] === ($run['prState'] ?? null) && $status === $stored) {
+        return $run;
+    }
+    $refreshed = [...$run, 'prState' => $view['state'], 'status' => $status->stored(proof_status_reason($run))];
+    $problem = proof_store_amend("{$entry['dir']}/index.html", fn (array $filed): array => $refreshed);
+    if ($problem !== null) {
+        fwrite(STDERR, "proof: {$problem}\n");
+    }
 
-    return ($code === 0 && $state !== '') ? $state : null;
+    return $refreshed;
 }
 
 function proof_cli_rmdir(string $dir): void
@@ -126,25 +180,7 @@ function proof_cli_prune(): int
     $pruned = 0;
 
     foreach (proof_scan_runs($root) as $entry) {
-        $run = $entry['run'];
-
-        $state = proof_cli_pr_state($run);
-        if ($state !== null && $state !== ($run['prState'] ?? null)) {
-            $run['prState'] = $state;
-            // Preserve updatedAt: the grace period measures age since the run was last
-            // written, not since this housekeeping pass noticed the PR had closed.
-            $run['updatedAt'] = $run['updatedAt'] ?? $now;
-            file_put_contents(
-                $entry['dir'] . '/run.json',
-                json_encode($run, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
-            );
-            // The run page prints the state in its header, so it goes stale the moment this
-            // pass learns the PR has closed. Re-render it, or the index and the page it
-            // links to disagree about the same run.
-            file_put_contents($entry['dir'] . '/index.html', proof_render_run($run));
-        }
-
-        if (proof_should_prune($run, $now)) {
+        if (proof_should_prune(proof_cli_refresh($entry), $now)) {
             proof_cli_rmdir($entry['dir']);
             $pruned++;
         }
@@ -168,9 +204,13 @@ if ($command === 'open') {
     exit(proof_cli_open((string) ($argv[2] ?? '')));
 }
 
+if ($command === 'status') {
+    exit(proof_cli_status(array_slice($argv, 2)));
+}
+
 if ($command === 'prune') {
     exit(proof_cli_prune());
 }
 
-fwrite(STDERR, "usage: proof_cli.php write <payload.json> | open [<page.html>] | prune\n");
+fwrite(STDERR, "usage: proof_cli.php write <payload.json> | open [<page.html>] | status <page.html> <running|halted|ready|merged|closed> [--reason <text>] | prune\n");
 exit(0);

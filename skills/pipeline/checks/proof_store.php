@@ -156,3 +156,44 @@ function proof_store_added_tests(array $run): array|string
         return $code === 0 ? $content : null;
     });
 }
+
+/**
+ * Applies `$change` to the run filed beside `$page`, then re-renders the page and the index of the store the page is
+ * in (`dirname($page, 3)`, never `proof_root()`, so a test store and the real one never mix). Not a filing:
+ * `updatedAt` and `revision` stay as they are, since the index's Updated counts filings and the prune pass's grace
+ * period measures the last one. Never a warning on stdout: a command that amends still prints one answer.
+ *
+ * @param callable(array): array $change
+ * @return ?string null, or why nothing was written
+ */
+function proof_store_amend(string $page, callable $change): ?string
+{
+    if ($page === '') {
+        return 'no page given';
+    }
+    $dir = dirname($page);
+    $run = proof_read_run($dir);
+    if ($run === null) {
+        return "no run at {$dir}";
+    }
+    $run = $change($run);
+    $root = dirname($page, 3);
+    $files = [
+        "{$dir}/run.json" => fn (): string => proof_run_json($run),
+        "{$dir}/index.html" => fn (): string => proof_render_run($run),
+        "{$root}/index.html" => fn (): string => proof_render_index(proof_scan_runs($root)),
+    ];
+    foreach ($files as $file => $contents) {
+        if (@file_put_contents($file, $contents()) === false) {
+            return "cannot write {$file}";
+        }
+    }
+
+    return null;
+}
+
+/** Marks the run filed beside `$page` with `$status`; the reason is kept only with Halted. Null, or why not. */
+function proof_store_status(string $page, ProofRunStatus $status, string $reason = ''): ?string
+{
+    return proof_store_amend($page, fn (array $run): array => [...$run, 'status' => $status->stored($reason)]);
+}
