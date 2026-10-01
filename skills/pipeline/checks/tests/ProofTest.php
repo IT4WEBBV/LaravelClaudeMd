@@ -48,7 +48,7 @@ it('round-trips a run and preserves createdAt across the second write', function
 
     $first = proof_write_run($dir, ['repo' => 'ViewieMedia', 'pr' => 412], '2026-08-25T10:00:00+02:00');
     expect($first['createdAt'])->toBe('2026-08-25T10:00:00+02:00');
-    expect($first['schema'])->toBe(1);
+    expect($first['schema'])->toBe(2);
 
     $second = proof_write_run($dir, ['repo' => 'ViewieMedia', 'pr' => 412], '2026-08-25T15:30:00+02:00');
     expect($second['createdAt'])->toBe('2026-08-25T10:00:00+02:00');
@@ -125,7 +125,7 @@ it('accepts a run named by a short title, whatever the length of its summary and
     expect(proof_validate_run([
         'title' => 'PR #430: service logs that follow',
         'headline' => str_repeat('A summary sentence of what was verified. ', 20),
-        'shots' => [['title' => 'Unreachable swarm', 'caption' => str_repeat('What the shot proves. ', 20)]],
+        'shots' => [['title' => 'Unreachable swarm', 'caption' => str_repeat('What the shot proves. ', 20), 'state' => 'after']],
     ]))->toBe([]);
 });
 
@@ -150,12 +150,97 @@ it('rejects a shot title that belongs in its caption', function () {
     $problems = proof_validate_run([
         'title' => 'PR #430: service logs that follow',
         'shots' => [
-            ['title' => 'Unreachable swarm'],
-            ['title' => str_repeat('x', PROOF_TITLE_MAX + 1)],
+            ['title' => 'Unreachable swarm', 'state' => 'after'],
+            ['title' => str_repeat('x', PROOF_TITLE_MAX + 1), 'state' => 'after'],
         ],
     ]);
 
     expect($problems)->toHaveCount(1);
     expect($problems[0])->toContain('shot 2');
     expect($problems[0])->toContain('caption');
+});
+
+/** A run an agent's `write` may file: title, branch, prose, one shot with a state. */
+function proof_prose_run(array $overrides = []): array
+{
+    return [
+        'title' => 'PR #12: logs that follow',
+        'branch' => 'feature/issue-12-logs',
+        'clientSummary' => 'De servicelogboeken lopen nu live mee, zodat een storing direct zichtbaar is.',
+        'explainer' => [
+            'problem' => 'The service log stopped at the last line it had.',
+            'solution' => 'The log now keeps following as new lines arrive.',
+        ],
+        'shots' => [['title' => 'Following log', 'state' => 'after']],
+        ...$overrides,
+    ];
+}
+
+/** Both rule sets, as `proof_cli.php write` applies them. */
+function proof_all_problems(array $run): array
+{
+    return [...proof_validate_run($run), ...proof_validate_prose($run)];
+}
+
+it('passes a run with a valid summary, explainer and shot states', function () {
+    expect(proof_all_problems(proof_prose_run()))->toBe([]);
+});
+
+it('refuses each broken rule of the prose and the shots with its own message', function (array $overrides, string $message) {
+    $run = proof_prose_run($overrides);
+
+    expect(proof_all_problems(array_filter($run, fn ($value) => $value !== null)))->toBe([$message]);
+})->with([
+    'no summary' => [['clientSummary' => null], 'clientSummary is missing: one to three Dutch sentences for the hour registration, what the client gets, at most 400 characters'],
+    'a blank summary' => [['clientSummary' => "  \n"], 'clientSummary is missing: one to three Dutch sentences for the hour registration, what the client gets, at most 400 characters'],
+    'a long summary' => [['clientSummary' => str_repeat('a', 431)], 'clientSummary is 431 characters, at most 400'],
+    'an issue reference' => [['clientSummary' => 'Opgelost in #141, de logs lopen mee.'], "clientSummary holds an issue or PR reference (#141): name what the client gets, in the client's words"],
+    'a backtick' => [['clientSummary' => 'De `tail` volgt nu het logboek.'], 'clientSummary holds a backtick: plain words, no code'],
+    'the whole branch' => [['clientSummary' => 'Gebouwd op feature/issue-12-logs.'], 'clientSummary holds the branch name feature/issue-12-logs'],
+    'the branch topic, in capitals' => [['clientSummary' => 'Zie ISSUE-12-LOGS voor de details.'], 'clientSummary holds the branch name feature/issue-12-logs'],
+    'no explainer' => [['explainer' => null], 'explainer is missing: {problem, solution}, a paragraph each for a reader who knows nothing about the issue'],
+    'an explainer that is text' => [['explainer' => 'The log follows now.'], 'explainer is missing: {problem, solution}, a paragraph each for a reader who knows nothing about the issue'],
+    'an empty solution' => [['explainer' => ['problem' => 'It stopped.', 'solution' => ' ']], 'explainer.solution is missing'],
+    'a shot without a state' => [['shots' => [['title' => 'Log', 'state' => 'after'], ['title' => 'Header']]], 'shot 2 has no state: before, after or defect'],
+    'a shot with another state' => [['shots' => [['title' => 'Log', 'state' => 'after'], ['title' => 'Header', 'state' => 'fixed']]], 'shot 2 state is "fixed": before, after or defect'],
+]);
+
+it('matches the branch topic as a word of its own, so a short topic does not refuse ordinary Dutch', function () {
+    $run = proof_prose_run(['branch' => 'feature/ui', 'clientSummary' => 'De gebruiker ziet de uitslag nu direct.']);
+
+    expect(proof_all_problems($run))->toBe([]);
+    expect(proof_names_branch('De nieuwe ui staat klaar.', 'feature/ui'))->toBeTrue();
+    expect(proof_names_branch('Alles werkt.', 'main'))->toBeFalse();
+});
+
+it('labels each shot state and names them for a refusal', function () {
+    expect(array_map(fn (ProofShotState $state) => $state->label(), ProofShotState::cases()))->toBe(['Before', 'After', 'Defect']);
+    expect(ProofShotState::named())->toBe('before, after or defect');
+});
+
+it('merges a payload over the stored run key by key, replacing a list whole and keeping what it leaves out', function () {
+    $stored = ['title' => 'PR #7: x', 'headline' => 'H', 'openQuestions' => ['a', 'b'], 'schema' => 2, 'createdAt' => '2026-10-01T10:00:00+02:00', 'addedTests' => [['file' => 'tests/XTest.php', 'cases' => []]]];
+    $payload = ['openQuestions' => ['c'], 'schema' => 9, 'createdAt' => 'never', 'updatedAt' => 'never', 'addedTests' => [], 'shotSources' => ['/tmp/a.png']];
+
+    expect(proof_merge_run($stored, $payload))->toBe([
+        'title' => 'PR #7: x', 'headline' => 'H', 'openQuestions' => ['c'], 'schema' => 2,
+        'createdAt' => '2026-10-01T10:00:00+02:00', 'addedTests' => [['file' => 'tests/XTest.php', 'cases' => []]],
+    ]);
+    expect(proof_merge_run($stored, ['openQuestions' => []])['openQuestions'])->toBe([]);
+});
+
+it('fills a default only where the stored run lacks the key', function () {
+    expect(proof_merge_run([], ['pr' => 7], ['title' => 'PR #7: x']))->toBe(['title' => 'PR #7: x', 'pr' => 7]);
+    expect(proof_merge_run(['title' => 'PR #7: logs that follow'], ['pr' => 7], ['title' => 'PR #7: x'])['title'])->toBe('PR #7: logs that follow');
+});
+
+it('shortens a title over 70 characters at a word boundary, and leaves one at or under 70 alone', function () {
+    $at = str_repeat('a', PROOF_TITLE_MAX);
+    expect(proof_short_title($at))->toBe($at);
+    expect(proof_short_title('  PR #7: short  '))->toBe('PR #7: short');
+
+    $short = proof_short_title('PR #141: Every run gets a proof page, opening with a Dutch client summary and a plain-language explainer');
+    expect(mb_strlen($short))->toBeLessThanOrEqual(PROOF_TITLE_MAX);
+    expect($short)->toBe('PR #141: Every run gets a proof page, opening with a Dutch client…');
+    expect(mb_strlen(proof_short_title(str_repeat('é', 90))))->toBe(PROOF_TITLE_MAX);
 });
