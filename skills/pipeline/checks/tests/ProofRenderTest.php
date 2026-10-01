@@ -443,3 +443,74 @@ it('escapes the workflow names, the step labels and the models', function () {
     expect($html)->toContain('&lt;i&gt;wf&lt;/i&gt;')->toContain('&lt;b&gt;step&lt;/b&gt;')->toContain('&lt;s&gt;m&lt;/s&gt;');
     expect($html)->not->toContain('<b>step</b>');
 });
+
+/** An index entry for a Deploy run in `/store/Deploy/<name>`. */
+function proof_index_entry(string $name, array $run): array
+{
+    return ['dir' => "/store/Deploy/{$name}", 'run' => proof_fixture_run(['repo' => 'Deploy', ...$run])];
+}
+
+it('orders the index by attention: halted, then ready, then the rest, each newest first by time', function () {
+    $runs = [
+        proof_index_entry('running', ['updatedAt' => '2026-10-01T02:00:00Z']),
+        proof_index_entry('ready-old', ['status' => ['state' => 'ready'], 'updatedAt' => '2026-09-20T12:00:00+02:00']),
+        // 04:30 UTC on 1 October: newer than `running`, though its string sorts before it.
+        proof_index_entry('merged-new', ['status' => ['state' => 'merged'], 'updatedAt' => '2026-09-30T23:30:00-05:00']),
+        proof_index_entry('halted-old', ['status' => ['state' => 'halted', 'reason' => 'r'], 'updatedAt' => '2026-09-01T12:00:00+02:00']),
+        proof_index_entry('ready-new', ['status' => ['state' => 'ready'], 'updatedAt' => '2026-09-30T09:00:00Z']),
+        proof_index_entry('halted-new', ['status' => ['state' => 'halted', 'reason' => 'r'], 'updatedAt' => '2026-09-29T12:00:00+02:00']),
+    ];
+
+    expect(array_map(fn (array $entry) => basename($entry['dir']), proof_index_order($runs)))
+        ->toBe(['halted-new', 'halted-old', 'ready-new', 'ready-old', 'merged-new', 'running']);
+
+    $html = proof_render_index($runs);
+    expect(strpos($html, 'halted-old/index.html'))->toBeLessThan(strpos($html, 'ready-new/index.html'));
+    expect(strpos($html, 'ready-old/index.html'))->toBeLessThan(strpos($html, 'merged-new/index.html'));
+    expect(strpos($html, 'merged-new/index.html'))->toBeLessThan(strpos($html, '/running/index.html'));
+});
+
+it('gives each row what the index script needs, its status, its figures, and a copy button only with a summary', function () {
+    $html = proof_render_index([
+        proof_index_entry('pr-5-logs', [
+            'revision' => 3, 'status' => ['state' => 'ready'], 'updatedAt' => '2026-10-01T10:00:00+02:00',
+            'clientSummary' => 'De logboeken lopen mee.',
+            'cost' => [['workflow' => 'wf_a', 'span' => 1200.0, 'steps' => [proof_cost_step('implement:run', 2310000.0)]]],
+        ]),
+        ['dir' => '/store/Asimo/feature-old', 'run' => proof_fixture_run(['repo' => 'Asimo', 'updatedAt' => '2026-09-01T10:00:00+02:00', 'status' => ['state' => 'halted', 'reason' => 'CI red']])],
+    ]);
+
+    expect($html)->toContain('<tr data-run="Deploy/pr-5-logs" data-repo="Deploy" data-group="1" data-updated="2026-10-01T10:00:00+02:00" data-revision="3">');
+    expect($html)->toContain('<tr data-run="Asimo/feature-old" data-repo="Asimo" data-group="0" data-updated="2026-09-01T10:00:00+02:00">');
+    expect($html)->toContain('<td><span class="pill pill-halted">Halted</span> <span class="reason">CI red</span></td>');
+    expect($html)->toContain('index.html">PR #412: product summary grid</a><span class="marker"></span></td>');
+    expect($html)->toContain('<td class="num">20.0 min</td><td class="num">2.31M</td>');
+    expect($html)->toContain('<td class="num"></td><td class="num"></td>');
+    expect($html)->toContain('<button type="button" class="copy" data-copy="summary-1">Copy</button><span id="summary-1" lang="nl" hidden>De logboeken lopen mee.</span>');
+    expect(substr_count($html, 'class="copy"'))->toBe(1);
+    expect($html)->toContain('<select id="repo-filter"><option value="">All repos</option><option value="Asimo">Asimo</option><option value="Deploy">Deploy</option></select>');
+    expect($html)->toContain('<th>Status</th><th>Repo</th><th>PR</th><th>Run</th><th class="num">Shots</th><th class="num">Time</th><th class="num">Cost</th><th>Updated</th><th>Summary</th>');
+});
+
+it('carries the index script: seen markers, the attention order, the remembered filter and the copy code', function () {
+    $html = proof_render_index([proof_index_entry('pr-5-logs', [])]);
+
+    expect($html)->toContain('<body class="index">');
+    expect($html)->toContain("storage.getItem('seen:' + row.dataset.run)");
+    expect($html)->toContain("storage.setItem('proof:repo', filter.value)");
+    expect($html)->toContain("window.addEventListener('pageshow'");
+    expect($html)->toContain('navigator.clipboard.writeText');
+    expect($html)->not->toContain('showModal()');
+    expect(proof_render_index([]))->not->toContain('<script')->not->toContain('repo-filter')->toContain('No runs recorded');
+});
+
+it('escapes the repo, the title, the reason and the summary in the index', function () {
+    $html = proof_render_index([['dir' => '/store/X/pr-1-x', 'run' => proof_fixture_run([
+        'repo' => '<b>R</b>', 'title' => '<i>T</i>', 'status' => ['state' => 'halted', 'reason' => '<u>why</u>'],
+        'clientSummary' => 'Klant <b>"blij"</b>', 'updatedAt' => '"><script>',
+    ])]]);
+
+    expect($html)->toContain('&lt;b&gt;R&lt;/b&gt;')->toContain('&lt;i&gt;T&lt;/i&gt;')->toContain('&lt;u&gt;why&lt;/u&gt;');
+    expect($html)->toContain('Klant &lt;b&gt;&quot;blij&quot;&lt;/b&gt;')->toContain('data-updated="&quot;&gt;&lt;script&gt;"');
+    expect($html)->not->toContain('<b>R</b>');
+});

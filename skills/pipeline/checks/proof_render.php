@@ -555,40 +555,154 @@ function proof_render_run(array $run): string
  *
  * Links are relative to the store root, so the index works when opened over `file://`.
  *
- * @param list<array{dir: string, run: array}> $runs newest first, from `proof_scan_runs()`
+ * @param list<array{dir: string, run: array}> $runs in any order: it is ordered here
  */
 function proof_render_index(array $runs): string
 {
-    $rows = '';
-    foreach ($runs as $entry) {
-        $run = $entry['run'];
-        // The link comes from the directory the run was found in, never from re-deriving a name
-        // out of the run: a run filed under an earlier naming scheme has to stay reachable.
-        $href = implode('/', array_slice(explode('/', trim((string) $entry['dir'], '/')), -2)) . '/index.html';
-
-        // A run that opened no PR is unreachable by the prune pass by design, so the index
-        // is where its accumulation becomes visible rather than silent.
-        $pr = empty($run['pr'])
-            ? '<span class="flag">no PR — prune manually</span>'
-            : proof_e('#' . (string) $run['pr'] . ' ' . (string) ($run['prState'] ?? ''));
-
-        $rows .= '<tr><td><code>' . proof_e((string) ($run['repo'] ?? '')) . '</code></td>'
-            . '<td>' . $pr . '</td>'
-            . '<td><a href="' . proof_e($href) . '">' . proof_e(proof_run_title($run)) . '</a></td>'
-            . '<td>' . proof_e((string) count($run['shots'] ?? [])) . '</td>'
-            . '<td>' . proof_e(substr((string) ($run['updatedAt'] ?? ''), 0, 10)) . "</td></tr>\n";
-    }
-
-    $body = $rows === ''
+    $runs = proof_index_order($runs);
+    $body = $runs === []
         ? "<p class=\"meta\">No runs recorded.</p>\n"
-        : "<table>\n<tr><th>Repo</th><th>PR</th><th>Run</th><th>Shots</th><th>Updated</th></tr>\n{$rows}</table>\n";
+        : proof_render_index_filter($runs)
+            . "<table id=\"runs\">\n<thead><tr><th>Status</th><th>Repo</th><th>PR</th><th>Run</th><th class=\"num\">Shots</th>"
+            . "<th class=\"num\">Time</th><th class=\"num\">Cost</th><th>Updated</th><th>Summary</th></tr></thead>\n<tbody>\n"
+            . implode('', array_map(proof_render_index_row(...), array_keys($runs), $runs))
+            . "</tbody>\n</table>\n<script>\n" . proof_render_copy_script() . "\n" . proof_render_index_script() . "\n</script>\n";
 
     $styles = proof_render_styles();
 
     return "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
         . "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-        . "<title>Pipeline proof store</title>\n<style>\n{$styles}\n</style>\n</head>\n<body>\n"
+        . "<title>Pipeline proof store</title>\n<style>\n{$styles}\n</style>\n</head>\n<body class=\"index\">\n"
         . "<h1>Pipeline proof store</h1>\n"
         . $body
         . "</body>\n</html>\n";
+}
+
+/**
+ * The runs in the index's order: Halted, then Ready, then the rest, each newest first. The index script then moves a
+ * Ready run this browser has seen into the rest, which only the browser knows.
+ *
+ * @param list<array{dir: string, run: array}> $runs
+ * @return list<array{dir: string, run: array}>
+ */
+function proof_index_order(array $runs): array
+{
+    usort($runs, fn (array $a, array $b): int => [ProofRunStatus::of($a['run'])->group(), proof_updated_time($b['run'])]
+        <=> [ProofRunStatus::of($b['run'])->group(), proof_updated_time($a['run'])]);
+
+    return $runs;
+}
+
+/** `updatedAt` as a Unix time, 0 when it does not parse: the store holds several offsets, so strings do not compare. */
+function proof_updated_time(array $run): int
+{
+    return strtotime((string) ($run['updatedAt'] ?? '')) ?: 0;
+}
+
+/** A `<select>` of the repos present, `All repos` first; the index script hides the other repos' rows. */
+function proof_render_index_filter(array $runs): string
+{
+    $repos = array_values(array_unique(array_filter(array_map(fn (array $entry): string => (string) ($entry['run']['repo'] ?? ''), $runs))));
+    sort($repos, SORT_STRING | SORT_FLAG_CASE);
+    $options = implode('', array_map(fn (string $repo): string => '<option value="' . proof_e($repo) . '">' . proof_e($repo) . '</option>', $repos));
+
+    return "<label class=\"filter\">Repo <select id=\"repo-filter\"><option value=\"\">All repos</option>{$options}</select></label>\n";
+}
+
+/** One run: what the index script reads, its status, where it lives, its page, its figures, and its summary to copy. */
+function proof_render_index_row(int $number, array $entry): string
+{
+    $run = $entry['run'];
+    // The link comes from the directory the run was found in, never from re-deriving a name out of the run: a run
+    // filed under an earlier naming scheme has to stay reachable. The page keys its seen marker on the same segments.
+    $key = implode('/', array_slice(explode('/', trim((string) $entry['dir'], '/')), -2));
+    $cost = $run['cost'] ?? [];
+    $totals = proof_cost_totals($cost);
+    $summary = trim((string) ($run['clientSummary'] ?? ''));
+
+    // A run that opened no PR is unreachable by the prune pass by design, so the index is where its accumulation
+    // becomes visible rather than silent.
+    $pr = empty($run['pr'])
+        ? '<span class="flag">no PR — prune manually</span>'
+        : proof_e('#' . (string) $run['pr'] . ' ' . (string) ($run['prState'] ?? ''));
+
+    $data = [
+        'run' => $key,
+        'repo' => (string) ($run['repo'] ?? ''),
+        'group' => (string) ProofRunStatus::of($run)->group(),
+        'updated' => (string) ($run['updatedAt'] ?? ''),
+        ...(isset($run['revision']) ? ['revision' => (string) (int) $run['revision']] : []),
+    ];
+    $attributes = implode('', array_map(fn (string $name, string $value): string => " data-{$name}=\"" . proof_e($value) . '"', array_keys($data), $data));
+    $copy = $summary === ''
+        ? ''
+        : "<button type=\"button\" class=\"copy\" data-copy=\"summary-{$number}\">Copy</button><span id=\"summary-{$number}\" lang=\"nl\" hidden>" . proof_e($summary) . '</span>';
+
+    return "<tr{$attributes}>"
+        . '<td>' . proof_render_status($run) . '</td>'
+        . '<td><code>' . proof_e((string) ($run['repo'] ?? '')) . '</code></td>'
+        . "<td>{$pr}</td>"
+        . '<td><a href="' . proof_e("{$key}/index.html") . '">' . proof_e(proof_run_title($run)) . '</a><span class="marker"></span></td>'
+        . '<td class="num">' . count($run['shots'] ?? []) . '</td>'
+        . '<td class="num">' . ($cost === [] ? '' : proof_minutes($totals['seconds'])) . '</td>'
+        . '<td class="num">' . ($cost === [] ? '' : proof_millions($totals['cost'])) . '</td>'
+        . '<td>' . proof_e(substr((string) ($run['updatedAt'] ?? ''), 0, 10)) . '</td>'
+        . "<td>{$copy}</td></tr>\n";
+}
+
+/**
+ * The index's script, on `DOMContentLoaded` and again on a `pageshow` from the back/forward cache (Back from a page is
+ * how the index is reached again): per row with a revision `New` when this browser never opened it, `Updated` when it
+ * was filed again since; a seen Ready row drops among the rest; the rows re-ordered by that rank and their time; the
+ * repo filter applied and remembered. Without `localStorage` (a private window, blocked site data) no row is marked,
+ * the order is PHP's, and the filter works without being remembered.
+ */
+function proof_render_index_script(): string
+{
+    return <<<'JS'
+(function () {
+  var body = document.getElementById('runs').tBodies[0];
+  var filter = document.getElementById('repo-filter');
+  var rows = Array.prototype.slice.call(body.rows);
+  var storage = null;
+  try {
+    storage = window.localStorage;
+    storage.getItem('proof:repo');
+  } catch (error) {
+    storage = null;
+  }
+  function mark(row) {
+    var revision = Number(row.dataset.revision || 0);
+    var seen = revision ? storage.getItem('seen:' + row.dataset.run) : null;
+    var state = !revision ? '' : seen === null ? 'New' : Number(seen) < revision ? 'Updated' : 'seen';
+    row.querySelector('.marker').textContent = state === 'seen' ? '' : state;
+    row.dataset.rank = state === 'seen' && row.dataset.group === '1' ? '2' : row.dataset.group;
+  }
+  function order() {
+    rows.sort(function (a, b) {
+      return (Number(a.dataset.rank) - Number(b.dataset.rank))
+        || ((Date.parse(b.dataset.updated) || 0) - (Date.parse(a.dataset.updated) || 0));
+    });
+    rows.forEach(function (row) { body.appendChild(row); });
+  }
+  function show() {
+    rows.forEach(function (row) { row.hidden = filter.value !== '' && row.dataset.repo !== filter.value; });
+  }
+  function refresh() {
+    if (storage) {
+      rows.forEach(mark);
+      order();
+      var saved = storage.getItem('proof:repo');
+      if (Array.prototype.some.call(filter.options, function (option) { return option.value === saved; })) { filter.value = saved; }
+    }
+    show();
+  }
+  filter.addEventListener('change', function () {
+    try { if (storage) { storage.setItem('proof:repo', filter.value); } } catch (error) {}
+    show();
+  });
+  document.addEventListener('DOMContentLoaded', refresh);
+  window.addEventListener('pageshow', function (event) { if (event.persisted) { refresh(); } });
+})();
+JS;
 }
