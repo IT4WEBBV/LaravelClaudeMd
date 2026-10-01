@@ -90,6 +90,32 @@ it('ends a case without a closing line before the next one, so the next case\'s 
     ]]);
 });
 
+it('reads no case out of a heredoc or nowdoc fixture, so test source embedded as a fixture is not listed', function () {
+    $content = <<<'PHP'
+<?php
+
+const FIXTURE = <<<'SOURCE'
+it('is a fixture', function () {
+    expect(true)->toBeTrue();
+});
+SOURCE;
+
+it('reads the fixture', function () {
+    $more = <<<SOURCE
+    public function test_also_a_fixture(): void
+    {
+    }
+    SOURCE;
+    expect(FIXTURE)->toBeString();
+});
+PHP;
+
+    expect(added_tests('tests/Feature/FixtureTest.php', $content, range(3, 17)))->toBe([[
+        'file' => 'tests/Feature/FixtureTest.php',
+        'cases' => [['name' => 'reads the fixture', 'change' => 'added']],
+    ]]);
+});
+
 it('reads only PHP test files: not a PHP file outside tests, not a JavaScript test, not a deleted file', function () {
     $php = "<?php\n\nfunction test_helper(): void\n{\n}";
     $js = "it('follows the log', () => {\n  expect(true).toBe(true)\n})";

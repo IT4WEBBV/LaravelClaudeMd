@@ -56,9 +56,9 @@ function proof_is_test_file(string $path): bool
 
 /**
  * Every case the file declares, in file order: Pest's `it(` or `test(` with a quoted description, a method
- * `function test…(`, a method after `#[Test]`. A case runs from its first line (the attribute's, for `#[Test]`)
- * to the first later line that closes it at the declaration's own indentation (`})` for Pest, `}` for a method),
- * else to the line before the next case, else to the end of the file.
+ * `function test…(`, a method after `#[Test]`, none inside a heredoc or nowdoc. A case runs from its first line
+ * (the attribute's, for `#[Test]`) to the first later line that closes it at the declaration's own indentation
+ * (`})` for Pest, `}` for a method), else to the line before the next case, else to the end of the file.
  *
  * @return list<array{name: string, declared: int, start: int, end: int}>
  */
@@ -67,8 +67,15 @@ function proof_test_cases(string $content): array
     $lines = explode("\n", $content);
     $found = [];
     $attribute = null;
+    $heredoc = null;
     foreach ($lines as $index => $line) {
         $number = $index + 1;
+        if ($heredoc !== null) {
+            $heredoc = preg_match('/^\s*' . preg_quote($heredoc, '/') . '\b/', $line) === 1 ? null : $heredoc;
+
+            continue;
+        }
+        $heredoc = proof_heredoc_label($line);
         if (preg_match('/^(\s*)(?:it|test)\(\s*([\'"])((?:\\\\.|(?!\2).)*)\2/', $line, $pest) === 1) {
             $found[] = ['name' => proof_unquote($pest[3], $pest[2]), 'declared' => $number, 'start' => $number, 'close' => $pest[1] . '})'];
 
@@ -93,6 +100,12 @@ function proof_test_cases(string $content): array
         'start' => $case['start'],
         'end' => proof_case_end($lines, $case, ($found[$i + 1]['start'] ?? count($lines) + 1) - 1),
     ], $found, array_keys($found));
+}
+
+/** The label a line opens a heredoc or nowdoc with, whose body is a string and declares no case; else null. */
+function proof_heredoc_label(string $line): ?string
+{
+    return preg_match('/<<<\s*([\'"]?)(\w+)\1\s*$/', $line, $opener) === 1 ? $opener[2] : null;
 }
 
 /** The first line after the declaration that starts with the case's closing token at its indentation, else `$limit`. */
