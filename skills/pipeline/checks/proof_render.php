@@ -22,10 +22,11 @@ function proof_render_styles(): string
 {
     return <<<'CSS'
 :root { --bg:#fff; --fg:#18181b; --muted:#71717a; --line:#e4e4e7; --card:#fafafa; --accent:#dc2626;
-  --before:#71717a; --after:#16a34a; --defect:var(--accent); }
+  --before:#71717a; --after:#16a34a; --defect:var(--accent);
+  --running:var(--muted); --halted:var(--accent); --ready:#2563eb; --merged:var(--after); --closed:var(--muted); }
 @media (prefers-color-scheme: dark) {
   :root { --bg:#18181b; --fg:#f4f4f5; --muted:#a1a1aa; --line:#3f3f46; --card:#27272a; --accent:#ef4444;
-    --before:#a1a1aa; --after:#22c55e; }
+    --before:#a1a1aa; --after:#22c55e; --ready:#60a5fa; }
 }
 * { box-sizing:border-box; }
 body { margin:0; padding:2rem 1.5rem 4rem; background:var(--bg); color:var(--fg);
@@ -78,6 +79,23 @@ dialog.zoom { padding:0; border:0; max-width:95vw; max-height:95vh; overflow:aut
 dialog.zoom::backdrop { background:rgba(0,0,0,.75); }
 dialog.zoom .shot { width:max-content; margin:0; cursor:zoom-out; }
 dialog.zoom .shot img { width:auto; max-width:none; }
+.status { margin:.25rem 0 .5rem; }
+.pill { display:inline-block; padding:0 .55rem; border:1px solid currentColor; border-radius:999px;
+  font-size:.75rem; font-weight:700; line-height:1.6; white-space:nowrap; }
+.pill-running { color:var(--running); }
+.pill-halted { color:var(--halted); }
+.pill-ready { color:var(--ready); }
+.pill-merged { color:var(--merged); }
+.pill-closed { color:var(--closed); }
+.reason { color:var(--muted); font-size:.8rem; }
+td .reason { display:block; margin-top:.15rem; }
+.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+tr.workflow th { color:var(--muted); font-weight:600; padding-top:.9rem; }
+tr.total th, tr.total td { font-weight:700; border-top:2px solid var(--line); }
+.marker { margin-left:.4rem; color:var(--ready); font-size:.7rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.filter { display:flex; align-items:center; gap:.5rem; margin:1rem 0; color:var(--muted); font-size:.875rem; }
+.filter select { font:inherit; color:var(--fg); background:var(--card); border:1px solid var(--line); border-radius:.35rem; padding:.2rem .5rem; }
+body.index { max-width:80rem; }
 CSS;
 }
 
@@ -142,15 +160,35 @@ function proof_render_tests(array $files): string
 }
 
 /**
- * The page's one script: the copy button (the clipboard API, else a selected textarea and `execCommand('copy')`,
- * which works over `file://`) and the zoom (a click on a shot shows a copy of it at natural size in the dialog;
- * Escape, the backdrop or the zoomed shot closes it).
+ * The page's one script: the seen write, the copy button, the zoom. The index uses the copy part
+ * (`proof_render_copy_script()`) with its own (`proof_render_index_script()`).
  */
 function proof_render_script(): string
 {
+    return proof_render_seen_script() . "\n" . proof_render_copy_script() . "\n" . proof_render_zoom_script();
+}
+
+/**
+ * Opening a page stores its revision under `seen:<repo>/<run>`, the last two directories of its own path (a trailing
+ * `index.html` dropped), which are what the index links to: `file://` is one origin in Chrome, so the index reads it.
+ */
+function proof_render_seen_script(): string
+{
     return <<<'JS'
 (function () {
-  var dialog = document.getElementById('zoom');
+  var revision = document.body.dataset.revision;
+  if (!revision) { return; }
+  var run = location.pathname.replace(/\/index\.html$/, '').split('/').filter(Boolean).slice(-2).map(decodeURIComponent).join('/');
+  try { localStorage.setItem('seen:' + run, revision); } catch (error) {}
+})();
+JS;
+}
+
+/** A `[data-copy]` button copies the text of the element it names: the clipboard API, else a selected textarea and `execCommand('copy')`, which works over `file://`. */
+function proof_render_copy_script(): string
+{
+    return <<<'JS'
+(function () {
   function fallback(text) {
     var area = document.createElement('textarea');
     area.value = text;
@@ -174,17 +212,27 @@ function proof_render_script(): string
     button.textContent = label;
     setTimeout(function () { button.textContent = 'Copy'; }, 2000);
   }
+  document.addEventListener('click', function (event) {
+    var button = event.target.closest('[data-copy]');
+    if (!button) { return; }
+    copyText(document.getElementById(button.dataset.copy).textContent)
+      .then(function () { flash(button, 'Copied'); }, function () { flash(button, 'Copy failed'); });
+  });
+})();
+JS;
+}
+
+/** A click on a shot shows a copy of it at natural size in the dialog; Escape, the backdrop or the zoomed shot closes it. */
+function proof_render_zoom_script(): string
+{
+    return <<<'JS'
+(function () {
+  var dialog = document.getElementById('zoom');
   function zoom(shot) {
     dialog.replaceChildren(shot.cloneNode(true));
     dialog.showModal();
   }
   document.addEventListener('click', function (event) {
-    var button = event.target.closest('[data-copy]');
-    if (button) {
-      copyText(document.getElementById(button.dataset.copy).textContent)
-        .then(function () { flash(button, 'Copied'); }, function () { flash(button, 'Copy failed'); });
-      return;
-    }
     if (dialog.open) {
       if (event.target === dialog || event.target.closest('#zoom .shot')) { dialog.close(); }
       return;
@@ -325,6 +373,65 @@ function proof_render_ledger(array $ledger): string
     return "<details><summary>Gate ledger</summary>\n<table>\n{$rows}</table>\n</details>\n";
 }
 
+/** The run's status pill, and for a halted run the reason beside it. */
+function proof_render_status(array $run): string
+{
+    $status = ProofRunStatus::of($run);
+    $reason = proof_status_reason($run);
+
+    return '<span class="pill pill-' . $status->value . '">' . proof_e($status->label()) . '</span>'
+        . ($reason === '' ? '' : ' <span class="reason">' . proof_e($reason) . '</span>');
+}
+
+/**
+ * Per step what it took and cost, the workflows in filing order with a row naming each when there is more than one,
+ * and the run's totals: the summed spans and the summed weighted cost. Nothing for a run without figures.
+ */
+function proof_render_cost(array $cost): string
+{
+    if ($cost === []) {
+        return '';
+    }
+    $named = count($cost) > 1;
+    $rows = '';
+    foreach ($cost as $workflow) {
+        $rows .= $named ? '<tr class="workflow"><th colspan="6">' . proof_e((string) ($workflow['workflow'] ?? '')) . "</th></tr>\n" : '';
+        $rows .= implode('', array_map(proof_render_cost_row(...), $workflow['steps'] ?? []));
+    }
+    $totals = proof_cost_totals($cost);
+
+    return "<h2>Time and cost</h2>\n<table>\n"
+        . '<thead><tr><th>Step</th><th>Models</th><th class="num">Minutes</th><th class="num">Waiting on tools</th>'
+        . "<th class=\"num\">Weighted cost</th><th class=\"num\">Peak context</th></tr></thead>\n<tbody>\n"
+        . $rows
+        . '<tr class="total"><th>Total</th><td></td><td class="num">' . proof_minutes($totals['seconds']) . '</td><td></td>'
+        . '<td class="num">' . proof_millions($totals['cost']) . "</td><td></td></tr>\n"
+        . "</tbody>\n</table>\n"
+        . "<p class=\"meta\">Minutes are each step's wall time; the total is the summed spans of the run's workflows. The weighted cost is the proxy <code>run_cost.php</code> defines, not money.</p>\n";
+}
+
+function proof_render_cost_row(array $step): string
+{
+    return '<tr><th>' . proof_e((string) ($step['label'] ?? '')) . '</th>'
+        . '<td>' . proof_e(implode('+', $step['models'] ?? [])) . '</td>'
+        . '<td class="num">' . proof_minutes((float) ($step['wall'] ?? 0)) . '</td>'
+        . '<td class="num">' . proof_minutes((float) ($step['waiting'] ?? 0)) . '</td>'
+        . '<td class="num">' . proof_millions((float) ($step['cost'] ?? 0)) . '</td>'
+        . '<td class="num">' . intdiv((int) ($step['peak'] ?? 0), 1000) . "k</td></tr>\n";
+}
+
+/** Seconds as minutes, one decimal, as `run_cost_cli.php` prints them: `20.0 min`. */
+function proof_minutes(float $seconds): string
+{
+    return sprintf('%.1f min', $seconds / 60);
+}
+
+/** A weighted cost in millions, two decimals, as `run_cost_cli.php` prints it: `2.31M`. */
+function proof_millions(float $cost): string
+{
+    return sprintf('%.2fM', $cost / 1e6);
+}
+
 /**
  * A GitHub URL for this run, or null when the payload carries no `nameWithOwner` and there is
  * therefore nothing to build one from.
@@ -399,9 +506,10 @@ function proof_render_run(array $run): string
         '<code>' . proof_e((string) ($run['branch'] ?? '')) . '</code>',
         proof_e((string) ($run['mode'] ?? '')) . ' mode',
         proof_e((string) ($run['updatedAt'] ?? '')),
+        isset($run['revision']) ? 'revision ' . (int) $run['revision'] : '',
     ]));
 
-    $body = "<h1>" . proof_e($title) . "</h1>\n<p class=\"meta\">{$meta}</p>\n";
+    $body = '<h1>' . proof_e($title) . "</h1>\n<p class=\"status\">" . proof_render_status($run) . "</p>\n<p class=\"meta\">{$meta}</p>\n";
 
     // A run filed before schema 2 renders as it did: pending lines on a finished old page would claim work is
     // outstanding.
@@ -427,14 +535,16 @@ function proof_render_run(array $run): string
     $body .= proof_render_shots($run['shots'] ?? []);
     $body .= proof_render_checks($run['checks'] ?? []);
     $body .= proof_render_list('Open questions', $run['openQuestions'] ?? []);
+    $body .= proof_render_cost($run['cost'] ?? []);
     $body .= proof_render_ledger($run['ledger'] ?? []);
     $body .= "<dialog class=\"zoom\" id=\"zoom\"></dialog>\n<script>\n" . proof_render_script() . "\n</script>\n";
 
     $styles = proof_render_styles();
+    $revision = isset($run['revision']) ? ' data-revision="' . (int) $run['revision'] . '"' : '';
 
     return "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
         . "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-        . '<title>' . proof_e($title) . "</title>\n<style>\n{$styles}\n</style>\n</head>\n<body>\n"
+        . '<title>' . proof_e($title) . "</title>\n<style>\n{$styles}\n</style>\n</head>\n<body{$revision}>\n"
         . $body
         . "</body>\n</html>\n";
 }

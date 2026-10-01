@@ -360,3 +360,86 @@ it('escapes the summary, the explainer, the test names and their files', functio
     expect($html)->toContain('tests/&lt;i&gt;X&lt;/i&gt;Test.php')->toContain('shows &lt;em&gt;it&lt;/em&gt;');
     expect($html)->not->toContain('<script>x</script>');
 });
+
+it('shows the run\'s status between the heading and the meta line', function (array $overrides, string $pill, string $label) {
+    $html = proof_render_run(proof_current_run($overrides));
+
+    expect($html)->toContain("<p class=\"status\"><span class=\"pill pill-{$pill}\">{$label}</span></p>");
+    expect(strpos($html, '<p class="status">'))->toBeGreaterThan(strpos($html, '</h1>'))->toBeLessThan(strpos($html, '<p class="meta">'));
+})->with([
+    'stored running' => [['status' => ['state' => 'running']], 'running', 'Running'],
+    'stored ready' => [['status' => ['state' => 'ready']], 'ready', 'Ready for review'],
+    'stored merged' => [['status' => ['state' => 'merged']], 'merged', 'Merged'],
+    'stored closed' => [['status' => ['state' => 'closed']], 'closed', 'Closed'],
+    'an older merged run' => [['prState' => 'MERGED'], 'merged', 'Merged'],
+    'an older open run' => [[], 'running', 'Running'],
+]);
+
+it('puts a halted run\'s reason beside its pill, escaped', function () {
+    $html = proof_render_run(proof_current_run(['status' => ['state' => 'halted', 'reason' => 'CI red on <b>abc</b>']]));
+
+    expect($html)->toContain('<p class="status"><span class="pill pill-halted">Halted</span> <span class="reason">CI red on &lt;b&gt;abc&lt;/b&gt;</span></p>');
+});
+
+it('names the revision in the meta line and on the body, and leaves both out for a run without one', function () {
+    $html = proof_render_run(proof_current_run(['revision' => 3]));
+    expect($html)->toContain(' · revision 3</p>')->toContain("<body data-revision=\"3\">\n");
+
+    expect(proof_render_run(proof_current_run()))->not->toContain(' · revision')->toContain("<body>\n");
+});
+
+it('records the page as seen at its revision, keyed by its repo and run directories, before the copy and zoom code', function () {
+    $html = proof_render_run(proof_current_run(['revision' => 3]));
+
+    expect($html)->toContain("localStorage.setItem('seen:' + run, revision)");
+    expect($html)->toContain(".split('/').filter(Boolean).slice(-2)");
+    expect(strpos($html, "localStorage.setItem('seen:'"))->toBeLessThan(strpos($html, 'navigator.clipboard.writeText'));
+    expect(strpos($html, 'navigator.clipboard.writeText'))->toBeLessThan(strpos($html, 'showModal()'));
+});
+
+/** One step's figures as `run_cost_cli.php` files them. */
+function proof_cost_step(string $label, float $cost, float $wall = 60.0, array $models = ['opus']): array
+{
+    return ['label' => $label, 'models' => $models, 'cost' => $cost, 'calls' => 1, 'peak' => 182000, 'wall' => $wall, 'waiting' => 0.0];
+}
+
+it('shows each step\'s time and cost after the open questions and before the ledger, with the run\'s totals', function () {
+    $html = proof_render_run(proof_current_run([
+        'openQuestions' => ['Keep the guard?'],
+        'ledger' => [['gate' => 'pr-review', 'outcome' => 'continued', 'note' => 'n']],
+        'cost' => [['workflow' => 'wf_a', 'span' => 1200.0, 'steps' => [
+            ['label' => 'implement:run', 'models' => ['sonnet'], 'cost' => 2310000.0, 'calls' => 41, 'peak' => 182000, 'wall' => 780.0, 'waiting' => 312.0],
+        ]]],
+    ]));
+
+    expect($html)->toContain('<h2>Time and cost</h2>');
+    expect($html)->toContain('<tr><th>implement:run</th><td>sonnet</td><td class="num">13.0 min</td><td class="num">5.2 min</td><td class="num">2.31M</td><td class="num">182k</td></tr>');
+    expect($html)->toContain('<tr class="total"><th>Total</th><td></td><td class="num">20.0 min</td><td></td><td class="num">2.31M</td><td></td></tr>');
+    expect($html)->not->toContain('<tr class="workflow">');
+    expect(strpos($html, 'Time and cost'))->toBeGreaterThan(strpos($html, 'Keep the guard?'))->toBeLessThan(strpos($html, 'Gate ledger'));
+});
+
+it('names each workflow of a run that had several, in filing order, and sums their spans and costs', function () {
+    $html = proof_render_run(proof_current_run(['cost' => [
+        ['workflow' => 'wf_first', 'span' => 600.0, 'steps' => [proof_cost_step('implement:run', 1000000.0)]],
+        ['workflow' => 'wf_fix', 'span' => 300.0, 'steps' => [proof_cost_step('review-pr:review', 500000.0)]],
+    ]]));
+
+    expect($html)->toContain('<tr class="workflow"><th colspan="6">wf_first</th></tr>');
+    expect(strpos($html, 'wf_fix'))->toBeGreaterThan(strpos($html, 'implement:run'))->toBeLessThan(strpos($html, 'review-pr:review'));
+    expect($html)->toContain('<td class="num">15.0 min</td><td></td><td class="num">1.50M</td>');
+});
+
+it('has no time and cost section for a run without figures', function () {
+    expect(proof_render_run(proof_current_run()))->not->toContain('Time and cost');
+});
+
+it('escapes the workflow names, the step labels and the models', function () {
+    $html = proof_render_run(proof_current_run(['cost' => [
+        ['workflow' => '<i>wf</i>', 'span' => 1.0, 'steps' => [proof_cost_step('<b>step</b>', 1.0, 1.0, ['<s>m</s>'])]],
+        ['workflow' => 'wf_b', 'span' => 1.0, 'steps' => []],
+    ]]));
+
+    expect($html)->toContain('&lt;i&gt;wf&lt;/i&gt;')->toContain('&lt;b&gt;step&lt;/b&gt;')->toContain('&lt;s&gt;m&lt;/s&gt;');
+    expect($html)->not->toContain('<b>step</b>');
+});
