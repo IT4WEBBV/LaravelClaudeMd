@@ -203,6 +203,24 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
    no automatic round (engine.md §The CI gate, *In `interactive`*).
 9. **Changelog?** The repo has no `CHANGELOG.md` and no `.changelog/`: none.
 
+Added by the `plan` step, where the plan needed an answer this design did not give:
+
+10. **May the two new halt reasons hold a single quote?** No. The session hands a halt to `finish` as
+    `finish <manifest> '<the answer>'` (pipeline `SKILL.md` step 5), and `json_encode` leaves `'` as it
+    is, so a quote in the reason ends the shell argument early. The plan pins both reasons free of one.
+    The existing `mismatch` halt (`PR #<pr>'s head on GitHub…`) does hold one; that is outside this
+    issue and stays as it is.
+11. **Do the new brief lines join `LockStepTest`'s list of lines whose `§` names must be engine.md
+    headings?** Yes: both name sections (`§Catching up with the base`, `§The CI gate`), and the test
+    exists so a renamed heading fails the suite. The CI round's lines are not on that list today; adding
+    them is not this issue.
+12. **Does an `interactive` run's `review-pr` brief carry the conflict line?** Whenever a `Conflict with
+    the base` decision is recorded, as the CI round's line does: neither checks the mode. An
+    `interactive` run records none (assumption 8), so in practice only `autoflow` sees it.
+13. **What does `pipeline_ci_answer()` do with a `mergeable` value that is neither `UNKNOWN` nor
+    `CONFLICTING`, an empty string included?** Goes on to the checks, as §1 says for any other value;
+    the plan pins that with a value GitHub does not send today.
+
 ## Relation to other work
 
 - #153 (sibling in this batch, no PR yet): when it lands first and shares files, the base is merged as
