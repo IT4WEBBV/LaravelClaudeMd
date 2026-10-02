@@ -72,7 +72,7 @@ it('keeps engine.md\'s agents table in lock-step with pipeline_agent_table()', f
         $rows[] = "| `{$step}` after a loop-back | {$same($entry)} |";
     }
     $rows[] = "| a review that returned nothing, once | {$same($table['retry'])} |";
-    $rows[] = "| a smoke run's stub step | {$same($table['smoke'])} |";
+    $rows[] = "| a smoke run's stub step, and the relay check | {$same($table['smoke'])} |";
 
     expect($section)->toContain('| Step | `full` | `medium` | `light` | Why |');
     expect($rows)->toHaveCount(12);

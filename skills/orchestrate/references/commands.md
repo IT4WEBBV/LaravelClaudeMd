@@ -93,13 +93,19 @@ and ends, steps 1–3.
   its base when its brief says so.
 - `launch` runs with `PIPELINE_NO_OPEN=1`: the run is unattended. `done` or a halt: report it and
   start no workflow.
-- Start the workflow `pipeline-autoflow` with `launch`'s JSON as `args`, in the background, and add
-  its task id → N to the dispatch record (the id `TaskStop` takes and the completion notice carries;
-  the `wf_…` run id names the transcript dir). Do not wait on it; its completion notice arrives.
+- Start the workflow `pipeline-autoflow` with `launch`'s JSON as `args`, in the background, **through
+  the detour** (pipeline `SKILL.md` §`autoflow` step 3): this reply ends with the detour's background
+  wait, and the `Workflow` call is the first tool call of the reply its notice opens. Launch every run
+  due now before that wait, so their `Workflow` calls share that first block. Add each task id → N to
+  the dispatch record (the id `TaskStop` takes and the completion notice carries; the `wf_…` run id
+  names the transcript dir). Do not wait on it; its completion notice arrives.
+- A question pending when runs start waits for them: the starting reply ends with a second background
+  wait, the same as the detour's, and the reply its notice opens asks the batched `AskUserQuestion` (Step 5, *Ask
+  last*). An `AskUserQuestion` holds its reply until answered, so asked earlier it would hold the runs.
 
 `launch` refuses a manifest that is not `autoflow`; one that still says `auto` is refused naming
 `autoflow` (pipeline `engine.md` §The loop). A dead session's `autoflow` run: `finish` it with a halt,
-then a new `launch` and workflow.
+then a new `launch` and workflow, as above.
 
 Commits wanted on a ready PR, after `gh pr ready --undo <P>`:
 
@@ -108,7 +114,7 @@ git -C <worktree> diff origin/<base>...HEAD > <manifest stem>.diff
 PIPELINE_NO_OPEN=1 php ~/.claude/skills/pipeline/checks/dispatch_cli.php launch <manifest> <manifest stem>.diff --from review-pr --decision "<the owner's request, verbatim>"
 ```
 
-then a new `pipeline-autoflow` workflow with that JSON.
+then a new `pipeline-autoflow` workflow with that JSON, through the detour as above.
 
 ## Finish
 
@@ -137,8 +143,15 @@ stops (*Bound exhaustion*) says. No proof page opens on a halt in an unattended 
 The CI gate (pipeline `engine.md` §The CI gate) runs in one background Bash and wakes you with its
 answer; a run in its gate still counts as working. `fix`: the fix round, as §Launch's *commits wanted*
 block with `--decision "<its decision>"` in place of the owner's request and no `gh pr ready --undo`
-(the PR is still draft), then a new `pipeline-autoflow` workflow in the dispatch record. `halt`:
+(the PR is still draft), then a new `pipeline-autoflow` workflow, as §Launch, in the dispatch record. `halt`:
 `finish <manifest> '<the answer>'`, and the run is halted like any other.
+
+**A relay halt.** `finish` answered `relaunch: true`: the run started framed and no step ran (pipeline
+`engine.md` §`autoflow`, the relay check). Start it again as §Launch: the diff, `launch <manifest>
+<manifest stem>.diff` with no `--from` and no `--decision`, then the detour; replace its task id in the
+dispatch record and report one line, *#N restarted through the detour: the first start was framed*. No
+PR body entry, no proof page, no question. A `relay:` halt without `relaunch` is halted like any other
+(Step 5).
 
 A stalled run: `TaskStop` its task id first. Only once it reports the task stopped,
 `finish <manifest> '{"action":"halt","reason":"stalled: no notice, commit or PR change for 90 minutes"}'`.

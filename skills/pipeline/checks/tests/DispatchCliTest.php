@@ -420,6 +420,38 @@ it('records the workflow\'s return with finish', function (string $leg, string $
     'no decision' => ['implement', 'not json', ['leg' => 'implement', 'status' => 'halted', 'reason' => 'the workflow returned no decision: not json']],
 ]);
 
+it('answers a relay halt with one relaunch, counted from the cursor it overwrites (#134)', function (array $cursor, string $decision, array $answer, array $recorded) {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => $cursor]);
+
+    expect(dispatch_cli(['finish', $fixture['manifest'], $decision])['json'])->toBe($answer);
+    expect(manifest_read($fixture['manifest'])['cursor'])->toBe($recorded);
+})->with([
+    'the first relay halt' => [
+        ['leg' => 'implement', 'status' => 'pending'],
+        '{"action":"halt","leg":"implement","reason":"relay: x"}',
+        ['action' => 'halt', 'reason' => 'relay: x', 'relaunch' => true],
+        ['leg' => 'implement', 'status' => 'halted', 'reason' => 'relay: x'],
+    ],
+    'a relay halt after a relay halt' => [
+        ['leg' => 'implement', 'status' => 'halted', 'reason' => 'relay: x'],
+        '{"action":"halt","leg":"implement","reason":"relay: y"}',
+        ['action' => 'halt', 'reason' => 'relay: y'],
+        ['leg' => 'implement', 'status' => 'halted', 'reason' => 'relay: y'],
+    ],
+    'a relay halt over another halt' => [
+        ['leg' => 'implement', 'status' => 'halted', 'reason' => 'tests stayed red'],
+        '{"action":"halt","leg":"implement","reason":" relay: y "}',
+        ['action' => 'halt', 'reason' => 'relay: y', 'relaunch' => true],
+        ['leg' => 'implement', 'status' => 'halted', 'reason' => 'relay: y'],
+    ],
+    'any other halt' => [
+        ['leg' => 'implement', 'status' => 'pending'],
+        '{"action":"halt","leg":"implement","reason":"the relay check failed: x"}',
+        ['action' => 'halt', 'reason' => 'the relay check failed: x'],
+        ['leg' => 'implement', 'status' => 'halted', 'reason' => 'the relay check failed: x'],
+    ],
+]);
+
 /** An `autoflow` run whose `$leg` `$step` was briefed as a run's first step: its snapshot is on disk. */
 function boundary_fixture(string $leg, string $step, array $manifest = []): array
 {

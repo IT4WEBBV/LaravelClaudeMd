@@ -6,8 +6,10 @@
 // return's `write` into the manifest (`cursor` one level down), writes its `diff` to the run's diff file,
 // and returns the rest. A return with `record` (a list of flags) writes through the real command instead:
 // its `review` and `actions` go to the run's two files and are passed by path, and a refusal comes back as a
-// halt. Prints {labels, prompts, settings, result}: the agent labels, prompts and
-// `<model> <effort>` in call order and what the script returned.
+// halt. A call whose schema has no `status` is the script's relay check: it returns `{head: input.relay}`
+// (default: a clean head), `null` when `input.relay` is null, or throws `input.relay.throw`. Prints
+// {labels, prompts, settings, relay?, result}: the step labels, prompts and `<model> <effort>` in call
+// order, the check's call when it ran, and what the script returned.
 import { execFileSync, execSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 
@@ -17,6 +19,8 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 const labels = []
 const prompts = []
 const settings = []
+const CLEAN_HEAD = '[Workflow harness — computed task] The t'
+let relay
 
 function brief(prompt) {
   const answer = execSync(prompt.match(/`(php \S+\/dispatch_cli\.php brief [^`]+)`/)[1], { encoding: 'utf8' })
@@ -55,7 +59,15 @@ function record(label, { record: flags, review, actions, diff, ...returns }) {
   return returns
 }
 
+function check(prompt, opts) {
+  relay = { prompt, label: opts.label, agentType: opts.agentType, schema: opts.schema, setting: `${opts.model} ${opts.effort}` }
+  const head = 'relay' in input ? input.relay : CLEAN_HEAD
+  if (head?.throw) throw new Error(head.throw)
+  return head === null ? null : { head }
+}
+
 async function agent(prompt, opts) {
+  if (!('status' in opts.schema.properties)) return check(prompt, opts)
   labels.push(opts.label)
   prompts.push(prompt)
   settings.push(`${opts.model} ${opts.effort}`)
@@ -72,4 +84,4 @@ async function agent(prompt, opts) {
 }
 
 const result = await new AsyncFunction('args', 'agent', 'log', body)(input.args, agent, () => {})
-process.stdout.write(JSON.stringify({ labels, prompts, settings, result }) + '\n')
+process.stdout.write(JSON.stringify({ labels, prompts, settings, ...(relay ? { relay } : {}), result }) + '\n')
