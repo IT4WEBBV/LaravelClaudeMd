@@ -363,12 +363,21 @@ function dispatch_cli_return_problem(string $manifestPath, array $before, array 
     return $reason === null ? null : ['leg' => $leg, 'reason' => $reason];
 }
 
+/** A halt the script's relay check returned: the run started framed by a relayed chat message, and no step ran (`../references/engine.md` §`autoflow`). */
+function dispatch_cli_is_relay(string $reason): bool
+{
+    return str_starts_with(trim($reason), 'relay:');
+}
+
 /**
  * Records the workflow's return; anything that is not `done` is a halt, and a halt with no reason says
  * so. `done` counts only on `review-pr`, and only when its resolve step's return holds: nothing else
  * may lead to `gh pr ready`. A halt keeps the cursor's leg when the cursor already records a halt
  * (`brief` or the step wrote it there) or when the return names no leg of the pipeline, so a later
- * `launch` resumes at the step that failed.
+ * `launch` resumes at the step that failed. A `relay:` halt (dispatch_cli_is_relay()) also answers
+ * `relaunch: true`, unless the cursor it overwrites is already one: the invoking session starts the run
+ * once more through the detour, and a run that got past the check has overwritten that cursor at its
+ * first brief.
  */
 function dispatch_cli_finish(string $manifestPath, string $decisionJson): array
 {
@@ -392,12 +401,15 @@ function dispatch_cli_finish(string $manifestPath, string $decisionJson): array
     $named = $decision['leg'] ?? null;
     $recorded = ($manifest['cursor']['status'] ?? null) === 'halted';
 
-    return dispatch_cli_halt(
+    $halt = dispatch_cli_halt(
         $manifestPath,
         $manifest,
         in_array($named, pipeline_legs(), true) && ! $recorded ? $named : $leg,
         $reason === '' ? "the workflow returned no decision: {$decisionJson}" : $reason,
     );
+    $relaunched = $recorded && dispatch_cli_is_relay((string) ($manifest['cursor']['reason'] ?? ''));
+
+    return dispatch_cli_is_relay($reason) && ! $relaunched ? [...$halt, 'relaunch' => true] : $halt;
 }
 
 /** Why a `done` return does not hold: the last step must be `review-pr`'s resolve step, and its return must pass the check. */

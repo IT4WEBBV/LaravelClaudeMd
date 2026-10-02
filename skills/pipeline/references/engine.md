@@ -74,7 +74,8 @@ steps, the loop-backs, their bounds and the halts are JavaScript, and agents exi
 ```
 invoking session   dispatch_cli.php kickoff → dispatch_cli.php launch → Workflow pipeline-autoflow (args: launch's JSON)
                    … on its return: dispatch_cli.php finish → dispatch_cli.php ci → gh pr ready | fix round | halt duties → report
-workflow script    per step: agent(prompt, {schema}) → {status, reason, ui, size} → next step, loop-back or return
+workflow script    first: the relay check, agent(prompt, {agentType: pipeline-relay-check, schema {head}}) → clean, or return a halt
+                   per step: agent(prompt, {schema}) → {status, reason, ui, size} → next step, loop-back or return
 step agent         dispatch_cli.php brief <manifest> <leg> <step> [--after …] → the leg's work → the manifest → {status, reason}
 ```
 
@@ -86,8 +87,8 @@ git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
 PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>] [--decision "<verbatim>"]…
 # → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"noOpen":…,"checks":…,"tables":{…},"profile":…,"tier":…,"escalated":…,"agents":{…}}
 #   | {"action":"done"} | {"action":"halt","reason":…}
-# start: the workflow pipeline-autoflow with that JSON as args, in the background; wait for its completion notice
-php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
+# start: through the detour (SKILL.md §autoflow step 3): this reply ends on a background wait; the reply its notice opens calls the workflow pipeline-autoflow with that JSON as args, first; wait for its completion notice
+php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'   # → … | {"action":"halt","reason":"relay: …","relaunch":true}, once
 php "$CHECKS/dispatch_cli.php" ci <manifest> --poll <n>                  # after done: the CI gate, polled (§The CI gate)
 ```
 
@@ -129,6 +130,17 @@ launched the run, with its reason.
   and `agents`, `profile` or `tier` missing or incomplete halts before any agent, and so does an
   `escalated` that is not a boolean; a review step that returns
   nothing runs once more on the retry entry; a step that throws or returns nothing halts the run.
+  **The relay check** (#134) is its first `agent()`, before any step and on a smoke run too: label
+  `relay-check`, agent type `pipeline-relay-check` (`../agents/pipeline-relay-check.md`, `tools: Read`,
+  linked into `~/.claude/agents/` by `hooks/git-freshness.sh`), the `smoke` entry, a `{head}` schema.
+  Claude Code relays the owner's last chat message to every agent of a run started in a reply a human
+  message opened, framed as outranking the agent's task; whether a run is framed is fixed at its start.
+  The agent copies the first 40 characters of its first message; the script normalises them (lower case,
+  letters and digits, single spaces) and accepts a head that starts with the harness's clean label
+  `[Workflow harness — computed task]` or with its own prompt's first 40 characters. Anything else,
+  an empty head or no answer, halts with `relay: … (head: "<normalised head>")` before any step, so the
+  manifest is as `launch` left it; a check that throws halts with `the relay check failed: …` and no
+  `relay:` prefix. The start-step check runs before it, so a halt that needs no agent still starts none.
 - **A step** first runs `dispatch_cli.php brief <manifest> <leg> <step>`, followed on every step but
   the run's first by what the step before it returned: `--after <leg>:<step> --status <status>`, plus
   `--ui` after `implement` and `--size` after `design` (§The check at the next boundary). It checks that
@@ -156,8 +168,17 @@ launched the run, with its reason.
   running. When `finish` prints `done` the invoking session runs the CI gate and, on its `ready`,
   **`gh pr ready <pr>`** (§The CI gate, §Who takes the PR out of draft); on a halt after `handoff`,
   §Failure policy's duties.
+  A `relay:` halt also answers `relaunch: true` unless the cursor it overwrites already holds a `relay:`
+  halt: the invoking session then runs `launch` again with no `--from` and no `--decision` and starts
+  the run through the detour, with no PR body entry, no proof page and no question. A run that got past
+  the check overwrote that cursor at its first `brief`, so the count starts over with every run.
 - **Resume** is `/pipeline` as always: `launch` starts from the cursor, and the step it names runs
   again.
+
+**Remove when** upstream fixes the relay (anthropics/claude-code#95369, #96640) or ships a switch that
+works, which shows as the relay check no longer halting with a relay head: the detour (`../SKILL.md`
+§`autoflow` step 3), the check, `../agents/pipeline-relay-check.md` and the hook's agents link go
+together.
 
 **The check at the next boundary.** The script routes on the `status` a step returns; the step's
 return is checked at the next command, by a separate process and no extra agent. `brief`, told by
@@ -233,7 +254,7 @@ change.
 | `review-pr:resolve` | opus high | opus medium | sonnet high | Full: nothing reviews it afterwards unless it loops back. Medium and light: targeted fixes on a small diff. |
 | `implement:run` after a loop-back | opus xhigh | opus xhigh | opus xhigh | A `verify-ui` or `review-pr` loop-back is the failure signal to rerun with more effort. |
 | a review that returned nothing, once | opus xhigh | opus xhigh | opus xhigh | Rare; it fires on `null`, not on a review with no findings, and compensates for reviewing with the author's model. |
-| a smoke run's stub step | sonnet low | sonnet low | sonnet low | A stub does no real work. |
+| a smoke run's stub step, and the relay check | sonnet low | sonnet low | sonnet low | A stub does no real work; the check copies 40 characters. |
 
 **Which profile.** The word names the tier (`AgentTier::fromManifest()`): the manifest's `tier`,
 `medium` for a legacy `light: true`, else `full`; `launch` halts on a `tier` that is not `medium` or
@@ -1054,7 +1075,7 @@ poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll
   commit <sha>: <check> failed (<link>)`, goes into `decisions` verbatim with the re-arm:
   `git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"`, then
   `launch <manifest> "<manifest stem>.diff" --from review-pr --decision "<its decision>"` and a new
-  `pipeline-autoflow` workflow. The review step reads the failing job's log and states the failure as a
+  `pipeline-autoflow` workflow, started through the detour (`../SKILL.md` §`autoflow` step 3). The review step reads the failing job's log and states the failure as a
   finding; the finish step fixes it, or shows it unrelated (the same failure on the base branch, or a
   flake whose failed jobs it reruns without waiting); then `finish`, and this gate again.
 - **`halt`** → `finish <manifest> '<the answer>'`: the answer names `review-pr` and its reason, so
@@ -1470,6 +1491,10 @@ Under `autoflow` these are the only stops. **No finding stops a run.**
   writes the failure to the manifest
   (`cursor.status: halted`, `cursor.reason`); a human resumes. **No silent retry** beyond that one — a retry hides
   the failure and the machinery may be in an unknown state.
+  The one exception is a `relay:` halt (§`autoflow`, the relay check): the run started framed and no
+  step ran, so the manifest is as `launch` left it; `finish` answers `relaunch: true` once, and the
+  invoking session starts the run again through the detour without asking. A second in a row is a halt
+  like any other.
   - **A halted manifest is the one the check rejected.** When the reason names a key the leg was not
     allowed to change, or a ledger entry it rewrote (*design added actions to ledger entry 1 (plan
     gap)*: the leg, what changed and the entry), repair it from `<manifest stem>.before.json`, the

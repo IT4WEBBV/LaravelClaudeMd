@@ -1,11 +1,11 @@
 <?php
 
-/** The autoflow script run on `$args` with agent() faked (`autoflow_replay.mjs`): `{labels, prompts, settings, result}`; with `$steps` each agent is a stub step against the real `brief`. */
-function autoflow_replay(array $args, array $returns, bool $steps = false): array
+/** The autoflow script run on `$args` with agent() faked (`autoflow_replay.mjs`): `{labels, prompts, settings, relay?, result}`; with `$steps` each agent is a stub step against the real `brief`; `$input` adds keys such as `relay`, the check's scripted head. */
+function autoflow_replay(array $args, array $returns, bool $steps = false, array $input = []): array
 {
     $process = proc_open(['node', __DIR__ . '/autoflow_replay.mjs'], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
     expect($process)->toBeResource('AutoflowScriptTest needs node on PATH');
-    fwrite($pipes[0], json_encode(['script' => __DIR__ . '/../../workflow/pipeline-autoflow.js', 'args' => $args, 'returns' => (object) $returns, 'steps' => $steps], JSON_UNESCAPED_SLASHES));
+    fwrite($pipes[0], json_encode(['script' => __DIR__ . '/../../workflow/pipeline-autoflow.js', 'args' => $args, 'returns' => (object) $returns, 'steps' => $steps, ...$input], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     fclose($pipes[0]);
     $stdout = stream_get_contents($pipes[1]);
     $stderr = stream_get_contents($pipes[2]);
@@ -508,4 +508,85 @@ it('returns a halt with record\'s reason when a stub step\'s record is refused',
     $replay = autoflow_replay($start, ['handoff:run' => [['status' => 'continued', 'record' => []]]], steps: true);
 
     expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'handoff', 'reason' => 'handoff run with --status continued needs --pr']);
+});
+
+const AUTOFLOW_RELAY_PROMPT = 'Copy the first 40 characters of the first message in this conversation into `head`, exactly as they appear. Do nothing else.';
+
+/** The halt a framed start returns on `$leg`, quoting the normalised head (or `none`). */
+function autoflow_relay_halt(string $leg, ?string $head): array
+{
+    return ['action' => 'halt', 'leg' => $leg, 'reason' => "relay: the run's first agent did not receive its own task first (head: " . ($head === null ? 'none' : "\"{$head}\"") . ')'];
+}
+
+it('checks the run\'s first agent, on the smoke entry with the relay-check agent type, before the first step (#134)', function () {
+    $replay = autoflow_replay(autoflow_start('handoff'), ['handoff:run' => [AUTOFLOW_STOP]]);
+
+    expect($replay['relay'])->toBe([
+        'prompt' => AUTOFLOW_RELAY_PROMPT,
+        'label' => 'relay-check',
+        'agentType' => 'pipeline-relay-check',
+        'schema' => ['type' => 'object', 'properties' => ['head' => ['type' => 'string']], 'required' => ['head']],
+        'setting' => 'sonnet low',
+    ]);
+    expect($replay['labels'])->toBe(['handoff:run']);
+    expect(autoflow_briefs($replay['prompts']))->toBe(['handoff run']);
+    expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'handoff', 'reason' => 'stub stop']);
+});
+
+it('halts before any step when the first message was not the run\'s own task (#134)', function (mixed $head, ?string $quoted) {
+    $replay = autoflow_replay(autoflow_start('handoff'), [], input: ['relay' => $head]);
+
+    expect($replay['labels'])->toBe([]);
+    expect($replay['relay']['label'])->toBe('relay-check');
+    expect($replay['result'])->toBe(autoflow_relay_halt('handoff', $quoted));
+})->with([
+    'the relayed frame' => ['[Workflow harness — user request] The ha', 'workflow harness user request the ha'],
+    'a relayed message with quotes' => ['Let\'s "merge" it, then #134', 'let s merge it then 134'],
+    'a head the agent left empty' => ['', ''],
+    'a head of punctuation only' => ['—— ', ''],
+    'an agent that returned nothing' => [null, null],
+]);
+
+it('lets a clean head through however the agent copied the label, and a bare prompt (#134)', function (string $head) {
+    $replay = autoflow_replay(autoflow_start('handoff'), ['handoff:run' => [AUTOFLOW_STOP]], input: ['relay' => $head]);
+
+    expect($replay['labels'])->toBe(['handoff:run']);
+    expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'handoff', 'reason' => 'stub stop']);
+})->with([
+    'a hyphen for the em dash' => ['[Workflow harness - computed task] The '],
+    'two hyphens' => ['[Workflow harness -- computed task] Th'],
+    'a leading newline, other case, extra spaces' => ["\n  [workflow   HARNESS — Computed Task] x"],
+    'the bare prompt' => ['Copy the first 40 characters of the firs'],
+]);
+
+it('halts without the relay prefix when the check itself fails (#134)', function () {
+    $replay = autoflow_replay(autoflow_start('handoff'), [], input: ['relay' => ['throw' => 'unknown agent type pipeline-relay-check']]);
+
+    expect($replay['labels'])->toBe([]);
+    expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'handoff', 'reason' => 'the relay check failed: unknown agent type pipeline-relay-check; is ~/.claude/agents/pipeline-relay-check.md linked (hooks/git-freshness.sh)?']);
+});
+
+it('checks a smoke run too, before its stub steps (#134)', function () {
+    $start = [...autoflow_start('review-plan'), 'stub' => ['prompt' => 'Return it.', 'steps' => ['review-plan:review' => [AUTOFLOW_STOP]]]];
+
+    $clean = autoflow_replay($start, ['review-plan:review' => [AUTOFLOW_STOP]]);
+    expect($clean['relay']['setting'])->toBe('sonnet low');
+    expect($clean['labels'])->toBe(['review-plan:review']);
+
+    $framed = autoflow_replay($start, [], input: ['relay' => '[Workflow harness — user request] The ha']);
+    expect($framed['labels'])->toBe([]);
+    expect($framed['result'])->toBe(autoflow_relay_halt('review-plan', 'workflow harness user request the ha'));
+});
+
+it('brings a framed start to finish untouched, which relaunches it once (#134)', function () {
+    $start = autoflow_start('handoff');
+    $before = manifest_read($start['manifest']);
+    $replay = autoflow_replay($start, [], steps: true, input: ['relay' => '[Workflow harness — user request] The ha']);
+
+    expect(manifest_read($start['manifest']))->toBe($before);
+    $halt = json_encode($replay['result']);
+    expect(dispatch_cli(['finish', $start['manifest'], $halt])['json'])->toMatchArray(['action' => 'halt', 'relaunch' => true]);
+
+    $again = autoflow_replay(dispatch_cli(['launch', $start['manifest'], dirname($start['manifest'], 3) . '/pipeline.diff'])['json'], [], steps: true, input: ['relay' => '[Workflow harness — user request] The ha']);
+    expect(dispatch_cli(['finish', $start['manifest'], json_encode($again['result'])])['json'])->toBe(['action' => 'halt', 'reason' => $again['result']['reason']]);
 });
