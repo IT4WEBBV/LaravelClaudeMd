@@ -71,36 +71,56 @@ it('honours the store-root override so tests never touch the real store', functi
     expect(proof_root())->toEndWith('/GitProjects/_proofs');
 });
 
-it('prunes a run only once its PR is finished and has been finished a while', function () {
-    $now = '2026-08-25T12:00:00+00:00';
-    $old = '2026-08-01T12:00:00+00:00';   // 24 days before $now
-    $recent = '2026-08-20T12:00:00+00:00'; // 5 days before $now
+it('prunes a finished run with a PR a week after its last filing, by its status or an older run\'s PR state', function (array $run) {
+    $now = '2026-10-02T12:00:00+00:00';
 
-    expect(proof_should_prune(['pr' => 412, 'prState' => 'MERGED', 'updatedAt' => $old], $now))->toBeTrue();
-    expect(proof_should_prune(['pr' => 412, 'prState' => 'CLOSED', 'updatedAt' => $old], $now))->toBeTrue();
-
+    expect(proof_should_prune([...$run, 'pr' => 412, 'updatedAt' => '2026-09-24T12:00:00+00:00'], $now))->toBeTrue();  // 8 days
     // A PR merged this morning is exactly the one still worth looking at this afternoon.
-    expect(proof_should_prune(['pr' => 412, 'prState' => 'MERGED', 'updatedAt' => $recent], $now))->toBeFalse();
-});
+    expect(proof_should_prune([...$run, 'pr' => 412, 'updatedAt' => '2026-09-26T12:00:00+00:00'], $now))->toBeFalse(); // 6 days
+    expect(proof_should_prune([...$run, 'pr' => 412, 'updatedAt' => '2026-09-25T12:00:00+00:00'], $now))->toBeFalse(); // exactly 7
+})->with([
+    'an older merged run' => [['prState' => 'MERGED']],
+    'an older closed run' => [['prState' => 'CLOSED']],
+    'a merge the watch wrote while gh could not answer' => [['prState' => 'OPEN', 'status' => ['state' => 'merged']]],
+    'a stored closed status' => [['status' => ['state' => 'closed']]],
+]);
 
-it('never prunes an open PR, and never prunes a run that opened none', function () {
-    $now = '2026-08-25T12:00:00+00:00';
-    $old = '2026-08-01T12:00:00+00:00';
+it('never prunes a run with a PR that is not finished, at any age', function (array $run) {
+    expect(proof_should_prune([...$run, 'pr' => 412, 'updatedAt' => '2026-09-02T12:00:00+00:00'], '2026-10-02T12:00:00+00:00'))->toBeFalse();
+})->with([
+    'running' => [['prState' => 'OPEN', 'status' => ['state' => 'running']]],
+    'halted' => [['prState' => 'OPEN', 'status' => ['state' => 'halted', 'reason' => 'CI red']]],
+    'ready' => [['prState' => 'OPEN', 'status' => ['state' => 'ready']]],
+    'an older open run' => [['prState' => 'OPEN']],
+    'a stored running status over a merged PR state' => [['prState' => 'MERGED', 'status' => ['state' => 'running']]],
+]);
 
-    expect(proof_should_prune(['pr' => 412, 'prState' => 'OPEN', 'updatedAt' => $old], $now))->toBeFalse();
+it('prunes a run that opened no PR two weeks after its last filing, whatever its status', function (array $run) {
+    $now = '2026-10-02T12:00:00+00:00';
 
-    // review-plan bound-exhaustion halts before handoff and opens no PR. Those runs are
-    // flagged in the index for manual pruning, never deleted automatically.
-    expect(proof_should_prune(['prState' => 'MERGED', 'updatedAt' => $old], $now))->toBeFalse();
-    expect(proof_should_prune(['pr' => null, 'prState' => 'MERGED', 'updatedAt' => $old], $now))->toBeFalse();
-});
+    expect(proof_should_prune([...$run, 'updatedAt' => '2026-09-17T12:00:00+00:00'], $now))->toBeTrue();  // 15 days
+    expect(proof_should_prune([...$run, 'updatedAt' => '2026-09-19T12:00:00+00:00'], $now))->toBeFalse(); // 13 days
+})->with([
+    'no pr key' => [[]],
+    'a null pr' => [['pr' => null, 'prState' => null]],
+    'an empty pr' => [['pr' => '']],
+    'halted before handoff' => [['status' => ['state' => 'halted', 'reason' => 'review-plan bound']]],
+    'a stale merged PR state' => [['pr' => null, 'prState' => 'MERGED']],
+]);
 
 it('never prunes on unusable timestamps', function () {
-    $now = '2026-08-25T12:00:00+00:00';
+    $now = '2026-10-02T12:00:00+00:00';
 
     expect(proof_should_prune(['pr' => 1, 'prState' => 'MERGED', 'updatedAt' => 'not a date'], $now))->toBeFalse();
     expect(proof_should_prune(['pr' => 1, 'prState' => 'MERGED'], $now))->toBeFalse();
     expect(proof_should_prune(['pr' => 1, 'prState' => 'MERGED', 'updatedAt' => '2026-08-01T12:00:00+00:00'], 'nonsense'))->toBeFalse();
+    expect(proof_should_prune(['pr' => null], $now))->toBeFalse();
+    expect(proof_should_prune(['updatedAt' => 'not a date'], $now))->toBeFalse();
+    expect(proof_should_prune(['updatedAt' => '2026-08-01T12:00:00+00:00'], 'nonsense'))->toBeFalse();
+});
+
+it('tells the finished statuses from the open ones', function () {
+    expect(array_map(fn (ProofRunStatus $status) => $status->finished(), ProofRunStatus::cases()))->toBe([false, false, false, true, true]);
 });
 
 it('scans every run in the store, newest first', function () {

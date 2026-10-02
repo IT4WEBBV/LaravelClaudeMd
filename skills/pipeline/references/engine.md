@@ -947,6 +947,12 @@ client summary. **What changed since the last look** is per browser: opening a p
 *New*, one filed again since it was opened *Updated*, and drops a seen `ready` run among the rest. A run filed before
 `revision` existed gets no marker. Without `localStorage` nothing is marked and the order is the status order.
 
+**Retention.** The prune pass runs after every `proof_cli.php write` and on `proof_cli.php prune`. It corrects each
+run's status from `gh` first (above), then removes a run whose status is `merged` or `closed` 7 days after its last
+filing (`updatedAt`), and a run that opened no PR 14 days after its last filing, whatever its status; a run whose PR
+is still open is never removed. A status or cost amendment is no filing, so a run that waited longer than 7 days for
+its merge goes on the first pass after it.
+
 **Time and cost.** After an `autoflow` run, `run_cost_cli.php <transcript dir> <page>` files its figures into
 `cost`, one entry per workflow keyed by the transcript dir's name: filing it again changes nothing, and a resume or a
 CI fix round adds its own. The page shows them per step under *Time and cost*, the index the summed spans and cost.
