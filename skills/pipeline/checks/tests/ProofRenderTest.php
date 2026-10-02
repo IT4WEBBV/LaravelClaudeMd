@@ -531,3 +531,39 @@ it('escapes the repo, the title, the reason and the summary in the index', funct
     expect($html)->toContain('Klant &lt;b&gt;&quot;blij&quot;&lt;/b&gt;')->toContain('data-updated="&quot;&gt;&lt;script&gt;"');
     expect($html)->not->toContain('<b>R</b>');
 });
+
+it('opens the run page with one link back to the store index, relative, above the title', function () {
+    $html = proof_render_run(proof_current_run());
+    $link = '<nav class="back" aria-label="Proof store"><a href="../../index.html">← All proofs</a></nav>';
+
+    expect($html)->toContain($link);
+    expect(substr_count($html, 'class="back"'))->toBe(1);
+    expect(strpos($html, $link))->toBeGreaterThan(strpos($html, '<body'))->toBeLessThan(strpos($html, '<h1>'));
+});
+
+it('gives a run filed before schema 2 the link back too', function () {
+    $html = proof_render_run(proof_fixture_run(['schema' => 1]));
+    $link = '<nav class="back" aria-label="Proof store"><a href="../../index.html">← All proofs</a></nav>';
+
+    expect($html)->toContain($link);
+    expect(strpos($html, $link))->toBeLessThan(strpos($html, '<h1>'));
+    expect($html)->not->toContain('Pending:');
+});
+
+it('gives the store index no link back, since it is the root', function () {
+    $html = proof_render_index([
+        ['dir' => '/store/ViewieMedia/pr-412-orders-export', 'run' => proof_fixture_run()],
+    ]);
+
+    expect($html)->not->toContain('class="back"');
+    expect($html)->not->toContain('All proofs');
+});
+
+it('resolves the link back to the index of the store the page is filed in', function () {
+    $page = proof_test_page();
+
+    expect(proof_store_amend($page, fn (array $run): array => $run))->toBeNull();
+    expect(is_file(dirname($page) . '/../../index.html'))->toBeTrue();
+    expect(realpath(dirname($page) . '/../../index.html'))->toBe(realpath(dirname($page, 3) . '/index.html'));
+    expect(dirname(proof_run_dir('/store', 'Deploy', 'feature/logs', 5), 2))->toBe('/store');
+});
