@@ -191,6 +191,20 @@ path that does not exist, compiled into `$TMPDIR` and opened once, shows the ale
 10. **Does sibling run #154 touch these files?** #154 changes when pages open and adds `status.js`; it edits the
     proof scripts, `SKILL.md` and engine.md §The proof store. This design touches engine.md in one sentence at the
     end of the *The index* paragraph and leaves `SKILL.md` alone, to keep a merge of the base small.
+11. **How does implement check the real app, when the hook builds only from the config repo's checkout (on `main`,
+    without this source until the merge)?** Assumed (added by `design:plan`): implement compiles the worktree's
+    source with `osacompile` straight into `~/Applications/Proofs.app` when nothing is there (nothing is, on this
+    machine), which is exactly what the hook will find and skip after the merge; when a later step changes the
+    source, it deletes and rebuilds that app. Alfred's keypress cannot be driven from a session, so implement checks
+    what Alfred rides on: Spotlight finds the app (`mdfind`), and opening it puts the index in Chrome's front tab
+    (asked of Chrome with `osascript`). Alfred "proofs" + Enter and the Dock drag are the owner's check, named in
+    the PR body.
+12. **Is the apps dir created when a repo ships no app source?** Assumed yes (added by `design:plan`), as
+    `link_new_skill_files()` creates its dir unconditionally: `~/Applications` is a standard folder, and one rule
+    for every per-machine dir is simpler than a lazy one.
+13. **Is the `osacompile`-missing guard tested?** Assumed no (added by `design:plan`): making a `/usr/bin` tool
+    disappear while `git`, `bash` and the coreutils stay needs a hand-built `PATH`; the guard is one line, read in
+    review, and the compiling cases print `skip` on such a box.
 
 ## What was read
 
