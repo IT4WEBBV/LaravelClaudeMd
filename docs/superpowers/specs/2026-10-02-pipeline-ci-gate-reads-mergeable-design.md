@@ -107,17 +107,18 @@ headRefOid,mergeable,statusCheckRollup`).
 As `pipeline_ci_round_line()` gives the CI round's two lines while `pipeline_ci_rounds() > 0`, a new
 `pipeline_conflict_round_line($step)` gives one per `review-pr` step while `pipeline_conflict_rounds() > 0`:
 
-- review: ``The settled `Conflict with the base` decision is a finding of this review unless HEAD
-  already contains the base's tip (`git merge-base --is-ancestor origin/<base> HEAD`): name the conflict
-  and leave the merge to the resolve step, since a review step does not merge (engine.md §Catching up
-  with the base).``
+- review: ``The settled `Conflict with the base` decision is a finding of this review: name the
+  conflict and leave the merge to the resolve step, since a review step does not merge (engine.md
+  §Catching up with the base).``
 - resolve: ``Resolve the `Conflict with the base` finding with the merge this brief's catch-up override
   asks for, and name it in `actions`; when this brief has no such override, say so in `actions` and
   change nothing for it: the CI gate reads the PR's mergeability again (engine.md §The CI gate).``
 
-`<base>` is written as the literal placeholder text in the line, as the CI round's `<run>` is: the
-brief's state section already names the run's base when it is not the default. The lines sit right
-after the CI round's line in `pipeline_brief_overrides()`.
+The review line names the conflict unconditionally: between the gate's read and the review step no
+step writes the branch, and the gate already required GitHub's head to be the worktree's `HEAD`, so the
+branch cannot have gained the base's tip in between; whether a merge is still needed is the resolve
+step's catch-up override's call, the one place that fetches. The lines sit right after the CI round's
+line in `pipeline_brief_overrides()`.
 
 ### 3. Docs
 

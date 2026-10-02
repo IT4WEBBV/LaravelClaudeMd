@@ -35,9 +35,8 @@ plan: the plan argues from it, and its `## Assumptions` 10–13 are the answers 
   - the spent-round halt: `PR #{$pr} conflicts with its base again after the conflict round, on {$sha}: merge the base into the branch (engine.md §Catching up with the base), push, and run the CI gate again`
   - the unknown halt: `GitHub had not worked out whether PR #{$pr} merges into its base after an hour, on {$sha}`
   - verdicts: `conflicting`, `unknown`
-  - the review line: ``The settled `Conflict with the base` decision is a finding of this review unless HEAD already contains the base's tip (`git merge-base --is-ancestor origin/<base> HEAD`): name the conflict and leave the merge to the resolve step, since a review step does not merge (engine.md §Catching up with the base).``
+  - the review line: ``The settled `Conflict with the base` decision is a finding of this review: name the conflict and leave the merge to the resolve step, since a review step does not merge (engine.md §Catching up with the base).``
   - the resolve line: ``Resolve the `Conflict with the base` finding with the merge this brief's catch-up override asks for, and name it in `actions`; when this brief has no such override, say so in `actions` and change nothing for it: the CI gate reads the PR's mergeability again (engine.md §The CI gate).``
-- `<base>` in the review line is literal text, not substituted.
 - Answers' key order (the tests use `toBe`): `fix` is `['action', 'verdict', 'sha', 'decision']`; a
   `wait` is `['action', 'verdict', 'sha']`; a halt is `['action', 'leg', 'reason', 'verdict', 'sha']`
   (`pipeline_ci_halt()` puts `action`, `leg`, `reason` first).
@@ -387,7 +386,7 @@ it('makes a recorded conflict with the base a finding of review-pr\'s review and
     $conflict = "Conflict with the base on the PR's head commit abc123: GitHub reports PR #42 CONFLICTING with its base; review-pr's resolve step merges the base (engine.md §Catching up with the base)";
     $red = "CI red on the PR's head commit abc123: CI / ci failed (https://github.com/acme/app/actions/runs/11/job/12)";
     $round = ['mode' => 'autoflow', 'decisions' => ['The engine never edits.', $conflict]];
-    $review = 'The settled `Conflict with the base` decision is a finding of this review unless HEAD already contains the base\'s tip (`git merge-base --is-ancestor origin/<base> HEAD`): name the conflict and leave the merge to the resolve step, since a review step does not merge (engine.md §Catching up with the base).';
+    $review = 'The settled `Conflict with the base` decision is a finding of this review: name the conflict and leave the merge to the resolve step, since a review step does not merge (engine.md §Catching up with the base).';
     $resolve = 'Resolve the `Conflict with the base` finding with the merge this brief\'s catch-up override asks for, and name it in `actions`; when this brief has no such override, say so in `actions` and change nothing for it: the CI gate reads the PR\'s mergeability again (engine.md §The CI gate).';
 
     expect(pipeline_brief(brief_manifest('review-pr', $round), 'review-pr', '/tmp/m.json', 'review'))->toContain($review)->not->toContain($resolve);
@@ -442,7 +441,7 @@ After `pipeline_ci_round_line()` add:
 function pipeline_conflict_round_line(string $step): string
 {
     return $step === 'review'
-        ? 'The settled `Conflict with the base` decision is a finding of this review unless HEAD already contains the base\'s tip (`git merge-base --is-ancestor origin/<base> HEAD`): name the conflict and leave the merge to the resolve step, since a review step does not merge (engine.md §Catching up with the base).'
+        ? 'The settled `Conflict with the base` decision is a finding of this review: name the conflict and leave the merge to the resolve step, since a review step does not merge (engine.md §Catching up with the base).'
         : 'Resolve the `Conflict with the base` finding with the merge this brief\'s catch-up override asks for, and name it in `actions`; when this brief has no such override, say so in `actions` and change nothing for it: the CI gate reads the PR\'s mergeability again (engine.md §The CI gate).';
 }
 ```
@@ -535,11 +534,12 @@ review is for.`, insert:
   would merge. `CONFLICTING` answers `fix` with verdict `conflicting` and the decision `Conflict with the
   base on the PR's head commit <sha>: GitHub reports PR #<pr> CONFLICTING with its base; review-pr's
   resolve step merges the base (engine.md §Catching up with the base)`, and the session does what it does
-  for a red. The review step names the conflict as a finding unless `HEAD` already contains the base's tip;
-  the resolve step makes the merge its catch-up override asks for (a textual conflict means both sides
-  changed a file, so §Catching up with the base gives that override), resolves it, runs the suite and
-  pushes. At the next gate the merge round reviews those resolutions when it is unspent. Once per run,
-  counted from `decisions` apart from the other two rounds: a conflict after it halts, naming `review-pr`.
+  for a red. The review step names the conflict as a finding; the resolve step makes the merge its
+  catch-up override asks for (a textual conflict means both sides changed a file, so §Catching up with the
+  base gives that override), resolves it, runs the suite and pushes. At the next gate the merge round
+  reviews those resolutions when it is unspent; when it is spent they go on unreviewed, as the bullet
+  above says of any further merge. Once per run, counted from `decisions` apart from the other two
+  rounds: a conflict after it halts, naming `review-pr`.
   `UNKNOWN` is a `wait`, as a pending check is, and a halt at the 120th read.
 ```
 
