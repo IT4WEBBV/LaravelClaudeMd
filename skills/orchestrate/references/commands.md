@@ -49,6 +49,8 @@ The PR is found by prefix: `closingIssuesReferences` stays empty until the run's
   session rooted in, above, or in the same repository as the worktree, so treat the worktree as owned
   and ask the owner, quoting the error. An unreadable session rooted anywhere else is skipped.
   Only a `working` or `blocked` session owns a worktree; `done`, `failed` and `stopped` rows never do.
+  A session working in a worktree nested in the primary checkout (`.claude/worktrees/*`) does not own
+  the primary checkout.
   An open PR with no worktree has no owner to find: treat it as orphaned.
   An `autoflow` run's steps work from the launch directory, so for those `owners.py` also reads the
   workflow step transcripts and matches what names the run's worktree: its `dispatch_cli.php` calls,
