@@ -38,6 +38,8 @@ h2 { font-size:1rem; text-transform:uppercase; letter-spacing:.05em; color:var(-
   margin:2.5rem 0 .75rem; padding-bottom:.4rem; border-bottom:1px solid var(--line); }
 .meta { color:var(--muted); font-size:.875rem; margin-bottom:.5rem; }
 .meta code { background:var(--card); padding:.1rem .35rem; border-radius:.25rem; }
+.back { margin:0 0 .75rem; font-size:.875rem; }
+.back a { color:var(--muted); }
 .shot { position:relative; display:block; margin:0 0 .5rem; cursor:zoom-in; }
 .shot img { width:100%; display:block; border:1px solid var(--line); border-radius:.5rem; }
 .badge { position:absolute; width:26px; height:26px; border-radius:50%; background:var(--accent);
@@ -509,7 +511,9 @@ function proof_render_run(array $run): string
         isset($run['revision']) ? 'revision ' . (int) $run['revision'] : '',
     ]));
 
-    $body = '<h1>' . proof_e($title) . "</h1>\n<p class=\"status\">" . proof_render_status($run) . "</p>\n<p class=\"meta\">{$meta}</p>\n";
+    // Every run page sits at <root>/<repo>/<run>/index.html, so the store index is always two levels up.
+    $body = "<nav class=\"back\" aria-label=\"Proof store\"><a href=\"../../index.html\">← All proofs</a></nav>\n"
+        . '<h1>' . proof_e($title) . "</h1>\n<p class=\"status\">" . proof_render_status($run) . "</p>\n<p class=\"meta\">{$meta}</p>\n";
 
     // A run filed before schema 2 renders as it did: pending lines on a finished old page would claim work is
     // outstanding.

@@ -917,6 +917,8 @@ The page opens with the **client summary** (Dutch, for the hour registration, wi
 **In plain language** (the problem and the solution for a reader who knows nothing about the issue), the
 headline and the technical Problem and Solution, **Tests this PR adds**, the shots, the checks, the open
 questions and the ledger. A store-wide `index.html` is the join from a PR back to its page.
+Above the heading, an *← All proofs* link goes to the store index (`../../index.html`, relative, so it works over
+`file://`).
 
 **Each run has a status**, on its page under the heading and in the index's first column: `running`, `halted`
 (with the reason), `ready` (*Ready for review*), `merged`, `closed`. A command writes what it already knows; a
