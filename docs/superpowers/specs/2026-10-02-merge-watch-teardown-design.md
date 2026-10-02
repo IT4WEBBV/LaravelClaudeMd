@@ -58,8 +58,8 @@ teardown.py <checkout> <pr> [--repo <owner/name>] [--proof <page.html>] [--proje
 - `<pr>`: a PR number or its URL, passed to `gh pr view` as given. `--repo` adds `-R <owner/name>`; without it `gh`
   resolves the repo from the checkout (every `gh` call runs with the checkout as its cwd).
 - `--proof`: the proof page to mark. Without it, the page is the run manifest's `artifacts.proof` when
-  `<checkout>/.claude/pipeline/<headRefName, "/" → "-">.json` exists (the path `pipeline_manifest_path()` builds,
-  `manifest.php:25`); no manifest or no `artifacts.proof`: no page.
+  `<checkout>/.claude/pipeline/<headRefName, "/" → "-">.json` exists (the path `manifest_path()` builds,
+  `skills/pipeline/checks/manifest.php:23`); no manifest or no `artifacts.proof`: no page.
 - `--projects-dir`: passed on to `owners.py` (default `~/.claude/projects`), for the test fixture.
 - The session id `owners.py` skips is its own default, `CLAUDE_CODE_SESSION_ID` from the environment.
   *Probed: the Bash tool's environment carries `CLAUDE_CODE_SESSION_ID` (`echo $CLAUDE_CODE_SESSION_ID` printed a
@@ -278,6 +278,22 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
 16. **Should the `CLAUDE.md` rule hold for `/work-on` sessions?** Yes, unchanged: the issue says user instructions
     take precedence over a skill, and work-on is not edited (DevOps-Claude-Config).
 17. **Is a changelog entry needed?** No: this repo has neither `.changelog/` nor `CHANGELOG.md`.
+18. **What happens to `Worktree.remove` in the repo config?** Nothing reads it any more once the script recognises
+    the checkout's kind (*Assumptions* 2). Its row in pipeline engine.md §The repo config stays (the pipeline's
+    `LockStepTest` pins `| \`Worktree\` | \`remove\` |`, and the file is shared with `work-on`), its *Read by* says the
+    teardown recognises the checkout's kind instead and its requirement becomes `—`; orchestrate `SKILL.md` stops
+    naming `worktree.remove` among the keys it needs. No PHP reads the key, so kickoff is unchanged.
+19. **How are paths compared?** As real paths. *Probed: `git worktree list --porcelain` prints a worktree's real path,
+    `/private/var/…` for one added under `/var/…` (a throwaway repo under `mktemp -d`, then
+    `git worktree list --porcelain`).* So `owners.py`'s nested-worktree rule compares `os.path.realpath` of the entry's
+    cwd with the listed paths, and the teardown fixture builds under `pwd -P`.
+20. **`claude agents` itself fails?** The `owners` check fails with its stderr: the same fail-closed side as
+    `owners.py`'s exit 2.
+21. **How is the primary checkout found?** The first `worktree` entry of `git -C <checkout> worktree list
+    --porcelain`: git lists the main working tree first, and it is the one whose git dir is the common dir, so this is
+    the *kind* table's rule read from one command. A checkout equal to it is the primary kind.
+22. **engine.md §The proof store's status table** names `merged`/`closed` as written by the session holding the merge
+    watch. It now names `orchestrate/teardown.py`, run by that session; the rest of the row is unchanged.
 
 ## Relation to other work
 
