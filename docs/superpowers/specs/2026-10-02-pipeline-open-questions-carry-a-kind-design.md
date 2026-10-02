@@ -305,6 +305,33 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
     design gives it the kind and the ask; how `design` records an open question is #145's to decide.
 13. **Changelog?** The repo has no `CHANGELOG.md` and no `.changelog/`: none.
 
+Added by the `design` leg's `plan` step, where the plan needed an answer the sections above do not give:
+
+14. **Do `ask`'s `questions` items carry `kind`?** Yes: they are `pipeline_unanswered()`'s items whole,
+    `{id, gate, kind, question, note, decision}` (§1), `kind` always `blocking`. §3's JSON example lists
+    them without it; the tests pin the full shape, so the CLI answer and the function cannot drift.
+15. **How does a proof payload refusal number its item?** From 0, `openQuestions[0]`, as `record` numbers
+    `actions[0]`: both name a list index. Shots keep their own 1-based `shot 1`.
+16. **How do the refusals name the kinds?** `blocking, follow-up, remark`, comma-joined, as `record`
+    names the dispositions, from one `QuestionKind::listed()`. `record` says
+    ``actions[0]: `kind` is not one of blocking, follow-up, remark``; the proof store says
+    `openQuestions[0] has no kind: blocking, follow-up, remark` for a missing or unknown kind, and
+    `openQuestions[0] has no question` for an item that is not an object with a non-empty `question`.
+17. **Where does `ci` answer `ask`?** After the `artifacts.pr` check, which reads no file and no command,
+    and before `git rev-parse HEAD`: neither git nor gh is called. Both `dispatch_cli_ci()` and
+    `pipeline_ci_answer()` answer through one `pipeline_ci_ask($unanswered)`, so they cannot answer
+    differently.
+18. **How does `questions.php` tell an answered question?** With its own `str_starts_with` over
+    `decisions` (an `array_filter`, not 8.4's `array_any`: earlier plans name PHP 8.3+), not `ci.php`'s
+    `pipeline_decisions_starting()`: §1 has it require no other check file, and `proof.php` requires it.
+19. **Is the answer round's brief line mode-bound?** No: it is keyed on a decision that starts
+    `Answer to open question`, as the CI round's line is keyed on its record. Only `launch` writes one, and
+    `launch` serves `autoflow` runs only.
+20. **How does the page show a kind?** The kind's `label()` in `<strong>` before the text,
+    `<strong>Blocking:</strong> Keep the guard?`; no new CSS. A stored string item renders as today.
+21. **A `follow-up` carried by two entries with different notes?** `pipeline_follow_ups()` keeps the first
+    one's `note`, in ledger order.
+
 ## Relation to other work
 
 - #145 (open): its mockup departures are `blocking` by definition and reach the owner through §3–§8.
