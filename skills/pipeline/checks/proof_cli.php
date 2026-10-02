@@ -41,7 +41,8 @@ function proof_cli_write(string $payloadPath): int
 }
 
 /**
- * Open a finished run's page in the desktop browser — the run's last action, once per run.
+ * Open a run's page in the desktop browser, by hand: no step runs this, a run's report names its page instead
+ * (`../references/engine.md` §The proof store, *No page opens by itself*).
  *
  * Cosmetic, and weaker than every other policy in this file: failing to *capture* proof halts a
  * run and failing to *file* it logs and continues, but failing to *open* it does not even rate a
@@ -53,8 +54,7 @@ function proof_cli_write(string $payloadPath): int
  * as one literal argument. There is no command line for a quote or a `;` in it to escape from.
  *
  * The opener is expected to return immediately (`open` launches and exits; a desktop `xdg-open`
- * delegates and exits). On a headless box where `xdg-open` would fall back to a blocking terminal
- * browser, set `PIPELINE_NO_OPEN=1` — which is what an unattended run wants regardless.
+ * delegates and exits); `PIPELINE_OPEN_CMD` names another one.
  */
 function proof_cli_open(string $path): int
 {

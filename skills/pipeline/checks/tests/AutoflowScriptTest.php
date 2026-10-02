@@ -591,3 +591,10 @@ it('brings a framed start to finish untouched, which relaunches it once (#134)',
     $again = autoflow_replay(dispatch_cli(['launch', $start['manifest'], dirname($start['manifest'], 3) . '/pipeline.diff'])['json'], [], steps: true, input: ['relay' => '[Workflow harness — user request] The ha']);
     expect(dispatch_cli(['finish', $start['manifest'], json_encode($again['result'])])['json'])->toBe(['action' => 'halt', 'reason' => $again['result']['reason']]);
 });
+
+it('opens no proof page at the finish step', function () {
+    $replay = autoflow_replay(autoflow_start('review-pr'), ['review-pr:review' => [AUTOFLOW_C], 'review-pr:resolve' => [AUTOFLOW_C]]);
+    $resolve = $replay['prompts'][array_search('review-pr:resolve', $replay['labels'], true)];
+
+    expect($resolve)->toContain('review-pr resolve')->not->toContain('proof_cli.php open')->not->toContain('PIPELINE_NO_OPEN');
+});

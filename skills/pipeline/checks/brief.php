@@ -106,10 +106,9 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
             'Reconcile the closing links (engine.md §Closing links): each related issue\'s outcome goes to `record` as an `--issue-link`.',
             'Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` as the finished work stands, the suite line under `checks`, the final open questions and ledger; `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, and a run without `artifacts.proof` gets its page from this write, with `repo` (the GitHub name), `branch` and `pr` from the PR.',
             $writeActions,
-            ($autoflow
+            $autoflow
                 ? 'Push your commits and leave the PR draft; the session that launched the run marks it ready after the CI gate (engine.md §The CI gate).'
-                : 'Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`, then `proof_cli.php status <the path write printed> ready`; show any other answer to the human.')
-            . ' After `record`, the last action is `proof_cli.php open` on the path `write` printed (engine.md §The proof store).',
+                : 'Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`, then `proof_cli.php status <the path write printed> ready`; show any other answer to the human. Your reply names the page path `write` printed: no page opens by itself (engine.md §The proof store).',
         ],
     ];
 }
@@ -552,7 +551,7 @@ function pipeline_brief_return(string $leg, string $step, string $mode, string $
         : 'Take the `status` it printed and reply with one line naming it.';
 
     return "## Return\n\n"
-        . "Your last act is {$last}; only a read-only command your instructions name (`size`, `ui`, the proof page's `open`) comes after it. {$only} the only way you write the manifest: do not edit the file, and never find it by a glob (`{$snapshot}` beside it is the dispatcher's snapshot).\n\n"
+        . "Your last act is {$last}; only a read-only command your instructions name (`size`, `ui`) comes after it. {$only} the only way you write the manifest: do not edit the file, and never find it by a glob (`{$snapshot}` beside it is the dispatcher's snapshot).\n\n"
         . implode("\n", $commands) . "\n\n"
         . 'Write a `--reason` without double quotes. '
         . $prints . ' `{"action":"recorded",…}`, or `{"action":"refused","reason":…}` with exit 1 and the manifest untouched: ' . $refused . '. '
