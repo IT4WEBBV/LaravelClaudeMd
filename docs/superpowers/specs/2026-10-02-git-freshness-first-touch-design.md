@@ -239,6 +239,33 @@ Each question the brainstorm would have asked, with the answer assumed.
 13. **Several repos in one Bash command?** Each newly touched one is checked, and their reports share the call's one
     JSON object.
 
+Added by the `plan` step, where the plan needed an answer this spec did not give:
+
+14. **Consequence details for a branch whose upstream is the base (a local `main` tracking `origin/main`)?** Yes.
+    Today's `upstream != base_ref` gate kept the consequences from doubling the "pushed to this branch elsewhere"
+    line; that line is now skipped in exactly that case, so the gate goes and a behind `main` with local commits gets
+    its migrations, lockfiles and conflicts like any other branch.
+15. **How does the legacy `edit` mode find its path?** From `file_path` in the payload, as today, without looking at
+    `tool_name`: the existing `git-freshness-sync.test.sh` case 11 sends no `tool_name` and must keep passing
+    unchanged. Only `touch` resolves paths by `tool_name`.
+16. **The `systemMessage` format for every report with findings?** One shape: `<repo> '<branch>': <tags>.`. Today's
+    "— incoming from `<base_ref>`" suffix goes: the leading "N behind `<base_ref>`" tag names the base, and the
+    "branch pushed elsewhere" tag never needed it.
+17. **Detached HEAD with local changes and a moved base?** It keeps today's consequence details under today's
+    "Stale checkout with consequences: `<repo>` on '(detached HEAD)'" header; only the working-branch line is
+    withheld (assumption 11).
+18. **Does a fetch that did not finish carry the raise-and-wait instruction?** Not by itself: it is a paragraph of its
+    own, like the sync notes, with the `freshness unknown` tag. It says nothing about being behind; the instruction
+    comes with a behind line or a consequence, as before.
+19. **The manifest path function's name?** It is `manifest_path($worktree, $branch)` in
+    `skills/pipeline/checks/manifest.php`; the *Design* section's `pipeline_manifest_path()` names the same thing. The
+    hook mirrors its rule in bash (`<toplevel>/.claude/pipeline/<branch with / as ->.json`) and does not call PHP.
+20. **Does `session` skip its check when the launch repo's marker already exists?** No: a resume, `/clear` or compact
+    fires SessionStart again under the same session id, and today it checks every time. It claims the marker and
+    checks regardless of the claim's result.
+21. **Which directory does `session` mark?** The launch directory's `--show-toplevel`, so a session launched in a
+    repo's subdirectory silences the first touch anywhere in that repo.
+
 ## What was read and probed
 
 - `hooks/git-freshness.sh` in full: `check_repo`, `sync_base_branch`, `worktree_holding`, `fetch_if_stale`
@@ -258,3 +285,7 @@ Each question the brainstorm would have asked, with the answer assumed.
   `~/.local/share/claude/versions/2.1.287`). The probe shows the field is read for PreToolUse; that it reaches the
   model on an allowed call is the implement step's live check once a machine is rewired, and with the event name a
   parameter of the shared code, the PostToolUse `edit` wiring stays a working fallback.
+- Probed (plan step): an up-to-date `git fetch` still rewrites `FETCH_HEAD`, which *Testing* case 6 relies on to see
+  that a touched repo was fetched: two fetches in a row in this worktree left `FETCH_HEAD`'s mtime equal to the second
+  one's time (`stat -f %m "$(git rev-parse --absolute-git-dir)/FETCH_HEAD"; git fetch -q origin; git fetch -q origin;
+  stat -f %m …`).
