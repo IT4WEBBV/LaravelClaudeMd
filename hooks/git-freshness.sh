@@ -23,8 +23,8 @@
 #              wired it is a no-op. Remove it once touch is wired.
 #
 #   checkout   PostToolUse on `git checkout` — a branch switch changes the
-#              answer, so drop this session's cached verdicts and stay silent.
-#              The next touch re-checks.
+#              answer, so release the claim on the repo the command ran in and
+#              stay silent. Its next touch re-checks; other repos stay claimed.
 #
 # Any other mode does nothing.
 #
@@ -709,7 +709,26 @@ repo_toplevel() {
 # check, so a repo that fails it (no origin, a dead network) is not retried.
 claim_repo() {
     mkdir -p "$cache_dir" 2>/dev/null || return 1
-    mkdir "$cache_dir/$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')" 2>/dev/null
+    mkdir "$(repo_marker "$1")" 2>/dev/null
+}
+
+# The marker that claims repo $1 for this session.
+repo_marker() {
+    printf '%s/%s\n' "$cache_dir" "$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')"
+}
+
+# Release this session's claim on each repo among paths $1 (one per line), so
+# its next touch checks it again. A file marker left by an older edit mode goes
+# the same way.
+release_repos() {
+    local target toplevel
+
+    while IFS= read -r target; do
+        [ -n "$target" ] || continue
+        toplevel=$(repo_toplevel "$target") || continue
+        [ -n "$toplevel" ] || continue
+        rm -rf "$(repo_marker "$toplevel")" 2>/dev/null
+    done <<< "$1"
 }
 
 # The paths the payload's tool call acts on, one per line. Tools that carry no
@@ -923,8 +942,9 @@ fi
 
 case "$mode" in
     checkout)
-        # A branch switch invalidates every verdict cached for this session.
-        [ -n "$session_id" ] && rm -rf "$cache_dir" 2>/dev/null
+        # A branch switch changes the answer for the repo it ran in, and only
+        # that one: the config repos session claimed stay claimed.
+        release_repos "$(bash_targets "$(payload_field cwd)")"
         exit 0
         ;;
 

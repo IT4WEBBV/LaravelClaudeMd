@@ -387,6 +387,22 @@ lacks "$out" "nothing incoming" "not reported as current"
 lacks "$out" "last fetch (just now)" "the age is the last fetch before the failed one"
 echo
 
+# ---------------------------------------------------------------------------
+echo "case 15: a git checkout releases only the repo it ran in"
+cfg=$(fixture checkoutcfg 1)
+git -C "$cfg" checkout -q -b feature
+repo=$(fixture checkoutrepo 0)
+git -C "$repo" checkout -q -b switched
+printf '%s' "{\"session_id\":\"t-checkout\",\"cwd\":\"$root/plain\"}" \
+    | GIT_FRESHNESS_CONFIG_REPOS="$cfg" bash "$hook" session >/dev/null 2>&1
+run_hook touch "$(read_payload t-checkout "$repo/app.php")" >/dev/null
+run_hook checkout "$(tool_payload t-checkout Bash "$repo" '{"command":"git checkout switched","description":"x"}')" >/dev/null
+skill_read=$(run_hook touch "$(read_payload t-checkout "$cfg/app.php")")
+switched=$(run_hook touch "$(read_payload t-checkout "$repo/app.php")")
+is "$skill_read" "" "a read in the config repo after a checkout elsewhere stays silent"
+contains "$switched" "work on 'switched'" "the repo the checkout ran in is checked again"
+echo
+
 echo "----------------------------------------"
 printf '%d passed, %d failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]

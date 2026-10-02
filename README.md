@@ -84,7 +84,7 @@ the other machine on its own:
   `touch` entry above. Before removing `edit` on the first machine, check once that a `touch` report
   reaches the model: in a new session, read a file in a repo whose branch is behind and ask what
   the hook reported. If it does not, keep `edit` wired and leave `touch` out.
-- `checkout` — drops cached verdicts after a branch switch.
+- `checkout` — after a branch switch, releases the repo it ran in, so its next touch re-checks it.
 
 ### Permissions for unattended runs
 

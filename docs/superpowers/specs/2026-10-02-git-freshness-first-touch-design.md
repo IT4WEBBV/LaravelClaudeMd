@@ -80,8 +80,10 @@ touch). For each call:
    prints nothing: later touches cost a `bash` start, the payload parsing (for Bash also a `sed` and two `awk`s over
    the command, and a `-d` test per named word) and one `git rev-parse` per named path.
 
-The cache dir stays `${TMPDIR:-/tmp}/claude-git-freshness/<session_id>`, and `checkout` mode still drops it after a
-`git checkout`, so the next touch re-checks the switched branch.
+The cache dir stays `${TMPDIR:-/tmp}/claude-git-freshness/<session_id>`. After a `git checkout`, `checkout` mode
+releases the marker of the repo the command ran in (its `cd`/`git -C` words, else the `cwd`, as for a Bash touch),
+so the next touch there re-checks the switched branch; every other marker, the config repos' included, stays
+(assumption 25).
 
 **Bash command parsing** stays simple, as the issue prefers. `tool_input.command` is taken from the payload with a
 `sed` that respects JSON escapes (`"command":"((\\.|[^"\\])*)"`), then `\"`, `\\` and `\n` are unescaped. In it, a
@@ -222,6 +224,9 @@ report stays, as context only (`suppressOutput`).
 11. **Config repos are claimed at session start.** A config-repo fixture on `feature`, behind: after a session, a
     Read of a file in it prints nothing; the same Read under another session id reports the repo, so the line is not
     vacuous.
+12. **A `git checkout` releases only its own repo.** After a session that claimed a behind config repo and a touch in
+    another repo, `checkout` with a `git checkout` run in that other repo: a Read in the config repo still prints
+    nothing, and the next touch in the switched repo reports it again.
 
 The existing `git-freshness-sync.test.sh` keeps passing unchanged, including its case 11 (`edit` caches per repo)
 and the session cases, which now exercise `check_repo` through the collect-then-emit path.
@@ -305,6 +310,12 @@ Added by the `review-plan` resolve step, answering the plan review:
     outrun the 20 s hook timeout and leave both unreported for the session (*A fetch that does not finish*); accepted
     as rare and harmless rather than adding a budget passed through `check_repo`. A miss found in practice is a
     follow-up.
+
+Added by the `review-pr` resolve step, answering the PR review:
+
+25. **Which markers does `checkout` drop?** Only the repo the `git checkout` ran in. Dropping the whole cache dir, as
+    it did before markers were claimed at session start, reopened assumption 22 after any `git checkout`: the next
+    skill read re-checked the config repo's primary checkout.
 
 ## What was read and probed
 
