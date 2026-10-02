@@ -467,6 +467,8 @@ sync_base_branch() {
 
 # Fetch origin in the current repo, unless it fetched within the TTL. The network
 # call is capped at $1 seconds: a dead connection must not hang the session.
+# Returns 1 when a fetch ran and did not finish (killed at the cap, offline,
+# refused), so the caller can say its answer is only as fresh as the last fetch.
 fetch_if_stale() {
     local cap=$1 now last fetch_pid ticks=0
 
@@ -486,13 +488,15 @@ fetch_if_stale() {
         sleep 0.25
         ticks=$((ticks + 1))
     done
-    wait "$fetch_pid" 2>/dev/null
+    wait "$fetch_pid" 2>/dev/null || return 1
 
     # Re-point origin/HEAD at the remote's real default branch. This symref
     # is cached at clone time and goes stale silently — a clone made when
     # `develop` was default still claims `develop` years after the repo
     # moved to `main`, which would have us measure against the wrong branch.
+    # Skipped after a failed fetch: it is a second network call, uncapped.
     git remote set-head origin --auto >/dev/null 2>&1
+    return 0
 }
 
 # The branch the current repo is measured against: origin/HEAD, which
@@ -812,6 +816,12 @@ report_pushed_elsewhere() {
     tags="${tags}${tags:+, }branch pushed elsewhere"
 }
 
+# The fetch did not finish: the report stands, but only for the last fetch.
+report_fetch_failed() {
+    fetch_note="Fetch from origin did not finish (timed out after ${max_fetch_seconds}s, or failed); freshness unknown, measured against the last fetch ($1)."
+    tags="${tags}${tags:+, }freshness unknown"
+}
+
 # Fold this repo's findings into one report: the headline (or the consequences'
 # header) with the raise-and-wait instruction, then the notes that ask for no
 # decision. A repo with nothing to say gets one quiet line of context.
@@ -825,6 +835,12 @@ Last fetch: $age.
 Do NOT pull, rebase, or merge on your own initiative. Raise this with the user
 before working in this repo and wait for their decision: bring the branch up to
 date, or deliberately continue on the current base."
+    fi
+
+    if [ -n "$fetch_note" ]; then
+        context="${context}${context:+
+
+}${fetch_note}"
     fi
 
     # A sync that changed nothing anyone has to act on is still recorded, so
@@ -859,16 +875,21 @@ check_repo() {
     git rev-parse --git-dir >/dev/null 2>&1 || return 0
     git remote get-url origin >/dev/null 2>&1 || return 0
 
-    fetch_if_stale "$max_fetch_seconds"
+    # A failed fetch rewrites FETCH_HEAD as well, so its age is taken before.
+    local fetched=1 last_fetch
+    last_fetch=$(newest_fetch_mtime)
+    fetch_if_stale "$max_fetch_seconds" || fetched=""
+    [ -z "$fetched" ] || last_fetch=$(newest_fetch_mtime)
 
     local name age branch upstream base_ref
     name=$(basename "$target")
-    age=$(human_age $(( $(date +%s) - $(newest_fetch_mtime) )))
+    age=$(human_age $(( $(date +%s) - last_fetch )))
     branch=$(git symbolic-ref --short -q HEAD 2>/dev/null || echo "")
     upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo "")
     base_ref=$(resolve_base_ref)
 
     headline=""
+    fetch_note=""
     insights=""
     tags=""
     sync_notes=""
@@ -881,6 +902,7 @@ check_repo() {
 
     # A branch whose upstream is the base already got the behind line.
     [ "$upstream" = "$base_ref" ] || report_pushed_elsewhere "$upstream"
+    [ -n "$fetched" ] || report_fetch_failed "$age"
 
     add_repo_report "$name" "${branch:-(detached HEAD)}" "$age"
 }

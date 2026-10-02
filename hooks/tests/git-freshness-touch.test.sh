@@ -372,6 +372,21 @@ lacks "$out" "Raise this with the user" "no raise-and-wait"
 contains "$out" "fast-forwarded main" "main, checked out nowhere, is fast-forwarded as a ref"
 echo
 
+# ---------------------------------------------------------------------------
+echo "case 14: a fetch that does not finish reports freshness unknown"
+repo=$(fixture offline 0)
+git -C "$repo" remote set-url origin "$root/offline/missing.git"
+age_fetch_head "$repo"
+out=$(run_hook touch "$(read_payload t-offline "$repo/app.php")")
+one_json_line "$out" "failed fetch"
+contains "$out" "Fetch from origin did not finish (timed out after 10s, or failed); freshness unknown" "the fetch line"
+contains "$out" '"systemMessage":"work '"'"'main'"'"': freshness unknown.' "the on-screen tag"
+lacks "$out" "Raise this with the user" "no raise-and-wait without a behind line"
+lacks "$out" "nothing incoming" "not reported as current"
+# A failed fetch rewrites FETCH_HEAD too: the age must be the last good fetch's.
+lacks "$out" "last fetch (just now)" "the age is the last fetch before the failed one"
+echo
+
 echo "----------------------------------------"
 printf '%d passed, %d failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]
