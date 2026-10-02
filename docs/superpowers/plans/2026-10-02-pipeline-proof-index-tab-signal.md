@@ -33,7 +33,8 @@ step).
   in the index's attention order (`proof_index_order()`). `key` is `<repo>/<run>` (the last two directories),
   `revision` an int or `null`, `hash` 12 lowercase hex digits, `row` exactly `proof_render_index_row()`'s output.
   Encoded with `json_encode()`'s default escaping plus `JSON_INVALID_UTF8_SUBSTITUTE` (spec Assumption 13).
-- `status.js` is written to `status.js.tmp` and renamed over `status.js`; `index.html` keeps its plain write.
+- `index.html` and `status.js` are each written to `<file>.tmp` and renamed over the file, so neither a poll nor an
+  empty store's reload loads a half-written file.
 - The poll interval is `30000` ms. The index's `<title>` is `Proofs`, `(<n>) Proofs` with unread runs; its `<h1>`
   stays `Pipeline proof store`.
 - The favicon colours: halted `#dc2626`, ready `#16a34a`, unread `#2563eb`, none an unfilled `#71717a` ring.
@@ -758,8 +759,8 @@ git commit -m "feat(pipeline): the open proof index polls status.js and shows un
   (`Pest.php`), `proof_test_page(array $run = []): string` (`Pest.php`), `proof_write_cli()`, `proof_write_payload()`
   (`ProofWriteTest.php`), `proof_status_cli()`, `proof_fake_gh()` (`ProofStatusTest.php`), `cost_run()`, `cost_call()`,
   `cost_tool_use()`, `cost_tool_result()`, `checks_cli()` (`RunCostTest.php`).
-- Produces: `proof_store_index(string $root): ?string` — writes `{$root}/index.html` then `{$root}/status.js` (via
-  `status.js.tmp` and a rename) from one scan; null, or `cannot write <file>`.
+- Produces: `proof_store_index(string $root): ?string` — writes `{$root}/index.html` then `{$root}/status.js` (each
+  via `<file>.tmp` and a rename) from one scan; null, or `cannot write <file>`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -787,7 +788,7 @@ it('says which store file it cannot write, and leaves no temporary file', functi
     mkdir("{$root}/status.js", 0777, true); // a directory where the file goes: the rename over it fails
 
     expect(proof_store_index($root))->toBe("cannot write {$root}/status.js");
-    expect(file_exists("{$root}/status.js.tmp"))->toBeFalse();
+    expect(glob("{$root}/*.tmp"))->toBe([]);
     expect(is_file("{$root}/index.html"))->toBeTrue();
 
     $missing = sys_get_temp_dir() . '/proof-missing-' . uniqid();
@@ -891,22 +892,24 @@ Add after `proof_store_file()`:
 /**
  * The store index and the `status.js` beside it, rendered from one scan: every write path ends here, so the open
  * index never polls a `status.js` behind the index (`../references/engine.md` §The proof store, *The open index
- * tab*). `status.js` goes through `status.js.tmp` and a rename, so a poll never loads half a file; the index is read
- * only on a load the owner starts. Creates no directory.
+ * tab*). Each file goes through `<file>.tmp` and a rename, so neither a poll nor an empty store's reload loads half a
+ * file. Creates no directory.
  *
  * @return ?string null, or `cannot write <file>`
  */
 function proof_store_index(string $root): ?string
 {
     $runs = proof_scan_runs($root);
-    if (@file_put_contents("{$root}/index.html", proof_render_index($runs)) === false) {
-        return "cannot write {$root}/index.html";
-    }
-    $status = "{$root}/status.js";
-    if (@file_put_contents("{$status}.tmp", proof_render_status_js($runs)) === false || ! @rename("{$status}.tmp", $status)) {
-        @unlink("{$status}.tmp");
+    $files = [
+        "{$root}/index.html" => proof_render_index($runs),
+        "{$root}/status.js" => proof_render_status_js($runs),
+    ];
+    foreach ($files as $file => $contents) {
+        if (@file_put_contents("{$file}.tmp", $contents) === false || ! @rename("{$file}.tmp", $file)) {
+            @unlink("{$file}.tmp");
 
-        return "cannot write {$status}";
+            return "cannot write {$file}";
+        }
     }
 
     return null;
@@ -1364,12 +1367,11 @@ rm "$COPY/stale.html"
 Expected: `1` (the row the stale page did not have, inserted by a poll over `file://`), and `<title>(<n>) Proofs</title>`
 with `n` ≥ 1 (a fresh profile has seen nothing). If the virtual time budget does not reach the 30-second poll, the
 dumped title is still the stale page's: then raise the budget to `90000` once; if it still does not, record that in
-the report and rely on Step 3's `file://` run (or, when the Playwright MCP refuses `file:`, on Steps 4–9 over HTTP).
+the report and rely on Step 3's `file://` run (or, when the Playwright MCP refuses `file:`, on Steps 4–10 over HTTP).
 
-Then the empty store: `E=$(mktemp -d)/_proofs && mkdir -p "$E" && php -r 'require "skills/pipeline/checks/proof_store.php"; proof_store_index($argv[1]);' "$E"`,
-file run 1 into it (`W 1` with `PIPELINE_PROOF_ROOT="$E"`) after copying its `index.html` to `stale.html`, and dump
-`file://$E/stale.html` as above. Expected: the dump holds `<table id="runs">` (the page reloaded itself into the
-table). Remove `$(dirname "$E")` afterwards.
+The empty store's reload is not checked here: a reload loads the same URL, so a copied `stale.html` would reload
+into itself forever, and `--dump-dom` cannot change the file after the page loaded. Step 10 checks it in the
+Playwright session instead.
 
 - [ ] **Step 3: Open the index in the Playwright MCP**
 
@@ -1407,6 +1409,20 @@ definition from Step 3 (a back navigation without the cache reloads the page), p
 Open and come back from run 3's page and run 2's page (as in Step 5), then `W 4`, `S 4 ready`, poll now,
 `() => probe('TabCheck/pr-99004-tab-check-4')` → `title: "(1) Proofs"`, `icon: "ready"`.
 
+- [ ] **Step 6b: Look at the dot in a headed Chrome**
+
+Every other step reads the favicon `<link>`'s `href`; this one looks at the painted tab, the whole signal on a pinned
+tab. Run 3 is still halted, and the owner's browser has never opened it (the seen marks Step 6 set live in the
+Playwright profile), so red wins there whatever else that browser has seen. Open the copy in the owner's browser by
+hand: `php skills/pipeline/checks/proof_cli.php open "$COPY/index.html"`. Then look: `screencapture -x
+"$(dirname "$COPY")/tab.png"` and read the PNG. Expected: the Proofs tab shows a red dot as its icon (not Chrome's
+generic page icon), and `(n) Proofs` as its title. When the screenshot cannot be taken (no screen-recording
+permission) or does not show the tab bar, the dot is unverified.
+
+The implement step's report carries one line on this, either *favicon dot seen red in a headed Chrome tab* or
+*favicon dot not seen: only its `href` was checked*, so an unattended run never claims the tab works when nobody
+looked at the tab. Close that tab before Step 11's cleanup removes the copy.
+
 - [ ] **Step 7: A filter hides the row, not the signal**
 
 Choose a repo other than `TabCheck` in the repo filter (`browser_select_option`) and type `zzzz` in the search, poll
@@ -1430,10 +1446,21 @@ Open a new tab (`browser_tabs` action `new`), so the index is in the background.
 seconds, then `browser_tabs` action `list`: the index tab's title is `(1) Proofs`, without having been selected.
 Select it again.
 
-- [ ] **Step 10: Console and clean up**
+- [ ] **Step 10: An empty store's index reloads itself into the table**
 
-`browser_console_messages`: no error but the one failed `status.js` load from Step 9. Stop the `php -S` server if
-one ran. Remove the temp dir itself: `rm -rf "$(dirname "$COPY")"`. Confirm the live store was not written:
+`E=$(mktemp -d)/_proofs && mkdir -p "$E" && php -r 'require "skills/pipeline/checks/proof_store.php"; var_dump(proof_store_index($argv[1]));' "$E"`
+→ `NULL`. `browser_navigate` to `file://$E/index.html` (or, where Step 3 fell back to HTTP, serve it as well with
+`php -S 127.0.0.1:8155 -t "$E"` in the background and use `http://127.0.0.1:8155/index.html`):
+`() => document.getElementById('runs')` is `null` and the page says *No runs recorded.* Then file run 1 into it
+(`W 1` with `PIPELINE_PROOF_ROOT="$E"` in place of `"$COPY"`), poll now, and `browser_wait_for` 2 seconds more.
+Expected: `() => document.querySelector('#runs tr[data-run="TabCheck/pr-99001-tab-check-1"]') !== null` is `true`
+(the reload fetched the rewritten `index.html` from disk and landed on the table). Remove `$(dirname "$E")`
+afterwards.
+
+- [ ] **Step 11: Console and clean up**
+
+`browser_console_messages`: no error but the one failed `status.js` load from Step 9. Stop the `php -S` servers if
+any ran. Remove the temp dir itself: `rm -rf "$(dirname "$COPY")"`. Confirm the live store was not written:
 `ls ~/GitProjects/_proofs/status.js` → `No such file or directory` (no filing has rendered with the new code before
 the merge), and `ls ~/GitProjects/_proofs/TabCheck` → `No such file or directory`.
 

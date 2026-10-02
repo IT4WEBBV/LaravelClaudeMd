@@ -117,8 +117,9 @@ attribute.
 
 `proof_store_index(string $root): ?string` scans the store once (`proof_scan_runs($root)`), writes
 `{$root}/index.html` (`proof_render_index()`) and then `{$root}/status.js` (`proof_render_status_js()`), and returns
-null, or `cannot write <file>`. `status.js` is written to `status.js.tmp` and renamed over `status.js`, so a poll
-never loads a half-written file; the index keeps its plain write (it is read only on a load the owner starts).
+null, or `cannot write <file>`. Each is written to `<file>.tmp` and renamed over the file, so a poll never loads a
+half-written `status.js`, and an empty store's index, which reloads itself once a run appears, never loads a
+half-written `index.html`.
 
 - `proof_store_file()` calls it after the page; a problem goes to stderr as `proof: <problem>` and the filing stands
   (today the index write is unchecked).
@@ -257,7 +258,10 @@ the markup or the removal does not exist yet.
 **In Chrome over `file://`** (the issue's Verify), on a copy of the real store under `PIPELINE_PROOF_ROOT`: the index
 open in a background tab; a run filed again with `proof_cli.php write` turns the dot blue and the title to `(1)
 Proofs` within a couple of minutes, its row updated in place; opening that run and returning clears both; a run
-never opened that is set `halted` with `proof_cli.php status` shows red, one set `ready` green.
+never opened that is set `halted` with `proof_cli.php status` shows red, one set `ready` green. Every probe above
+reads the favicon `<link>`'s `href`; the painted dot (Assumption 12's repaint, and whether Chrome paints a `data:`
+favicon for a `file://` page at all) is looked at once in a headed Chrome tab, and the run's report says in one line
+whether the dot was seen or only its `href` was checked.
 
 ## Done when
 
@@ -323,11 +327,12 @@ an answer this design did not give:
     match.*; the next reload renders *No runs recorded.* The prune pass never removes a run with an open PR, so this
     is rare, and a reload is the owner's.
 15. **How is the Chrome check run over `file://` when the Playwright MCP refuses `file:` URLs?** The `file://`
-    mechanism (a stale index picking up a newer `status.js`, an empty store's index reloading itself) is proved with
-    headless Chrome over `file://` (`--virtual-time-budget`, `--dump-dom`), as the design's probes were. The
-    interactions (the dot, the count, rows in place, clearing on open, a background tab) run in the Playwright MCP
-    over `file://` when it allows that, else over a local `php -S` server, where the poll is the same script tag and
-    the seen marks live in that origin.
+    mechanism (a stale index picking up a newer `status.js`) is proved with headless Chrome over `file://`
+    (`--virtual-time-budget`, `--dump-dom`), as the design's probes were. An empty store's index reloading itself
+    is not: a reload loads the same URL, and the file must change after the page loaded, so it runs in the
+    Playwright session. The interactions (the dot, the count, rows in place, clearing on open, a background tab, an
+    empty store reloading) run in the Playwright MCP over `file://` when it allows that, else over a local `php -S`
+    server, where the poll is the same script tag and the seen marks live in that origin.
 
 ## Relation to other work
 
