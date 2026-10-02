@@ -313,4 +313,35 @@ ends 3 "teardown: stopped at git pull --ff-only origin main: done: git switch ma
 [ "$(git -C "$SHOP" branch --show-current)" = main ] || fail "the switch to main did not happen"
 git -C "$SHOP" rev-parse --verify -q refs/heads/feature/x >/dev/null || fail "feature/x was deleted"
 
+
+# The callers run the script and carry no copy of its checks or removal; every watch has the tool's
+# maximum timeout and is re-armed; orchestrate still polls every 300 s.
+CASE=docs
+out=""
+REPO="$(cd "$HERE/../../.." && pwd)"
+has() { grep -qF -- "$2" "$REPO/$1" || fail "$1 does not say: $2"; }
+lacks() { ! grep -qF -- "$2" "$REPO/$1" || fail "$1 still says: $2"; }
+COMMANDS=skills/orchestrate/references/commands.md
+has   $COMMANDS 'python3 ~/.claude/skills/orchestrate/teardown.py <worktree> <P> --repo <repo> [--proof <proof>]'
+has   $COMMANDS 'timeout: 7200000'
+has   $COMMANDS 'arm it again'
+lacks $COMMANDS 'status --porcelain'
+lacks $COMMANDS 'worktree.sh remove <N>'
+lacks $COMMANDS 'status <proof> merged'
+lacks $COMMANDS 'outlives its call'
+lacks $COMMANDS 'sleep 60'
+[ "$(grep -c 'do sleep 300; done' "$REPO/$COMMANDS")" -eq 2 ] || fail "$COMMANDS: both watch loops keep sleep 300"
+has   skills/orchestrate/SKILL.md 'teardown.py'
+lacks skills/orchestrate/SKILL.md 'A check fails: ask'
+lacks skills/orchestrate/SKILL.md '`worktree.remove`'
+ENGINE=skills/pipeline/references/engine.md
+has   $ENGINE 'python3 ~/.claude/skills/orchestrate/teardown.py <worktree> <P> --repo <repo>'
+has   $ENGINE 'timeout: 7200000'
+has   $ENGINE '| `Worktree` | `remove` | nothing:'
+lacks $ENGINE 'checks and removal as written there'
+lacks $ENGINE 'A check fails: ask'
+has   skills/slots/SKILL.md 'orchestrate/teardown.py'
+has   skills/slots/SKILL.md 'opened its PR from'
+lacks skills/slots/SKILL.md 'commands.md` §Teardown pass'
+
 echo "PASS teardown.py"

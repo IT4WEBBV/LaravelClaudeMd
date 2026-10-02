@@ -310,7 +310,7 @@ file.
 |---|---|---|---|
 | `Repo` | `repo` | kickoff (the issue lookup, §The work item), the status line, `orchestrate` | required |
 | `Worktree` | `create` | kickoff (§Kickoff), with `<branch>` substituted | required |
-| `Worktree` | `remove` | the teardown after the merge (§After the merge), `orchestrate` | required to tear down |
+| `Worktree` | `remove` | nothing: the teardown recognises the checkout's kind instead (`orchestrate/teardown.py`, §After the merge); accepted so a shared config parses | — |
 | `Branch convention` | `issue` | kickoff: the run's branch and the check that no branch of the issue exists | required for an issue |
 | `Board` | `org`, `number`, `project-id`, `status-field-id`, `in-progress-option-id` | kickoff's claim (§The work item) | all or none |
 | `Board` | `component-field-id`, `component-default` | `handoff` (the PR's Component) | optional |
@@ -518,16 +518,21 @@ A run started by `orchestrate` is covered by its own step 6 — this section is 
 `/pipeline`.
 
 1. **Arm the watch** as the run's report goes out (ready PR or halted-after-`handoff`): one background
-   Bash per PR, exactly `orchestrate`'s §Watch "awaiting merge" loop
-   (`../../orchestrate/references/commands.md`). It polls `gh` every 5 minutes in a shell, so it
-   costs no tokens while it waits; the session wakes once, on the change.
-2. **On `MERGED`**, first mark the page, `php "$CHECKS/proof_cli.php" status <artifacts.proof> merged` (none
-   set: skip), then run `orchestrate`'s §Teardown checks and removal as written there (clean, `HEAD`
-   equals the merged `headRefOid`, no owner, then the repo's declared `worktree.remove`). All hold:
-   **remove without asking**, ahead of `slots`' confirm step. A check fails: ask, quoting the output.
-   A session sitting inside the worktree leaves it first (`ExitWorktree` with `keep`).
-3. **Closed without merge**: `proof_cli.php status <artifacts.proof> closed`, and never torn down. Say so in one
-   line; the owner decides.
+   Bash per PR, exactly `orchestrate`'s §Watch "awaiting merge" loop with its `timeout: 7200000`
+   (`../../orchestrate/references/commands.md`), armed again when it ends without its `PR #<P>` line.
+   It polls `gh` every 5 minutes in a shell, so it costs no tokens while it waits; the session wakes
+   once, on the change.
+2. **On `MERGED`**, a session sitting inside the worktree leaves it first (`ExitWorktree` with `keep`),
+   then, from the primary checkout:
+   ```bash
+   python3 ~/.claude/skills/orchestrate/teardown.py <worktree> <P> --repo <repo>
+   ```
+   It marks `artifacts.proof` `merged`, prints `orchestrate`'s checks (clean, `HEAD` equals the merged
+   `headRefOid`, the PR's branch, no owner) and removes the slot or worktree and its branch only when
+   all hold: **remove without asking**, ahead of `slots`' confirm step. A check fails: it removes
+   nothing; report its last line, no question.
+3. **Closed without merge**: the same call marks the page `closed`, removes nothing and exits 1. Say so
+   in one line; the owner decides.
 
 **The watch dies with the session.** A merge the session never saw — or the owner saying "merged" —
 is handled the same way the next time `/pipeline` runs in that repo: a manifest whose PR is `MERGED`
@@ -932,7 +937,7 @@ command that made it so:
 | `running` | `dispatch_cli.php launch` (on `start`) and `next` (on a dispatch) | a run starts or resumes, so a resumed halt reads Running again |
 | `halted`, with the reason | `dispatch_cli_halt()`: `finish`, `returned`, `brief`'s boundary check, `launch`'s invariant check | the manifest records a halt |
 | `ready` | the session that ran `gh pr ready`: the invoking session in `autoflow` (§The CI gate), the finish step in `interactive` | right after `gh pr ready` succeeded: `proof_cli.php status <page> ready` |
-| `merged`, `closed` | the session holding the merge watch (§After the merge, `orchestrate` step 6) | the watch prints `MERGED` or `CLOSED`, before any teardown |
+| `merged`, `closed` | `orchestrate/teardown.py`, run by the session holding the merge watch (§After the merge, `orchestrate` step 6) | the watch prints `MERGED` or `CLOSED`, before any teardown |
 | any | the prune pass, on `prune` | `gh pr view --json state,isDraft`: merged, closed and an open ready PR are GitHub's to say; an open draft keeps `running` or `halted`, and turns a stale `ready` back into `running`. A run filed before `nameWithOwner` existed is asked about by its `repo` when that holds `owner/name`; a run with neither keeps its stored status |
 
 A command writes to `artifacts.proof` only when the manifest sets it, and never changes its answer or halts over it:
