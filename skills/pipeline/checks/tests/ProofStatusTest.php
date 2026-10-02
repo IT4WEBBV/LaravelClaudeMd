@@ -155,7 +155,7 @@ it('rewrites status.js in the store the page is in when a status is written', fu
     $runs = proof_test_status_runs(file_get_contents("{$root}/status.js"));
     expect($runs)->toHaveCount(1);
     expect($runs[0])->toMatchArray(['key' => 'Deploy/pr-5-logs', 'status' => 'halted', 'revision' => 1]);
-    expect(file_exists("{$root}/status.js.tmp"))->toBeFalse();
+    expect(glob("{$root}/*.tmp"))->toBe([]);
 });
 
 it('prints its count and names on stderr the index it cannot write', function () {

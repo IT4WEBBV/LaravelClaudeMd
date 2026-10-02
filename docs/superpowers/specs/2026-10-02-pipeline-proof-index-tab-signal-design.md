@@ -117,9 +117,9 @@ attribute.
 
 `proof_store_index(string $root): ?string` scans the store once (`proof_scan_runs($root)`), writes
 `{$root}/index.html` (`proof_render_index()`) and then `{$root}/status.js` (`proof_render_status_js()`), and returns
-null, or `cannot write <file>`. Each is written to `<file>.tmp` and renamed over the file, so a poll never loads a
-half-written `status.js`, and an empty store's index, which reloads itself once a run appears, never loads a
-half-written `index.html`.
+null, or `cannot write <file>`. Each is written to `<file>.<pid>.tmp` and renamed over the file, so a poll never loads
+a half-written `status.js`, an empty store's index, which reloads itself once a run appears, never loads a
+half-written `index.html`, and two store writes at once never share a temp file.
 
 - `proof_store_file()` calls it after the page; a problem goes to stderr as `proof: <problem>` and the filing stands
   (today the index write is unchecked).
@@ -245,7 +245,7 @@ the markup or the removal does not exist yet.
   the store the page is in.
 - The prune pass drops a pruned run from `status.js`, and its `gh` correction shows in it.
 - `run_cost_cli.php` filing a cost changes the run's hash in `status.js`.
-- No `status.js.tmp` is left behind.
+- No `*.tmp` is left behind.
 
 **`ProofOpenTest.php`, `DispatchCliTest.php`, `BriefTest.php`**
 - The two `PIPELINE_NO_OPEN` cases go; `PIPELINE_NO_OPEN=1` set while `PIPELINE_OPEN_CMD` points at the recorder

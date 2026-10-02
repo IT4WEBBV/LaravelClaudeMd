@@ -57,8 +57,8 @@ function proof_store_file(array $payload, string $now, callable $rules, array $d
 /**
  * The store index and the `status.js` beside it, rendered from one scan: every write path ends here, so the open
  * index never polls a `status.js` behind the index (`../references/engine.md` §The proof store, *The open index
- * tab*). Each file goes through `<file>.tmp` and a rename, so neither a poll nor an empty store's reload loads half a
- * file. Creates no directory.
+ * tab*). Each file goes through `<file>.<pid>.tmp` and a rename, so neither a poll nor an empty store's reload loads
+ * half a file, and two store writes at once never share a temp file. Creates no directory.
  *
  * @return ?string null, or `cannot write <file>`
  */
@@ -70,8 +70,9 @@ function proof_store_index(string $root): ?string
         "{$root}/status.js" => proof_render_status_js($runs),
     ];
     foreach ($files as $file => $contents) {
-        if (@file_put_contents("{$file}.tmp", $contents) === false || ! @rename("{$file}.tmp", $file)) {
-            @unlink("{$file}.tmp");
+        $temporary = "{$file}." . getmypid() . '.tmp';
+        if (@file_put_contents($temporary, $contents) === false || ! @rename($temporary, $file)) {
+            @unlink($temporary);
 
             return "cannot write {$file}";
         }
