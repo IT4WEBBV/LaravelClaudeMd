@@ -25,15 +25,14 @@
 # even when origin/main has moved underneath it. That is the most common
 # stale-checkout case, and it is invisible to `git status`.
 #
-# What it deliberately does NOT report: the commit count. "639 commits behind
-# origin/main" is a fact with no action attached — it is almost always true and
-# almost never means anything. Measured across a full set of checkouts, most
-# branches that were "behind" had no local commits at all, so there was nothing
-# to protect; and where there was local work, a 639-commit gap came down to five
-# touched files, three of which actually conflicted. This script reports
-# consequences instead: migrations your dev database is missing, lockfiles that
-# moved, files you will have to merge by hand. If none of those apply, it says
-# nothing at all.
+# What it reports: a working branch behind its base gets one line with the
+# count. A checked repo is a repo about to be worked in, and new work on a
+# stale base is the cost, whether or not the branch has commits of its own yet.
+# What makes that line actionable are the consequences under it: migrations
+# your dev database is missing, lockfiles that moved, files you will have to
+# merge by hand. A /pipeline run's own branch gets neither, because the run's
+# code decides when it merges its base. A repo that is current says so in one
+# quiet line of context and nothing on screen.
 #
 # The one thing it changes on its own is the local base branch: main/master is
 # fast-forwarded to match origin so that a branch cut later starts from a current
@@ -734,6 +733,123 @@ check_first_touches() {
     [ -z "$repo_context" ] || emit "$event" "$repo_context" "$repo_summary"
 }
 
+# Is branch $1 a /pipeline run's own branch? Its manifest sits in the worktree at
+# the path manifest_path() in skills/pipeline/checks/manifest.php builds, and the
+# run's own code decides whether a step merges the base (pipeline engine.md
+# §Catching up with the base): telling every step agent to raise it and wait on
+# its first Read would contradict the brief it runs on.
+runs_pipeline() {
+    local toplevel
+
+    toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
+    [ -f "$toplevel/.claude/pipeline/$(printf '%s' "$1" | tr '/' '-').json" ]
+}
+
+# What catching up with base $1 costs the local work: migrations, lockfiles,
+# files to merge by hand. Only work to protect earns it: a branch with no local
+# commits and a clean tree catches up as a plain fast-forward.
+report_consequences() {
+    local base_ref=$1 ahead dirty mb conflicts n_conf shown
+
+    ahead=$(git rev-list --count "$base_ref..HEAD" 2>/dev/null || echo 0)
+    dirty=$(git status --porcelain 2>/dev/null | grep -c . || true)
+    [ "${ahead:-0}" -gt 0 ] || [ "${dirty:-0}" -gt 0 ] || return 0
+
+    mb=$(git merge-base HEAD "$base_ref" 2>/dev/null)
+    [ -n "$mb" ] || return 0
+    classify_incoming "$mb" "$base_ref"
+
+    # No local commits means no divergence, so nothing can conflict.
+    [ "${ahead:-0}" -gt 0 ] || return 0
+    conflicts=$(predict_conflicts "$mb" "$base_ref")
+    n_conf=$(count_lines "$conflicts")
+    [ "${n_conf:-0}" -gt 0 ] || return 0
+
+    shown=$(printf '%s\n' "$conflicts" | head -"$max_listed_files" | sed 's/^/      /')
+    insights="${insights}
+  - catching up would need manual merging in ${n_conf} file(s):
+${shown}"
+    if [ "$n_conf" -gt "$max_listed_files" ]; then
+        insights="${insights}
+      (+$((n_conf - max_listed_files)) more)"
+    fi
+    tags="${tags}${tags:+, }${n_conf} to merge by hand"
+}
+
+# The working branch against base $3, after the base sync. A branch behind it
+# gets the headline with its count, then its consequences; a detached HEAD
+# ($2 empty) names no branch to bring up, so it gets the consequences only; a
+# /pipeline run's own branch gets neither.
+report_behind_base() {
+    local name=$1 branch=$2 base_ref=$3 behind
+
+    [ -n "$base_ref" ] || return 0
+    if [ -n "$branch" ] && runs_pipeline "$branch"; then
+        return 0
+    fi
+
+    behind=$(git rev-list --count "HEAD..$base_ref" 2>/dev/null || echo 0)
+    [ "${behind:-0}" -gt 0 ] || return 0
+
+    if [ -n "$branch" ]; then
+        headline="Stale checkout: $name on '$branch' is $behind commit(s) behind $base_ref."
+        tags="${tags}${tags:+, }$behind behind $base_ref"
+    fi
+    report_consequences "$base_ref"
+}
+
+# Someone pushed to *this* branch: another machine, or another slot, is ahead
+# of this checkout. Always worth knowing and always actionable.
+report_pushed_elsewhere() {
+    local upstream=$1 behind
+
+    [ -n "$upstream" ] || return 0
+    behind=$(git rev-list --count "HEAD..$upstream" 2>/dev/null || echo 0)
+    [ "${behind:-0}" -gt 0 ] || return 0
+
+    insights="${insights}
+  - $upstream has $behind commit(s) not in this checkout — another machine or slot pushed to this branch; pull before continuing"
+    tags="${tags}${tags:+, }branch pushed elsewhere"
+}
+
+# Fold this repo's findings into one report: the headline (or the consequences'
+# header) with the raise-and-wait instruction, then the notes that ask for no
+# decision. A repo with nothing to say gets one quiet line of context.
+add_repo_report() {
+    local name=$1 branch=$2 age=$3 context="" summary=""
+
+    if [ -n "$headline$insights" ]; then
+        context="${headline:-Stale checkout with consequences: $name on '$branch'}${insights}
+Last fetch: $age.
+
+Do NOT pull, rebase, or merge on your own initiative. Raise this with the user
+before working in this repo and wait for their decision: bring the branch up to
+date, or deliberately continue on the current base."
+    fi
+
+    # A sync that changed nothing anyone has to act on is still recorded, so
+    # the reason main moved is never a mystery; it just earns no line on screen.
+    if [ -n "$sync_notes" ]; then
+        context="${context}${context:+
+
+}Base branch sync: $name${sync_notes}"
+    fi
+
+    if [ -z "$context" ]; then
+        add_report "git freshness: $name on '$branch' — nothing incoming that affects this work (fetched $age)." ""
+        return 0
+    fi
+
+    [ -z "$tags" ] || summary="$name '$branch': $tags."
+    if [ -n "$sync_tags" ] && [ -n "$summary" ]; then
+        summary="$summary Also: $sync_tags."
+    elif [ -n "$sync_tags" ]; then
+        summary="$name: $sync_tags."
+    fi
+
+    add_report "$context" "$summary"
+}
+
 # Report on the repo containing $1 into repo_context/repo_summary, which the
 # mode emits. Adds nothing when the path is not a git repo with an origin.
 check_repo() {
@@ -745,113 +861,28 @@ check_repo() {
 
     fetch_if_stale "$max_fetch_seconds"
 
-    local age
-    age=$(( $(date +%s) - $(newest_fetch_mtime) ))
-
-    local branch upstream base_ref
+    local name age branch upstream base_ref
+    name=$(basename "$target")
+    age=$(human_age $(( $(date +%s) - $(newest_fetch_mtime) )))
     branch=$(git symbolic-ref --short -q HEAD 2>/dev/null || echo "")
-    [ -z "$branch" ] && branch="(detached HEAD)"
-
     upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo "")
     base_ref=$(resolve_base_ref)
 
+    headline=""
     insights=""
     tags=""
     sync_notes=""
     sync_tags=""
 
-    # Catch the local base branch up first, so a branch cut later in this
-    # session starts from the right base rather than from wherever main was
-    # left the last time anyone pulled by hand.
+    # Catch the local base branch up first, so the count below, and a branch
+    # cut later in this session, measure against the right base.
     sync_base_branch "$base_ref"
+    report_behind_base "$name" "$branch" "$base_ref"
 
-    # Someone pushed to *this* branch. Always worth knowing and always
-    # actionable — it means another machine, or another slot, is ahead of you.
-    local counts behind_up
-    if [ -n "$upstream" ]; then
-        counts=$(git rev-list --left-right --count "$upstream...HEAD" 2>/dev/null || echo "0 0")
-        behind_up=$(echo "$counts" | awk '{print $1+0}')
-        if [ "$behind_up" -gt 0 ]; then
-            insights="${insights}
-  - $upstream has $behind_up commit(s) not in this checkout — another machine or slot pushed to this branch; pull before continuing"
-            tags="${tags}${tags:+, }branch pushed elsewhere"
-        fi
-    fi
+    # A branch whose upstream is the base already got the behind line.
+    [ "$upstream" = "$base_ref" ] || report_pushed_elsewhere "$upstream"
 
-    # The base branch has moved. Only speak if there is local work to protect: a
-    # branch with no local commits and a clean tree catches up as a risk-free
-    # fast-forward, and announcing that is precisely the noise this replaces.
-    local behind_base ahead_base dirty mb conflicts n_conf shown
-    if [ -n "$base_ref" ] && [ "$upstream" != "$base_ref" ]; then
-        behind_base=$(git rev-list --count "HEAD..$base_ref" 2>/dev/null || echo 0)
-        ahead_base=$(git rev-list --count "$base_ref..HEAD" 2>/dev/null || echo 0)
-        dirty=$(git status --porcelain 2>/dev/null | grep -c . || true)
-
-        if [ "$behind_base" -gt 0 ] && { [ "$ahead_base" -gt 0 ] || [ "${dirty:-0}" -gt 0 ]; }; then
-            mb=$(git merge-base HEAD "$base_ref" 2>/dev/null)
-
-            if [ -n "$mb" ]; then
-                classify_incoming "$mb" "$base_ref"
-
-                # No local commits means no divergence, so nothing can conflict.
-                if [ "$ahead_base" -gt 0 ]; then
-                    conflicts=$(predict_conflicts "$mb" "$base_ref")
-                    n_conf=$(count_lines "$conflicts")
-                    if [ "${n_conf:-0}" -gt 0 ]; then
-                        shown=$(printf '%s\n' "$conflicts" | head -"$max_listed_files" | sed 's/^/      /')
-                        insights="${insights}
-  - catching up would need manual merging in ${n_conf} file(s):
-${shown}"
-                        if [ "$n_conf" -gt "$max_listed_files" ]; then
-                            insights="${insights}
-      (+$((n_conf - max_listed_files)) more)"
-                        fi
-                        tags="${tags}${tags:+, }${n_conf} to merge by hand"
-                    fi
-                fi
-            fi
-        fi
-    fi
-
-    # Nothing with a consequence attached: stay silent. This is the common case,
-    # and keeping it silent is the entire point of the rewrite.
-    if [ -z "$insights" ] && [ -z "$sync_notes" ]; then
-        add_report \
-            "git freshness: $(basename "$target") on '$branch' — nothing incoming that affects this work (fetched $(human_age "$age"))." \
-            ""
-        return 0
-    fi
-
-    local context="" summary=""
-
-    if [ -n "$insights" ]; then
-        context="Stale checkout with consequences: $(basename "$target") on '$branch'${insights}
-Last fetch: $(human_age "$age").
-
-Do NOT pull, rebase, or merge on your own initiative. Raise this with the user
-before starting work and let them decide whether to bring the branch up to date
-or deliberately continue on the current base."
-        summary="$(basename "$target") '$branch': ${tags} — incoming from ${base_ref:-origin}."
-    fi
-
-    # A sync that changed nothing anyone has to act on still gets recorded in
-    # the context, so the reason main moved is never a mystery — it just does
-    # not earn a line on screen.
-    if [ -n "$sync_notes" ]; then
-        context="${context}${context:+
-
-}Base branch sync: $(basename "$target")${sync_notes}"
-    fi
-
-    if [ -n "$sync_tags" ]; then
-        if [ -n "$summary" ]; then
-            summary="${summary} Also: ${sync_tags}."
-        else
-            summary="$(basename "$target"): ${sync_tags}."
-        fi
-    fi
-
-    add_report "$context" "$summary"
+    add_repo_report "$name" "${branch:-(detached HEAD)}" "$age"
 }
 
 # Sourcing this file with GIT_FRESHNESS_LIB=1 defines the functions above

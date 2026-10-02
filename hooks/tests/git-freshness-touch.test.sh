@@ -304,6 +304,74 @@ contains "$out" "bashtwo" "the named repo is checked"
 lacks "$out" "bashone" "the cwd repo is not checked when the command names a directory"
 echo
 
+# ---------------------------------------------------------------------------
+echo "case 9: a behind feature branch is reported once"
+repo=$(fixture behind 2)
+git -C "$repo" checkout -q -b feature
+echo mine > "$repo/local.php"
+git -C "$repo" add local.php
+git -C "$repo" commit -qm "local work"
+first=$(run_hook touch "$(read_payload t-behind "$repo/local.php")")
+second=$(run_hook touch "$(tool_payload t-behind Grep "$repo" '{"pattern":"x"}')")
+one_json_line "$first" "behind branch"
+contains "$first" "Stale checkout: work on 'feature' is 2 commit(s) behind origin/main." "the working-branch line"
+contains "$first" "Raise this with the user" "the raise-and-wait instruction"
+contains "$first" '"systemMessage":"work '"'"'feature'"'"': 2 behind origin/main.' "the on-screen line"
+lacks "$first" "to merge by hand" "no conflict when no shared file moved"
+is "$second" "" "a later touch stays silent"
+echo
+
+# ---------------------------------------------------------------------------
+echo "case 10: a dirty main is left alone and still reported behind"
+repo=$(fixture dirtymain 2)
+echo "work in progress" >> "$repo/app.php"
+before_sum=$(checksum "$repo/app.php")
+before_main=$(git -C "$repo" rev-parse main)
+out=$(run_hook touch "$(read_payload t-dirty "$repo/app.php")")
+is "$(git -C "$repo" rev-parse main)" "$before_main" "main did not move"
+is "$(checksum "$repo/app.php")" "$before_sum" "the uncommitted change is kept byte for byte"
+contains "$out" "uncommitted" "the sync note says why main was left alone"
+contains "$out" "work on 'main' is 2 commit(s) behind origin/main" "and main is reported behind"
+echo
+
+# ---------------------------------------------------------------------------
+echo "case 11: a main with local commits, tracking origin/main, behind"
+repo=$(fixture localmain 2 composer.lock)
+echo "mine" >> "$repo/app.php"
+git -C "$repo" commit -qam "local work on main"
+out=$(run_hook touch "$(read_payload t-localmain "$repo/app.php")")
+contains "$out" "work on 'main' is 2 commit(s) behind origin/main" "the working-branch line"
+contains "$out" "local commit(s)" "the sync note: not a fast-forward"
+contains "$out" "composer.lock moved" "the consequences are reported"
+contains "$out" "to merge by hand" "the conflict on app.php is predicted"
+lacks "$out" "pushed to this branch" "no second line saying the same thing"
+echo
+
+# ---------------------------------------------------------------------------
+echo "case 12: a /pipeline run's own branch gets no raise-and-wait"
+repo=$(fixture piperun 2)
+git -C "$repo" checkout -q -b run/feature
+mkdir -p "$repo/.claude/pipeline"
+echo '{}' > "$repo/.claude/pipeline/run-feature.json"
+out=$(run_hook touch "$(read_payload t-pipe "$repo/app.php")")
+lacks "$out" "commit(s) behind" "no working-branch line"
+lacks "$out" "Raise this with the user" "no raise-and-wait"
+contains "$out" "fast-forwarded main" "the base sync still reports"
+rm "$repo/.claude/pipeline/run-feature.json"
+out=$(run_hook touch "$(read_payload t-pipe-control "$repo/app.php")")
+contains "$out" "work on 'run/feature' is 2 commit(s) behind origin/main" "without its manifest the same branch is reported"
+echo
+
+# ---------------------------------------------------------------------------
+echo "case 13: a detached HEAD names no branch to bring up"
+repo=$(fixture detached 2)
+git -C "$repo" checkout -q --detach HEAD
+out=$(run_hook touch "$(read_payload t-detached "$repo/app.php")")
+lacks "$out" "commit(s) behind" "no working-branch line"
+lacks "$out" "Raise this with the user" "no raise-and-wait"
+contains "$out" "fast-forwarded main" "main, checked out nowhere, is fast-forwarded as a ref"
+echo
+
 echo "----------------------------------------"
 printf '%d passed, %d failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]
