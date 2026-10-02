@@ -119,6 +119,25 @@ it('never prunes on unusable timestamps', function () {
     expect(proof_should_prune(['updatedAt' => '2026-08-01T12:00:00+00:00'], 'nonsense'))->toBeFalse();
 });
 
+it('names the repo a run\'s PR lives in by its nameWithOwner, else by an old-scheme owner/name repo', function (array $run, ?string $nameWithOwner) {
+    expect(proof_run_name_with_owner($run))->toBe($nameWithOwner);
+})->with([
+    'today\'s scheme' => [['nameWithOwner' => 'IT4WEBBV/Deploy', 'repo' => 'Deploy'], 'IT4WEBBV/Deploy'],
+    'nameWithOwner wins over an owner/name repo' => [['nameWithOwner' => 'IT4WEBBV/Deploy', 'repo' => 'acme/Other'], 'IT4WEBBV/Deploy'],
+    'the old scheme' => [['repo' => 'IT4WEBBV/Deploy'], 'IT4WEBBV/Deploy'],
+    'a null nameWithOwner' => [['nameWithOwner' => null, 'repo' => 'IT4WEBBV/Deploy'], 'IT4WEBBV/Deploy'],
+    'a blank nameWithOwner' => [['nameWithOwner' => '  ', 'repo' => 'IT4WEBBV/Deploy'], 'IT4WEBBV/Deploy'],
+    'whitespace around the old-scheme repo' => [['repo' => ' IT4WEBBV/Deploy '], 'IT4WEBBV/Deploy'],
+    'dots, dashes and underscores' => [['repo' => 'it4web-bv/Laravel_Claude.md'], 'it4web-bv/Laravel_Claude.md'],
+    'a bare repo' => [['repo' => 'Deploy'], null],
+    'two slashes' => [['repo' => 'IT4WEBBV/Deploy/extra'], null],
+    'no owner' => [['repo' => '/Deploy'], null],
+    'no name' => [['repo' => 'IT4WEBBV/'], null],
+    'a character GitHub rejects' => [['repo' => 'IT4WEBBV/Deploy;rm'], null],
+    'whitespace inside' => [['repo' => 'IT4WEBBV/My Deploy'], null],
+    'neither key' => [[], null],
+]);
+
 it('tells the finished statuses from the open ones', function () {
     expect(array_map(fn (ProofRunStatus $status) => $status->finished(), ProofRunStatus::cases()))->toBe([false, false, false, true, true]);
 });
