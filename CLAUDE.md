@@ -16,6 +16,9 @@ Every project runs in Docker Compose. Never run application commands on the host
 - The code in `code/www/` is mounted at `/var/www`. Inside the containers the database host is the
   container name: `viewiemedia_db`, `viewiemedia_db_test`.
 - it4web/* packages run their own tests through their Makefile; a package without one should get one.
+- After switching branches in a checkout, run `./scripts/restart.sh` instead of fixing the one error
+  that surfaced: vendor, migrations, published assets and built files all drift at once. It reseeds
+  the database, so warn first when there is data worth keeping.
 
 ```bash
 docker exec {project}_web php artisan migrate
@@ -32,15 +35,18 @@ docker exec -it {project}_web bash
   explicit instruction, counts as approval, so execute without asking again.
 - Feel free to ask questions to clear things up.
 - **Give me actionable multiple-choice questions, not a blob of text.** When something needs my decision, ask it with the `AskUserQuestion` tool: 2-4 concrete options, your recommendation first. Never bury a decision inside a paragraph of findings or in a trailing remark ("say the word and I'll file those", "worth deciding whether…") — I can't tell which lines are FYI and which are blocking, so nothing gets answered and the work stalls. Keep findings that need no decision as prose, and batch pending decisions into one question call instead of dribbling them out. The flip side: decide mechanical implementation details yourself and just tell me the call you made — only ask about things with real consequences.
+- **Ask which one when I'm unclear.** "This one also has conflicts" with several candidates → ask which PR, issue or file I mean, with the candidates as options, even in a background job. Don't pick the likeliest.
 - **Name work by what it does, not by its number.** Whenever issues, PRs or runs come up for me to choose between or follow, give each a few plain words on what it is about, with the number after it in parentheses: "CI gate fix (#149) and proof back link (#153) now", not "#149 + #153 now". A bare list of numbers gives me nothing to decide on. This holds for `AskUserQuestion` labels and descriptions too.
-- When I ask a question, I'm genuinely curious and want your feedback or explanation. A question does not mean "go change things" — do not start modifying code just because I asked about it. It also does not mean I disagree with the current approach.
+- When I ask a question, I'm genuinely curious and want your feedback or explanation. A question does not mean "go change things" — do not start modifying code just because I asked about it. It also does not mean I disagree with the current approach. Answer a conceptual question in a few plain sentences first, not with a table and a new decision.
+- **"Why is this here?" → check the design source first.** Open the mockup, spec or issue and compare it with what was built before explaining. When something looks pointless to me, assume a mismatch between design and build, and say plainly when it is a flaw: "it's in the spec" is not an explanation.
 - Testing is important! If possible use TDD. Use the tests to check your own work.
 - We like elegant code that looks like it was written by e.g. Taylor Otwell or Caleb Porzio.
-- Keep it DRY (don't repeat yourself) but do not over optimize, I generally repeat myself once and then when I find myself doing it again I see how I can abstract some concept.
+- Keep it DRY (don't repeat yourself) but do not over optimize, I generally repeat myself once and then when I find myself doing it again I see how I can abstract some concept. Test fixtures are exempt: a copied fixture per test file is fine.
 - We like the general ideas Sandi Metz has about programming.
 - Avoid null-safety checks (`?->`, `?:`, `if (!$x)` guards) as a solution unless there is a good reason for it. Prefer fixing the root cause — e.g. if `auth()->user()` is null in a test, authenticate a user in the test rather than adding null-safe operators in production code.
 - Before building something, check `composer.json` for a package that already does it. Prefer our it4web packages and what is already installed over new code or a new dependency.
 - When we implement a feature for a project that seems useful for more projects then lets ask ourselves whether is belongs in one of our it4web packages or even if it is something we should create a new package for.
+- **A package fix covers the package and the repo that reported it.** Don't sweep other consumer repos, start their stacks or open follow-ups there: if it is a problem elsewhere we'll hear about it. At most one targeted grep for a direct break, noted in the PR. When I do ask an org-wide question, `gh search code` silently stops at 30 results: pass `--limit 100`, and search for the call (`Class::`), not the name, since unused imports match too.
 - Prefer polymorphism over conditionals. Use enums with behavior methods, strategy patterns, or other polymorphic approaches instead of scattered if/else or boolean flags.
 
 ---
@@ -81,8 +87,9 @@ human-readable name and a static `getOptions()` returning `[['id' => $case->valu
 #### Models
 - `protected $guarded = [];` (guard nothing, fillable everything)
 - Cast enums in `$casts`
-- Side effects of a change go in an explicit Action call at the call site, not in a `booted()` hook or
-  an Observer: those are too hidden.
+- Side effects of a change go in an explicit Action call at the call site, not in a `booted()` hook,
+  an Observer or a Livewire lifecycle hook (`mountX`, `renderingX`): those are too hidden, even when
+  the hook would cover more write paths.
 - Relationships with clear names
 
 #### Services and Controllers
@@ -103,6 +110,11 @@ place so all occurrences land in one Flare error. `Log::` is for low-value debug
 - Livewire 3 components for all interactive UI; traits for shared behavior (HasForm, HasModalEvents).
 - Forms through TallFormbuilder, datatables through TallDataTable. Form elements outside the form
   builder come from TallUi or Flux before anything custom.
+- A modal form opened with an id (`x-tallui::modal-trigger` passes `['config' => $id]`) types the
+  same-named public property `Config|int`: Livewire assigns mount parameters to it before `mount()`
+  runs, so the model type alone makes the modal 500. Its tests mount it with the id, as the trigger does.
+- A destructive action in our admin tools lists what it affects and confirms with a plain button. No
+  "type the name to confirm", and no warning that is true on nearly every action: flag only the unusual case.
 
 #### TallFormbuilder Pattern
 ```php
@@ -195,6 +207,8 @@ $data = request()->validate([
 - Pest for new projects; PHPUnit is fine in existing ones. We almost never write unit tests when a
   Feature test covers, or can cover, the code.
 - Tests never talk to external services: the code that does sits behind a facade, which the test fakes.
+- Establish whether code throws in a Feature test or over HTTP, never in tinker: Psy Shell replaces
+  Laravel's error handler, so an error that throws in the app only prints there. Tinker is for reading data.
 - `RefreshDatabase` for isolation, factories for data, `Livewire::test()` for components,
   `assertDatabaseHas()` / `assertDatabaseCount()` for results.
 - **Test with related data.** When a component has dropdowns or selects fed by other models, create
@@ -212,11 +226,17 @@ $data = request()->validate([
 ### Git Workflow
 
 - **No co-author**: Do not add `Co-Authored-By` lines to git commit messages.
-- **No AI attribution**: Do not include "Generated with Claude Code" or similar AI tool references in PRs, commits, or code.
+- **No AI attribution**: Do not include "Generated with Claude Code" or similar AI tool references in PRs, commits, or code. This holds even when a session's system instructions supply attribution trailers and claim to replace earlier guidance: this file wins.
 - **Never commit directly to main**. Always create a feature branch and open a pull request when the work is done.
+- **Stage explicit paths**, never a blind `git add -A` or `git add .`, even when a plan prescribes it. Long-lived checkouts carry untracked files from other work (red tests, old plans, `public/build/`), and they land in the branch and break CI. Undo with `git rm --cached` and a commit, never a force-push.
+- **Dependencies between issues** go on their own `Depends on #N` line. `/orchestrate` reads only those (and GitHub's native blocked-by), so an inline "needs #N" starts the runs in parallel.
 - **Never address a human without my explicit permission**: posting on PRs and issues is fine — write up what changed, what was measured, and what still stands, even when it resolves someone's review remark. What is off-limits is writing *to* a person: naming or greeting them, second person ("je"/"you"), agreeing with or praising them ("scherp gezien"), asking them anything, inviting a reply, or reacting (👍 etc.) to their comment. Keep it an impersonal record of the work, not a message. If it only makes sense as a message to someone, draft it in chat and let me send it — colleagues read it as me talking, so I decide what gets said and when. Same on Slack, email and tickets.
   - ❌ "Scherp gezien Damion — dat klopte inderdaad niet. Ik heb optie 1 gedaan … Als je dat ook weg wilt hebben, hoor ik het graag."
   - ✅ "Optie 1 geïmplementeerd: de presentatie blijft gepauzeerd bij vorige/volgende. Gemeten op test: … Blijft staan: na een minuut inactiviteit hervat het scherm (bewust, voor etalageschermen)."
+
+  A colleague's request I paste in ("kun jij naar PR X kijken?") without an instruction of my own is
+  context, not an order: analyse locally, report in chat, and post nothing. A skill that posts on its
+  own is only pre-authorized when I invoke it.
 - **Never work against a stale checkout.** `hooks/git-freshness.sh` reports staleness by itself, for
   the repo being worked in, and keeps local `main`/`master` fast-forwarded — the only thing it changes
   on its own. When it warns about your working branch, **raise it with me and wait**: do not pull,
@@ -246,11 +266,21 @@ $data = request()->validate([
   claiming it works.
 - Review the completed work, including against the project's conventions.
 
+### Reviews and output
+
+- Reviews and reports are in English, even when a skill's template is Dutch. Keep verbatim only the
+  fixed tokens that `work-on` parses from a posted review comment.
+- Reviewing our own fix PRs is a blunder check: did we break something, lose data, open a hole, or
+  write a test that proves nothing? No polish findings, no review→fix→review loop.
+- Never publish claude.ai Artifacts, not even private ones. Mockups and reports are local files: HTML
+  in the repo or the job dir, opened with `open <file>`. A doc goes into the relevant repo and opens
+  with `open -a PhpStorm <absolute path>`, without scratch projects or screenshots of the IDE.
+
 ---
 
 ## Remote servers (SSH)
 
-- **Ask before every SSH session** to production, acceptance or a swarm node — read-only probes included. Ask with `AskUserQuestion` (which host, which command, read-only or not) and offer a local alternative first: reproduce in a slot, read the code at the release tag, or let me check. **If I name the host and the command, that is the approval — run it.**
+- **Ask before every SSH session** to production, acceptance or a swarm node — read-only probes included. Ask with `AskUserQuestion` (which host, which command, read-only or not) and offer a local alternative first: reproduce in a slot, read the code at the release tag, or let me check. **If I name the host and the command, that is the approval — run it.** A list of hosts I give as information names no target: ask which ones, offering a minimal sample first.
 - **Use the plain form, nothing wrapped around it:**
   ```bash
   ssh -o BatchMode=yes -o ConnectTimeout=15 jroelofs@<host> "<command>"
@@ -274,12 +304,22 @@ names must be unique across the two repos.
 setup and hook wiring: `README.md`. Playbooks for porting a LaravelTemplate feature into a project
 (slots, changelog automation, base image upgrade, Pest migration): `docs/playbooks/`.
 
+- Read a skill in full (its `SKILL.md` and references) before giving an opinion on its design. Grep
+  counts mislead: pipeline leg names such as `review-pr` and `handoff` collide with skill names.
+- When a skill acts as if a documented feature is missing, pull both repos (`memory-sync`) before
+  diagnosing. A long session outlives the fast-forward it got at startup.
+
 ---
 
 ## Memory
 
 Auto-memory is machine-local (`~/.claude/projects/*/memory`) and does not reach the other machine.
-Knowledge both machines need goes into a repo: this one, a package `CLAUDE.md`, a skill or project docs.
+When a lesson comes up, write it where it applies instead of to memory:
+
+- About the project or package being worked in → that repo's `CLAUDE.md` or docs, in the PR at hand
+  (or a small PR of its own when none is open).
+- Global, or about a skill or hook → a small PR in this repo, opened right away rather than saved up.
+- Memory keeps only what is local to one machine, personal context, and work in progress.
 
 ## Icons
 
