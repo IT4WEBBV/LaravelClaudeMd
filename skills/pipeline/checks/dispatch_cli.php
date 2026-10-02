@@ -466,8 +466,9 @@ function dispatch_cli_ui(string $diffPath): ?string
 
 /**
  * The CI gate's reads (`../references/engine.md` §The CI gate): the worktree's `HEAD`, then the PR's head
- * commit and its checks in one gh call, the merges since the last completed review in an `autoflow` run,
- * and what the session does next. It never writes the manifest, so polling it changes nothing.
+ * commit, its mergeability and its checks in one gh call, the merges since the last completed review in an
+ * `autoflow` run, and what the session does next. It never writes the manifest, so polling it changes
+ * nothing.
  */
 function dispatch_cli_ci(string $manifestPath, int $poll): array
 {
@@ -491,7 +492,7 @@ function dispatch_cli_ci(string $manifestPath, int $poll): array
 
     return pipeline_ci_answer(
         $manifest,
-        dispatch_cli_pr_view($worktree, $pr, 'headRefOid,statusCheckRollup'),
+        dispatch_cli_pr_view($worktree, $pr, 'headRefOid,mergeable,statusCheckRollup'),
         $head,
         glob("{$worktree}/.github/workflows/*.y*ml") !== [],
         $poll,

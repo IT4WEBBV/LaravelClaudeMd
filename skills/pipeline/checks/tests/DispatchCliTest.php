@@ -794,9 +794,9 @@ function ci_gate(array $fixture, array $arguments = []): array
     return dispatch_cli(['ci', $fixture['manifest'], ...$arguments], $fixture['env']);
 }
 
-function ci_head(string $conclusion): array
+function ci_head(string $conclusion, string $mergeable = 'MERGEABLE'): array
 {
-    return ['headRefOid' => 'abc123', 'statusCheckRollup' => [['__typename' => 'CheckRun', 'name' => 'ci', 'workflowName' => 'CI', 'status' => 'COMPLETED', 'conclusion' => $conclusion, 'detailsUrl' => 'https://github.com/acme/app/actions/runs/11/job/12']]];
+    return ['headRefOid' => 'abc123', 'mergeable' => $mergeable, 'statusCheckRollup' => [['__typename' => 'CheckRun', 'name' => 'ci', 'workflowName' => 'CI', 'status' => 'COMPLETED', 'conclusion' => $conclusion, 'detailsUrl' => 'https://github.com/acme/app/actions/runs/11/job/12']]];
 }
 
 it('gates the PR\'s head commit with one gh read, and never writes the manifest', function () {
@@ -807,7 +807,7 @@ it('gates the PR\'s head commit with one gh read, and never writes the manifest'
 
     expect($result['code'])->toBe(0);
     expect($result['json'])->toBe(['action' => 'ready', 'verdict' => 'green', 'sha' => 'abc123']);
-    expect(file($fixture['dir'] . '/calls', FILE_IGNORE_NEW_LINES))->toBe(['pr view 7 --json headRefOid,statusCheckRollup']);
+    expect(file($fixture['dir'] . '/calls', FILE_IGNORE_NEW_LINES))->toBe(['pr view 7 --json headRefOid,mergeable,statusCheckRollup']);
     expect(file_get_contents($fixture['manifest']))->toBe($before);
 });
 
@@ -829,7 +829,7 @@ it('answers a red head with a fix round the first time, and with a halt finish r
 });
 
 it('waits on no checks while the worktree has workflows, and answers ready at once without them', function () {
-    $none = ['headRefOid' => 'abc123', 'statusCheckRollup' => []];
+    $none = ['headRefOid' => 'abc123', 'mergeable' => 'MERGEABLE', 'statusCheckRollup' => []];
 
     expect(ci_gate(ci_fixture($none))['json'])->toBe(['action' => 'wait', 'verdict' => 'none', 'sha' => 'abc123']);
     expect(ci_gate(ci_fixture($none), ['--poll', '3'])['json'])->toBe(['action' => 'ready', 'verdict' => 'none', 'sha' => 'abc123']);
@@ -839,6 +839,30 @@ it('waits on no checks while the worktree has workflows, and answers ready at on
 it('waits while gh cannot read the PR, and halts at the last read', function () {
     expect(ci_gate(ci_fixture(null))['json'])->toBe(['action' => 'wait', 'verdict' => 'unreadable']);
     expect(ci_gate(ci_fixture(null), ['--poll', '120'])['json'])->toMatchArray(['action' => 'halt', 'leg' => 'review-pr']);
+});
+
+it('answers the issue\'s three through the CLI: a conflicting PR fix, an unknown one wait, a clean one ready (#149)', function () {
+    $view = fn (string $mergeable) => ['headRefOid' => 'abc123', 'mergeable' => $mergeable, 'statusCheckRollup' => []];
+    $decision = "Conflict with the base on the PR's head commit abc123: GitHub reports PR #7 CONFLICTING with its base; review-pr's resolve step merges the base (engine.md §Catching up with the base)";
+    $conflicting = ci_fixture($view('CONFLICTING'), false);
+    $before = file_get_contents($conflicting['manifest']);
+
+    expect(ci_gate($conflicting)['json'])->toBe(['action' => 'fix', 'verdict' => 'conflicting', 'sha' => 'abc123', 'decision' => $decision]);
+    expect(file_get_contents($conflicting['manifest']))->toBe($before);
+    expect(ci_gate(ci_fixture($view('UNKNOWN'), false))['json'])->toBe(['action' => 'wait', 'verdict' => 'unknown', 'sha' => 'abc123']);
+    expect(ci_gate(ci_fixture($view('MERGEABLE'), false))['json'])->toBe(['action' => 'ready', 'verdict' => 'none', 'sha' => 'abc123']);
+});
+
+it('halts a conflict once the conflict round is spent, and finish records it on review-pr (#149)', function () {
+    $decision = "Conflict with the base on the PR's head commit abc123: GitHub reports PR #7 CONFLICTING with its base; review-pr's resolve step merges the base (engine.md §Catching up with the base)";
+    $reason = 'PR #7 conflicts with its base again after the conflict round, on abc123: merge the base into the branch (engine.md §Catching up with the base), push, and run the CI gate again';
+    $spent = ci_fixture(ci_head('SUCCESS', 'CONFLICTING'), true, [$decision]);
+
+    $halt = ci_gate($spent)['stdout'];
+    expect(json_decode($halt, true))->toBe(['action' => 'halt', 'leg' => 'review-pr', 'reason' => $reason, 'verdict' => 'conflicting', 'sha' => 'abc123']);
+
+    dispatch_cli(['finish', $spent['manifest'], trim($halt)]);
+    expect(manifest_read($spent['manifest'])['cursor'])->toBe(['leg' => 'review-pr', 'status' => 'halted', 'reason' => $reason]);
 });
 
 it('gates an interactive run as well, since its finish step runs the same loop', function () {

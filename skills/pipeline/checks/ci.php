@@ -17,6 +17,9 @@ const PIPELINE_CI_RED = "CI red on the PR's head commit ";
 /** How the gate's unreviewed-merge record starts in `decisions`; one such decision is the run's merge round spent. */
 const PIPELINE_MERGE_UNREVIEWED = "Unreviewed merge on the PR's head commit ";
 
+/** How the gate's conflict record starts in `decisions`; one such decision is the run's conflict round spent. */
+const PIPELINE_CONFLICT = "Conflict with the base on the PR's head commit ";
+
 /**
  * One `statusCheckRollup` item: a check run is pending until it completes, then green on success,
  * neutral or skipped; a commit status is green on success and pending while pending or expected.
@@ -76,11 +79,12 @@ function pipeline_ci_verdict(array $rollup): array
 /**
  * What the session does next: `wait` and read again, `ready` (`gh pr ready`), `fix` (the decision into
  * `decisions` through `launch --from review-pr --decision`), or `halt` (`finish`'s input). `$view` is
- * `gh pr view <pr> --json headRefOid,statusCheckRollup`, null when gh could not read it; `$head` the
- * worktree's `HEAD`, which GitHub's head must be before its checks count; `$workflows` whether the
- * worktree has GitHub Actions workflows; `$poll` this read's number, from 1; `$unreviewed` the files where
- * a merge since the last completed review met the branch's changes, which get one review round before
- * the PR or its checks are read.
+ * `gh pr view <pr> --json headRefOid,mergeable,statusCheckRollup`, null when gh could not read it; `$head`
+ * the worktree's `HEAD`, which GitHub's head must be before its mergeability or checks count; `$workflows`
+ * whether the worktree has GitHub Actions workflows; `$poll` this read's number, from 1; `$unreviewed` the
+ * files where a merge since the last completed review met the branch's changes, which get one review round
+ * before the PR or its checks are read. A PR that conflicts with its base, or whose mergeability GitHub has
+ * not worked out, is answered before its checks: GitHub runs no CI on a conflicting PR's merge ref.
  */
 function pipeline_ci_answer(array $manifest, ?array $view, string $head, bool $workflows, int $poll, array $unreviewed = []): array
 {
@@ -95,6 +99,12 @@ function pipeline_ci_answer(array $manifest, ?array $view, string $head, bool $w
     }
     if ($view['headRefOid'] !== $head) {
         return pipeline_ci_mismatch($manifest, $view['headRefOid'], $head, $poll);
+    }
+    if ($view['mergeable'] === 'UNKNOWN') {
+        return pipeline_ci_unknown($manifest, $view['headRefOid'], $last);
+    }
+    if ($view['mergeable'] === 'CONFLICTING') {
+        return pipeline_ci_conflict($manifest, ['verdict' => 'conflicting', 'sha' => $view['headRefOid']]);
     }
     $ci = pipeline_ci_verdict($view['statusCheckRollup']);
     $read = ['verdict' => $ci['verdict'], 'sha' => $view['headRefOid']];
@@ -129,6 +139,26 @@ function pipeline_ci_red(array $manifest, array $read): array
         : pipeline_ci_halt("CI red again after the fix round, on {$read['sha']}: {$failures}", $read);
 }
 
+/** GitHub works mergeability out lazily, after a push or `gh pr ready`: waited for, a halt at the hour. */
+function pipeline_ci_unknown(array $manifest, string $sha, bool $last): array
+{
+    $read = ['verdict' => 'unknown', 'sha' => $sha];
+
+    return $last
+        ? pipeline_ci_halt("GitHub had not worked out whether PR #{$manifest['artifacts']['pr']} merges into its base after an hour, on {$sha}", $read)
+        : ['action' => 'wait', ...$read];
+}
+
+/** The first conflict with the base of a run is its conflict round, where review-pr's resolve step merges the base; a conflict after it halts. */
+function pipeline_ci_conflict(array $manifest, array $read): array
+{
+    $pr = $manifest['artifacts']['pr'];
+
+    return pipeline_conflict_rounds($manifest) === 0
+        ? ['action' => 'fix', ...$read, 'decision' => PIPELINE_CONFLICT . "{$read['sha']}: GitHub reports PR #{$pr} CONFLICTING with its base; review-pr's resolve step merges the base (engine.md §Catching up with the base)"]
+        : pipeline_ci_halt("PR #{$pr} conflicts with its base again after the conflict round, on {$read['sha']}: merge the base into the branch (engine.md §Catching up with the base), push, and run the CI gate again", $read);
+}
+
 /** A gate halt names `review-pr`, so `finish` records it there as it stands. */
 function pipeline_ci_halt(string $reason, array $read): array
 {
@@ -156,6 +186,12 @@ function pipeline_ci_rounds(array $manifest): int
 function pipeline_merge_rounds(array $manifest): int
 {
     return pipeline_decisions_starting($manifest, PIPELINE_MERGE_UNREVIEWED);
+}
+
+/** The conflict rounds this run has had: the decisions the gate's conflict record starts. */
+function pipeline_conflict_rounds(array $manifest): int
+{
+    return pipeline_decisions_starting($manifest, PIPELINE_CONFLICT);
 }
 
 function pipeline_decisions_starting(array $manifest, string $prefix): int
