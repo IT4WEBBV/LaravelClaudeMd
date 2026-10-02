@@ -535,6 +535,13 @@ sync_config_repos() {
     while IFS= read -r repo; do
         [ -n "$repo" ] && cd "$repo" 2>/dev/null || continue
         git rev-parse --git-dir >/dev/null 2>&1 || continue
+
+        # Every skill is a symlink into this checkout, so nearly every session
+        # reads a file here. The session has just synced it: a skill read must
+        # not check it again and tell a session that does not work here to
+        # raise it and wait.
+        claim_repo "$(git rev-parse --show-toplevel)" || :
+
         name=$(basename "$repo")
         base_ref=$(resolve_base_ref)
 
@@ -582,6 +589,68 @@ remind_retired_vault() {
     config_notes="${config_notes}
   - SecondBrain leftovers on this machine: ${found#, }. The vault is retired (LaravelClaudeMd #64). Offer the cleanup with AskUserQuestion: \`claude mcp remove basic-memory -s user\`, \`uv tool uninstall basic-memory\`, \`rm -rf ~/.basic-memory\`, and grep ~/.claude/projects/*/memory for SecondBrain/basic-memory notes to delete. Ask separately before deleting ~/GitProjects/SecondBrain: uncommitted files there exist nowhere else (the GitHub repo is archived)."
     config_tags="${config_tags}${config_tags:+, }SecondBrain leftovers found"
+}
+
+# Path $1 as an absolute path, a relative one taken against directory $2.
+absolute_path() {
+    case "$1" in
+        /*) printf '%s\n' "$1" ;;
+        *)  printf '%s/%s\n' "$2" "$1" ;;
+    esac
+}
+
+# The repo path $1 is in: its --show-toplevel. A path that is no directory is
+# looked up by its dirname, so a file about to be written still finds its repo.
+# Prints nothing, status 1, when the path does not exist or is in no repo. Each
+# worktree, a slot included, is its own toplevel.
+repo_toplevel() {
+    local dir=$1
+
+    [ -d "$dir" ] || dir=$(dirname "$dir")
+    [ -d "$dir" ] || return 1
+    git -C "$dir" rev-parse --show-toplevel 2>/dev/null
+}
+
+# Claim repo $1 for this session: true the first time only. mkdir is atomic, so
+# of two tool calls racing into one repo exactly one wins, and a marker left as
+# a file by an older edit mode blocks it as well. The claim comes before the
+# check, so a repo that fails it (no origin, a dead network) is not retried.
+claim_repo() {
+    mkdir -p "$cache_dir" 2>/dev/null || return 1
+    mkdir "$cache_dir/$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')" 2>/dev/null
+}
+
+# The paths the payload's tool call acts on, one per line. Tools that carry no
+# path (WebFetch, MCP tools, Task tools) name none.
+touch_targets() {
+    local cwd path
+
+    cwd=$(payload_field cwd)
+    case "$(payload_field tool_name)" in
+        Read | Edit | Write | MultiEdit) path=$(payload_field file_path) ;;
+        NotebookEdit)                    path=$(payload_field notebook_path) ;;
+        Glob | Grep)                     path=$(payload_field path); path=${path:-$cwd} ;;
+        Bash)                            path=$cwd ;;
+        *)                               return 0 ;;
+    esac
+
+    [ -z "$path" ] || absolute_path "$path" "$cwd"
+}
+
+# Check each repo among paths $2 (one per line) that this session has not
+# claimed yet, then print one $1 hook object for all of them, or nothing.
+check_first_touches() {
+    local event=$1 target toplevel
+
+    while IFS= read -r target; do
+        [ -n "$target" ] || continue
+        toplevel=$(repo_toplevel "$target") || continue
+        [ -n "$toplevel" ] || continue
+        claim_repo "$toplevel" || continue
+        check_repo "$toplevel" </dev/null
+    done <<< "$2"
+
+    [ -z "$repo_context" ] || emit "$event" "$repo_context" "$repo_summary"
 }
 
 # Report on the repo containing $1 into repo_context/repo_summary, which the
@@ -717,26 +786,15 @@ case "$mode" in
         exit 0
         ;;
 
+    touch)
+        check_first_touches PreToolUse "$(touch_targets)"
+        ;;
+
     edit)
-        file_path=$(payload_field file_path)
-        [ -n "$file_path" ] || exit 0
-
-        dir=$file_path
-        [ -d "$dir" ] || dir=$(dirname "$file_path")
-        [ -d "$dir" ] || exit 0
-
-        toplevel=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || exit 0
-        [ -n "$toplevel" ] || exit 0
-
-        # Once per repo per session. The marker is written before the check runs
-        # so that non-repos and origin-less repos are cached too, and a second
-        # edit never re-spawns the work.
-        marker="$cache_dir/$(printf '%s' "$toplevel" | tr -c 'A-Za-z0-9._-' '_')"
-        [ -e "$marker" ] && exit 0
-        mkdir -p "$cache_dir" 2>/dev/null && : > "$marker" 2>/dev/null
-
-        check_repo "$toplevel"
-        [ -z "$repo_context" ] || emit PostToolUse "$repo_context" "$repo_summary"
+        # The legacy PostToolUse wiring: the same check on the written file's
+        # repo, sharing touch's markers, so with both wired it is a no-op. It
+        # reads file_path without tool_name, as it always has.
+        check_first_touches PostToolUse "$(payload_field file_path)"
         ;;
 
     session)
@@ -746,7 +804,11 @@ case "$mode" in
 
         sync_config_repos
         remind_retired_vault
-        check_repo "$repo"
+
+        # Mark the launch repo as touched, so its first tool call does not
+        # report it again. A resumed or cleared session checks regardless.
+        toplevel=$(repo_toplevel "$repo") && claim_repo "$toplevel"
+        check_repo "${toplevel:-$repo}"
 
         # check_repo adds nothing outside a git repo; config news still gets out.
         [ -z "$repo_context$config_notes$config_tags" ] \
