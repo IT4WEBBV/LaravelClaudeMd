@@ -84,8 +84,8 @@ CHECKS="$HOME/.claude/skills/pipeline/checks"
 php "$CHECKS/dispatch_cli.php" kickoff <primary checkout> <number | "<idea>"> [--medium|--light] [--base <branch>] [--decision "<verbatim>"]…
 # → {"action":"ready","manifest":…,"worktree":…,"branch":…,"notes":[…]} | {"action":"halt","reason":…}
 git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
-PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>] [--decision "<verbatim>"]…
-# → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"noOpen":…,"checks":…,"tables":{…},"profile":…,"tier":…,"escalated":…,"agents":{…}}
+php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from <leg>] [--decision "<verbatim>"]…
+# → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"checks":…,"tables":{…},"profile":…,"tier":…,"escalated":…,"agents":{…}}
 #   | {"action":"done"} | {"action":"halt","reason":…}
 # start: through the detour (SKILL.md §autoflow step 3): this reply ends on a background wait; the reply its notice opens calls the workflow pipeline-autoflow with that JSON as args, first; wait for its completion notice
 php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
@@ -564,7 +564,7 @@ Leg names are exactly `pipeline_legs()`: `design, review-plan, handoff, implemen
 | **handoff** | `dispatch_cli.php handoff <manifest>` | the same command, run by the dispatched agent | pushes the branch (never forced), opens the **draft PR** or adopts the open draft the branch already has, with `--base` on a run on a base; English title `Implement: <the spec's heading> (issue: #N)` and a body that names the spec and the plan; references the issue **without a closing keyword**, `Part of #N` (§Closing links) — this PR carries no implementation yet; sets the board Component where the repo's `## Board` names a `component-default`; posts no comment; files the run's **proof page** (§The proof store) | the command records the PR# pointer and the proof page itself, through `record`'s code |
 | **implement** | no skill: §Implement, in the current worktree (no slot) — read the item, the spec and the plan, validate the names the plan relies on, execute it test-first, running the suite and `static-analysis` after each step and `format` once before the push (§Mechanical checks); the `ci` label before the first push. **Leaves the PR draft** (below); in `autoflow` it does not wait on CI (§The CI gate). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, adds the shots to the run's page in the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — a `state` on every shot, and a first client summary and explainer — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
-| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | a **review** agent invokes `/critique pr` (in `autoflow` it applies `/critique pr`'s procedure itself) and appends an open `pr-review` entry; the **finish** step (its resolve step) acts on it, runs the suite unless reused, reconciles closing links (§Closing links), rewrites the proof page, runs `gh pr ready`, and opens the page last (§The proof store). In `autoflow` the finish step leaves the PR draft, and the invoking session runs the CI gate and `gh pr ready` after `finish` (§The CI gate, §Who takes the PR out of draft) | feeds the PR-review gate; writes `issue_links` onto the entry; re-runs `checks/proof_cli.php write` with the client summary, the explainer, the finalised open questions and gate ledger |
+| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | a **review** agent invokes `/critique pr` (in `autoflow` it applies `/critique pr`'s procedure itself) and appends an open `pr-review` entry; the **finish** step (its resolve step) acts on it, runs the suite unless reused, reconciles closing links (§Closing links), rewrites the proof page and runs `gh pr ready`; no page opens by itself (§The proof store). In `autoflow` the finish step leaves the PR draft, and the invoking session runs the CI gate and `gh pr ready` after `finish` (§The CI gate, §Who takes the PR out of draft) | feeds the PR-review gate; writes `issue_links` onto the entry; re-runs `checks/proof_cli.php write` with the client summary, the explainer, the finalised open questions and gate ledger |
 
 **`handoff` in order.** `record`'s own checks first (the manifest, this step's snapshot), so a refusal
 pushes nothing. Then, read-only: `artifacts.spec` and `artifacts.plan` exist at `HEAD`, the worktree is on
@@ -1025,34 +1025,16 @@ failing to *file* it logs and continues. The engine never reads the store to dec
 deleting all of `_proofs/` changes no run's behaviour, which is what keeps a durable store
 compatible with the non-goal "no persistent state not reconstructable from git + gh".
 
-**The finished page opens itself — once, at the end.** The finish step's last action, after its final
-`write`, is `php checks/proof_cli.php open <page>`, passing the path that `write` printed on stdout.
-`handoff` files the page and `write` runs once or twice after it — `verify-ui` adds the shots, `review-pr` finalises it — so
-opening from `write` would open the same page two or more times; a separate subcommand invoked once,
-at completion, is the only shape that opens once. A run that **halts** after the page exists opens it
-on the same rule: the session that holds the run (in `autoflow`, the invoking session after `finish`) runs `proof_cli.php open <artifacts.proof>` when that pointer is set, because a halted run is exactly the one a human is about to go looking at: one
-`open`, at whatever turns out to be the run's last action.
-
-**A run with no page opens nothing.** A run that halted before `handoff` has none. `open` given a
-missing path — or none — logs and returns 0; it is a silent no-op, never an error.
-
-**Opening is cosmetic, weaker than every other proof policy.** Failing to *capture* proof halts a
-run; failing to *file* it logs and continues; failing to *open* it does neither — `open` returns 0
-on every path, including a platform it has no opener for (`open` on macOS, `xdg-open` on Linux,
-nothing anywhere else). The page path reaches the store from a JSON payload, so `open` never builds
-a shell string from it: it hands `proc_open()` an argv **array**, which runs without a shell at all.
-
-- **`PIPELINE_NO_OPEN=1`** suppresses opening entirely — headless boxes, CI, and unattended batches
-  where the tabs are noise.
-- **`PIPELINE_OPEN_CMD`** replaces the platform default with an executable that receives the page
-  path as its single argument.
-
-**Concurrent finishes are left undamped, deliberately.** Legs run as background subagents and
-several runs can finish within minutes of each other; each opens only its own page, so four finishes
-are four tabs. Damping that — a lock, a debounce, a "just open the store index instead" — would
-silently drop some run's page, and a reader who cannot tell *which* run was skipped is worse off
-than one who closes a tab. The unattended batch that produces the burst is precisely the case
-`PIPELINE_NO_OPEN=1` already covers.
+**No page opens by itself.** A run's report names its page: the finish step's reply in `interactive`, the invoking
+session's report after `finish` in `autoflow` (the `proof` that `finish`'s `done` carries, else `artifacts.proof`),
+and a halt's report the same. The store index, opened by hand and left open, shows what changed (*The open index
+tab*, above), so a day of runs is one tab, not a tab per run. `php checks/proof_cli.php open <page>` opens a page by
+hand. It is cosmetic, weaker than every other proof policy: failing to *capture* proof halts a run, failing to
+*file* it logs and continues, and `open` returns 0 on every path (no page, a platform with no opener — `open` on
+macOS, `xdg-open` on Linux, nothing anywhere else —, an opener that fails). The page path reaches the store from a
+JSON payload, so `open` never builds a shell string from it: it hands `proc_open()` an argv **array**, which runs
+without a shell. **`PIPELINE_OPEN_CMD`** replaces the platform default with an executable that receives the page
+path as its single argument.
 
 ## Who takes the PR out of draft — `review-pr`, never `implement`
 
@@ -1619,7 +1601,7 @@ Under `autoflow` these are the only stops. **No finding stops a run.**
     nothing to not-push. Leave it **draft**, append the reason to the PR body without reading it
     (`gh pr view <pr> --json body --jq .body > "$TMPDIR/body.md"`, append the reason,
     `gh pr edit <pr> --body-file "$TMPDIR/body.md"`), stop. In `autoflow` the invoking session does
-    this after `finish`, and opens the proof page once when `artifacts.proof` is set (§The proof store).
+    this after `finish`, and its report names the proof page when `artifacts.proof` is set (§The proof store).
   - The entry is not marked halted: the resolve step records `outcome: looped-back` as it returns,
     and `finish` halts the run through the cursor (`cursor.status: halted`, `cursor.reason`) —
     `returned` in `interactive`.
