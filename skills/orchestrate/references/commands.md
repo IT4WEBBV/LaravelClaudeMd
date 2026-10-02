@@ -121,7 +121,7 @@ On a run's completion notice (pipeline `engine.md` §`autoflow` — a program th
 
 ```bash
 php ~/.claude/skills/pipeline/checks/dispatch_cli.php finish <manifest> '<the workflow return, as JSON>'
-poll=1; while answer=$(php ~/.claude/skills/pipeline/checks/dispatch_cli.php ci <manifest> --poll $poll); echo "$answer" | grep -q '"action":"wait"'; do sleep 30; poll=$((poll + 1)); done; echo "$answer"   # only when finish printed done; run_in_background
+poll=1; while answer=$(php ~/.claude/skills/pipeline/checks/dispatch_cli.php ci <manifest> --poll $poll); echo "$answer" | grep -q '"action":"wait"'; do sleep 30; poll=$((poll + 1)); done; echo "$answer"   # only when finish printed done, or ask and every answer is recorded; run_in_background
 gh pr ready <P> -R <repo>                                                      # only when the gate answered ready
 php ~/.claude/skills/pipeline/checks/proof_cli.php status <proof> ready              # right after gh pr ready; <proof>: the proof finish printed with done
 php ~/.claude/skills/pipeline/checks/run_cost_cli.php <the run's transcript dir> <proof>   # <proof>: finish's, else the manifest's artifacts.proof; none: leave it out
@@ -137,6 +137,17 @@ the PR stays draft, so the denial goes in the report and the owner runs `gh pr r
 workflow that errored: `finish <manifest> '{"action":"halt","reason":"<the error>"}'`. A halt
 after `handoff`: the reason into the PR body, as pipeline `engine.md` §Failure policy — what still
 stops (*Bound exhaustion*) says, and the report names the proof page.
+
+**`ask`** (pipeline `engine.md` §Open questions): `finish` printed `ask` because a `blocking` open
+question is unanswered; the manifest says done and the PR stays draft. Its `questions` go into the
+batched `AskUserQuestion` (Step 5, *Ask last*), and no gate runs yet. Record each answer as the question's
+`decision` with the answer appended, and append those lines to the PR body (`gh pr view <P> -R <repo>
+--json body`, append, `gh pr edit <P> -R <repo> --body-file`). Every answer keeps what the PR built: the
+diff, `launch <manifest> <manifest stem>.diff --decision "…"`… (it answers `done`), then the gate. Any
+answer changes the code: the diff, `launch <manifest> <manifest stem>.diff --from review-pr --decision
+"…"`… with all the answers, then a new `pipeline-autoflow` workflow, as §Launch, in the dispatch record.
+The gate answers `ask` too while one is open: the same. `followUps` (with `done` and `ask`): listed once
+in the ready report, then one batched *file an issue* / *drop* question, or filed directly.
 
 The CI gate (pipeline `engine.md` §The CI gate) runs in one background Bash and wakes you with its
 answer; a run in its gate still counts as working. `fix`: the fix round, as §Launch's *commits wanted*
