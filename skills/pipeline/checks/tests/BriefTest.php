@@ -319,6 +319,24 @@ it('makes a recorded red CI a finding of review-pr\'s review and resolve steps, 
     expect(pipeline_brief(brief_manifest('implement', $round), 'implement', '/tmp/m.json'))->not->toContain($review)->not->toContain($resolve);
 });
 
+it('makes a recorded conflict with the base a finding of review-pr\'s review and resolve steps, after the CI round\'s line, and only then (#149)', function () {
+    $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 2, 'at' => '2026-09-22T12:00:00Z', 'review' => 'r'];
+    $conflict = "Conflict with the base on the PR's head commit abc123: GitHub reports PR #42 CONFLICTING with its base; review-pr's resolve step merges the base (engine.md §Catching up with the base)";
+    $red = "CI red on the PR's head commit abc123: CI / ci failed (https://github.com/acme/app/actions/runs/11/job/12)";
+    $round = ['mode' => 'autoflow', 'decisions' => ['The engine never edits.', $conflict]];
+    $review = 'The settled `Conflict with the base` decision is a finding of this review: name the conflict and leave the merge to the resolve step, since a review step does not merge (engine.md §Catching up with the base).';
+    $resolve = 'Resolve the `Conflict with the base` finding with the merge this brief\'s catch-up override asks for, and name it in `actions`; when this brief has no such override, say so in `actions` and change nothing for it: the CI gate reads the PR\'s mergeability again (engine.md §The CI gate).';
+
+    expect(pipeline_brief(brief_manifest('review-pr', $round), 'review-pr', '/tmp/m.json', 'review'))->toContain($review)->not->toContain($resolve);
+    expect(pipeline_brief(brief_manifest('review-pr', [...$round, 'gate_ledger' => [$open]]), 'review-pr', '/tmp/m.json', 'resolve'))->toContain($resolve)->not->toContain($review);
+    expect(pipeline_brief(brief_manifest('review-pr', ['mode' => 'autoflow', 'decisions' => [$red]]), 'review-pr', '/tmp/m.json', 'review'))->not->toContain('`Conflict with the base` decision is a finding');
+    expect(pipeline_brief(brief_manifest('implement', $round), 'implement', '/tmp/m.json'))->not->toContain($review)->not->toContain($resolve);
+
+    $both = pipeline_brief(brief_manifest('review-pr', ['mode' => 'autoflow', 'decisions' => [$red, $conflict]]), 'review-pr', '/tmp/m.json', 'review');
+    expect($both)->toContain('`CI red on the PR\'s head commit` decision is a finding')->toContain($review);
+    expect(strpos($both, '`CI red on the PR\'s head commit` decision is a finding'))->toBeLessThan(strpos($both, $review));
+});
+
 it('tells every autoflow step where to work, that the run is authorised, and to return a structured result', function () {
     foreach (pipeline_legs() as $leg) {
         foreach (in_array($leg, ['review-plan', 'review-pr'], true) ? ['review', 'resolve'] : ['run'] as $step) {

@@ -15,9 +15,9 @@ function ci_manifest(array $decisions = []): array
     return ['branch' => 'feature/x', 'worktree' => '/tmp/wt', 'mode' => 'autoflow', 'cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'artifacts' => ['pr' => 7], 'decisions' => $decisions];
 }
 
-function ci_view(array $rollup): array
+function ci_view(array $rollup, string $mergeable = 'MERGEABLE'): array
 {
-    return ['headRefOid' => 'abc123', 'statusCheckRollup' => $rollup];
+    return ['headRefOid' => 'abc123', 'mergeable' => $mergeable, 'statusCheckRollup' => $rollup];
 }
 
 it('classifies a check run by its status and conclusion, and a commit status by its state', function (array $item, string $state) {
@@ -127,4 +127,65 @@ it('counts the merge round and the CI fix round apart', function () {
 
     expect(pipeline_ci_answer(ci_manifest([$merge]), $red, 'abc123', true, 1, ['a.php']))->toMatchArray(['action' => 'fix', 'verdict' => 'red', 'decision' => $ci]);
     expect(pipeline_ci_answer(ci_manifest([$ci]), $red, 'abc123', true, 1, ['a.php']))->toMatchArray(['action' => 'fix', 'verdict' => 'merge']);
+});
+
+function ci_conflict_decision(): string
+{
+    return "Conflict with the base on the PR's head commit abc123: GitHub reports PR #7 CONFLICTING with its base; review-pr's resolve step merges the base (engine.md §Catching up with the base)";
+}
+
+it('answers one conflict round on a PR that conflicts with its base, whatever its checks, and halts on a conflict after it (#149)', function () {
+    $fix = ['action' => 'fix', 'verdict' => 'conflicting', 'sha' => 'abc123', 'decision' => ci_conflict_decision()];
+    $reason = 'PR #7 conflicts with its base again after the conflict round, on abc123: merge the base into the branch (engine.md §Catching up with the base), push, and run the CI gate again';
+
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([ci_run('ci', 'COMPLETED', 'SUCCESS')], 'CONFLICTING'), 'abc123', true, 1))->toBe($fix);
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([], 'CONFLICTING'), 'abc123', true, 1))->toBe($fix);
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([ci_run('ci', 'IN_PROGRESS')], 'CONFLICTING'), 'abc123', true, 1))->toBe($fix);
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([ci_run('ci', 'COMPLETED', 'FAILURE')], 'CONFLICTING'), 'abc123', true, 1))->toBe($fix);
+    expect(pipeline_ci_answer(ci_manifest(['Keep the guard', ci_conflict_decision()]), ci_view([ci_run('ci', 'COMPLETED', 'SUCCESS')], 'CONFLICTING'), 'abc123', true, 1))
+        ->toBe(['action' => 'halt', 'leg' => 'review-pr', 'reason' => $reason, 'verdict' => 'conflicting', 'sha' => 'abc123']);
+    expect($reason)->not->toContain("'");
+});
+
+it('waits while GitHub has not worked out whether the PR merges, even without checks or workflows, and halts at the hour (#149)', function () {
+    $wait = ['action' => 'wait', 'verdict' => 'unknown', 'sha' => 'abc123'];
+    $unknown = ci_view([ci_run('ci', 'COMPLETED', 'SUCCESS')], 'UNKNOWN');
+    $reason = 'GitHub had not worked out whether PR #7 merges into its base after an hour, on abc123';
+
+    expect(pipeline_ci_answer(ci_manifest(), $unknown, 'abc123', true, 1))->toBe($wait);
+    expect(pipeline_ci_answer(ci_manifest(), $unknown, 'abc123', true, 119))->toBe($wait);
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([], 'UNKNOWN'), 'abc123', false, 1))->toBe($wait);
+    expect(pipeline_ci_answer(ci_manifest(), $unknown, 'abc123', true, 120))
+        ->toBe(['action' => 'halt', 'leg' => 'review-pr', 'reason' => $reason, 'verdict' => 'unknown', 'sha' => 'abc123']);
+    expect($reason)->not->toContain("'");
+});
+
+it('reads mergeability after the merge round and the head comparison, and any other value goes on to the checks (#149)', function () {
+    $mismatch = ['action' => 'wait', 'verdict' => 'mismatch', 'sha' => 'abc123', 'head' => 'def456'];
+    $merge = "Unreviewed merge on the PR's head commit def456: a merge since the last completed review met this branch's changes in a.php";
+    $green = fn (string $mergeable) => ci_view([ci_run('ci', 'COMPLETED', 'SUCCESS')], $mergeable);
+
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([], 'CONFLICTING'), 'def456', true, 1))->toBe($mismatch);
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([], 'UNKNOWN'), 'def456', true, 1))->toBe($mismatch);
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([], 'CONFLICTING'), 'def456', true, 1, ['a.php']))
+        ->toBe(['action' => 'fix', 'verdict' => 'merge', 'files' => ['a.php'], 'decision' => $merge]);
+    expect(pipeline_ci_answer(ci_manifest(), $green('SOMETHING_NEW'), 'abc123', true, 1))->toBe(['action' => 'ready', 'verdict' => 'green', 'sha' => 'abc123']);
+    expect(pipeline_ci_answer(ci_manifest(), $green(''), 'abc123', true, 1))->toBe(['action' => 'ready', 'verdict' => 'green', 'sha' => 'abc123']);
+    expect(pipeline_ci_answer(ci_manifest(), ci_view([ci_run('ci', 'COMPLETED', 'FAILURE')]), 'abc123', true, 1))->toMatchArray(['action' => 'fix', 'verdict' => 'red']);
+});
+
+it('counts the conflict round apart from the CI and merge rounds (#149)', function () {
+    $merge = "Unreviewed merge on the PR's head commit def456: a merge since the last completed review met this branch's changes in a.php";
+    $ci = "CI red on the PR's head commit abc123: CI / ci failed (https://github.com/acme/app/actions/runs/11/job/ci)";
+
+    expect(pipeline_conflict_rounds(ci_manifest(['Keep the guard', $merge, $ci])))->toBe(0);
+    expect(pipeline_conflict_rounds(ci_manifest([ci_conflict_decision()])))->toBe(1);
+    expect(pipeline_conflict_rounds(['branch' => 'feature/x']))->toBe(0);
+    expect(pipeline_ci_rounds(ci_manifest([ci_conflict_decision()])))->toBe(0);
+    expect(pipeline_merge_rounds(ci_manifest([ci_conflict_decision()])))->toBe(0);
+
+    expect(pipeline_ci_answer(ci_manifest([ci_conflict_decision()]), ci_view([ci_run('ci', 'COMPLETED', 'FAILURE')]), 'abc123', true, 1))
+        ->toMatchArray(['action' => 'fix', 'verdict' => 'red']);
+    expect(pipeline_ci_answer(ci_manifest([$ci, $merge]), ci_view([], 'CONFLICTING'), 'abc123', true, 1, ['a.php']))
+        ->toMatchArray(['action' => 'fix', 'verdict' => 'conflicting']);
 });

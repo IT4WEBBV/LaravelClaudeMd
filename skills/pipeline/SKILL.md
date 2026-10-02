@@ -138,7 +138,7 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    **`ready`:** `gh pr ready <pr>`, then `php "$CHECKS/proof_cli.php" status <proof> ready` with the `proof`
    `finish` printed. The manifest already says done; when `gh pr ready` is denied the
    PR stays draft and no halt is written: put the denial in the report, and the owner runs
-   `gh pr ready` by hand. **`fix`** (a red CI, or a merge the last review did not see): the diff as in step 2, then
+   `gh pr ready` by hand. **`fix`** (a red CI, a merge the last review did not see, or a conflict with the base): the diff as in step 2, then
    `launch <manifest> "<manifest stem>.diff" --from review-pr --decision "<its decision>"`, and steps
    3–5 again. **`halt`:** `finish <manifest> '<the answer>'`, then as any halt; on a `mismatch` GitHub's
    head and the worktree's `HEAD` differ: once they match (push the branch, or reconcile it when GitHub
