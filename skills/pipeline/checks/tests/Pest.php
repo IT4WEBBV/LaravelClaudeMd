@@ -25,3 +25,11 @@ function proof_test_page(array $run = []): string
 
     return "{$dir}/index.html";
 }
+
+/** The runs a `status.js` text carries: the JSON between `window.proofStatus = ` and the closing `;`. */
+function proof_test_status_runs(string $js): array
+{
+    expect($js)->toStartWith('window.proofStatus = ')->toEndWith(";\n");
+
+    return json_decode(substr($js, strlen('window.proofStatus = '), -strlen(";\n")), true, 512, JSON_THROW_ON_ERROR)['runs'];
+}

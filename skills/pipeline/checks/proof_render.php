@@ -574,7 +574,7 @@ function proof_render_index(array $runs): string
         ? "<p class=\"meta\">No runs recorded.</p>\n"
         : proof_render_index_controls($runs)
             . "<div class=\"table-wrap\">\n<table id=\"runs\">\n" . proof_render_index_head() . "<tbody>\n"
-            . implode('', array_map(proof_render_index_row(...), array_keys($runs), $runs))
+            . implode('', array_map(proof_render_index_row(...), $runs))
             . "</tbody>\n</table>\n</div>\n<p id=\"no-match\" class=\"meta\" hidden>No runs match.</p>\n"
             . "<script>\n" . proof_render_copy_script() . "\n" . proof_render_index_script() . "\n</script>\n";
 
@@ -675,13 +675,51 @@ function proof_render_index_head(): string
     return '<thead><tr>' . implode('', $cells) . "</tr></thead>\n";
 }
 
-/** One run: what the index script reads, its status, where it lives, its page, its figures, and its summary to copy. */
-function proof_render_index_row(int $number, array $entry): string
+/**
+ * `<repo>/<run>`, the last two directories the run was found in: its row's `data-run`, its link, its page's `seen:`
+ * key and its `status.js` key. Never re-derived from the run: a run filed under an earlier naming scheme has to stay
+ * reachable.
+ */
+function proof_index_key(array $entry): string
+{
+    return implode('/', array_slice(explode('/', trim((string) $entry['dir'], '/')), -2));
+}
+
+/** The first 12 hex digits of a sha1 over the key and the run as stored: any change to the filed run changes it. */
+function proof_index_row_hash(array $entry): string
+{
+    return substr(sha1(proof_index_key($entry) . "\n" . proof_run_json($entry['run'])), 0, 12);
+}
+
+/**
+ * `status.js`, which the open index polls (`proof_render_index_script()`): per run in the attention order its key,
+ * status, revision (null before revisions existed), hash and row. JSON's default escaping keeps it one valid script
+ * whatever a title holds (`/`, U+2028 and U+2029 escaped); it is a file of its own, so no value can end a tag.
+ *
+ * @param list<array{dir: string, run: array}> $runs
+ */
+function proof_render_status_js(array $runs): string
+{
+    $entries = array_map(fn (array $entry): array => [
+        'key' => proof_index_key($entry),
+        'status' => ProofRunStatus::of($entry['run'])->value,
+        'revision' => isset($entry['run']['revision']) ? (int) $entry['run']['revision'] : null,
+        'hash' => proof_index_row_hash($entry),
+        'row' => proof_render_index_row($entry),
+    ], proof_index_order($runs));
+
+    return 'window.proofStatus = ' . json_encode(['runs' => $entries], JSON_INVALID_UTF8_SUBSTITUTE) . ";\n";
+}
+
+/**
+ * One run: what the index script reads (its hash last), its status, where it lives, its page, its figures, and its
+ * summary to copy. `status.js` carries the same text, so a row the script inserts or replaces is this one; its copy
+ * target is named by the run, so it never collides with another row's.
+ */
+function proof_render_index_row(array $entry): string
 {
     $run = $entry['run'];
-    // The link comes from the directory the run was found in, never from re-deriving a name out of the run: a run
-    // filed under an earlier naming scheme has to stay reachable. The page keys its seen marker on the same segments.
-    $key = implode('/', array_slice(explode('/', trim((string) $entry['dir'], '/')), -2));
+    $key = proof_index_key($entry);
     $status = ProofRunStatus::of($run);
     $repo = (string) ($run['repo'] ?? '');
     $title = proof_run_title($run);
@@ -708,11 +746,13 @@ function proof_render_index_row(int $number, array $entry): string
         'updated' => (string) ($run['updatedAt'] ?? ''),
         ...(isset($run['revision']) ? ['revision' => (string) (int) $run['revision']] : []),
         'search' => proof_index_search($run),
+        'hash' => proof_index_row_hash($entry),
     ];
     $attributes = implode('', array_map(fn (string $name, string $value): string => " data-{$name}=\"" . proof_e($value) . '"', array_keys($data), $data));
+    $target = 'summary-' . substr(sha1($key), 0, 8);
     $copy = $summary === ''
         ? ''
-        : "<button type=\"button\" class=\"copy\" data-copy=\"summary-{$number}\">Copy</button><span id=\"summary-{$number}\" lang=\"nl\" hidden>" . proof_e($summary) . '</span>';
+        : "<button type=\"button\" class=\"copy\" data-copy=\"{$target}\">Copy</button><span id=\"{$target}\" lang=\"nl\" hidden>" . proof_e($summary) . '</span>';
 
     return "<tr{$attributes}>"
         . proof_render_index_cell($status->order(), proof_render_status($run))
