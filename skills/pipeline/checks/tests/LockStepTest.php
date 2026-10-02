@@ -41,6 +41,8 @@ it('keeps every engine.md section a brief names', function () {
         ...[[
             pipeline_review_scope_line(['since' => 'abc', 'base' => 'origin/main', 'commits' => 1, 'files' => []]),
             pipeline_catch_up_line(['worktree' => '/tmp/wt'], ['base' => 'origin/main', 'behind' => 1, 'shared' => []]),
+            pipeline_conflict_round_line('review'),
+            pipeline_conflict_round_line('resolve'),
         ]],
     );
     preg_match_all('/§([^,):;]+)/', implode("\n", $lines), $names);

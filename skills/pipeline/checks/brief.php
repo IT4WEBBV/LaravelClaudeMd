@@ -230,6 +230,9 @@ function pipeline_brief_overrides(array $manifest, string $manifestPath, string 
     if ($leg === 'review-pr' && pipeline_ci_rounds($manifest) > 0) {
         $lines[] = pipeline_ci_round_line($step);
     }
+    if ($leg === 'review-pr' && pipeline_conflict_rounds($manifest) > 0) {
+        $lines[] = pipeline_conflict_round_line($step);
+    }
     if ($scope !== null) {
         $lines[] = pipeline_review_scope_line($scope);
     }
@@ -264,6 +267,14 @@ function pipeline_ci_round_line(string $step): string
     return $step === 'review'
         ? 'The settled `CI red on the PR\'s head commit` decision is a finding of this review: read the failing job\'s log (`gh run view <run> --log-failed`, the run id from its link) and state the failure and its cause (engine.md §The CI gate).'
         : 'Fix the `CI red` finding, or show it is unrelated to this change (the same failure on the base branch, or a flake: start `gh run rerun <run> --failed` and do not wait on it), and say which in `actions`; the CI gate reads the head commit again (engine.md §The CI gate).';
+}
+
+/** The CI gate's conflict round (engine.md §The CI gate): the review names the conflict, the resolve step's catch-up override merges the base. */
+function pipeline_conflict_round_line(string $step): string
+{
+    return $step === 'review'
+        ? 'The settled `Conflict with the base` decision is a finding of this review: name the conflict and leave the merge to the resolve step, since a review step does not merge (engine.md §Catching up with the base).'
+        : 'Resolve the `Conflict with the base` finding with the merge this brief\'s catch-up override asks for, and name it in `actions`; when this brief has no such override, say so in `actions` and change nothing for it: the CI gate reads the PR\'s mergeability again (engine.md §The CI gate).';
 }
 
 /** A design-size escalation that no plan approval has answered yet. */
