@@ -1086,16 +1086,19 @@ runs (#77), while `review-pr:review` reads the diff, not CI.
 - **One gate, in the session that runs `gh pr ready`:** the invoking session once `finish` prints `done`
   in `autoflow`, the finish step in `interactive`. `dispatch_cli.php ci <manifest> --poll <n>`
   (`../checks/ci.php`) reads the worktree's `HEAD` (`git rev-parse HEAD`; a git error halts at once), then
-  the PR's head commit and its checks once (`gh pr view <pr> --json headRefOid,statusCheckRollup`), writes
-  nothing, and prints one JSON line. GitHub's head has to be the worktree's `HEAD` before its checks count
-  (#99): a push that failed or was skipped leaves an older head whose CI can be green, and the PR would go
-  ready without the last fix. That comparison comes first, so neither a green nor a red on an older
-  commit counts:
+  the PR's head commit, whether it merges into its base, and its checks once (`gh pr view <pr> --json
+  headRefOid,mergeable,statusCheckRollup`), writes nothing, and prints one JSON line. GitHub's head has to
+  be the worktree's `HEAD` before its checks count (#99): a push that failed or was skipped leaves an older
+  head whose CI can be green, and the PR would go ready without the last fix. That comparison comes first,
+  so neither a green nor a red on an older commit counts; whether the PR merges comes next, before the
+  checks (#149):
 
 | Verdict on the head commit | Answer |
 |---|---|
 | `merge`: a merge since the last completed review met the branch's changes (`autoflow`) | `fix` the first time in a run, before the PR is read; after that round the gate goes on to the rows below |
 | `mismatch`: GitHub's head is not the worktree's `HEAD` | `wait`; `halt` at the third read, naming both shas: a push GitHub shows within seconds, and one it does not show by then did not land |
+| `conflicting`: GitHub reports the PR `CONFLICTING` with its base | `fix` the first time in a run; `halt` once that round is spent |
+| `unknown`: GitHub has not worked out mergeability yet (it computes it lazily, after a push or `gh pr ready`) | `wait`; `halt` at the 120th read |
 | `green`: every check finished `SUCCESS`, `NEUTRAL` or `SKIPPED` | `ready` |
 | `none`: no check at all | `ready`; with `.github/workflows/*.yml` or `*.yaml` in the worktree only from the third read, since GitHub registers a push's checks seconds after it |
 | `pending` | `wait`; `halt` at the 120th read (an hour at 30 s) |
@@ -1110,8 +1113,10 @@ poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll
 ```
 
 - **`ready`** → `gh pr ready <pr>`, then `php "$CHECKS/proof_cli.php" status <proof> ready`, `<proof>` the `proof` that `finish`'s `done` named (null: nothing to mark).
-- **`fix`** → one automatic fix round (owner, #85). The answer's `decision`, `CI red on the PR's head
-  commit <sha>: <check> failed (<link>)`, goes into `decisions` verbatim with the re-arm:
+- **`fix`** → one automatic round per run for each of the gate's three records: a red CI (owner, #85), a
+  merge the review did not see and a conflict with the base (both below). The answer's `decision`, for a
+  red `CI red on the PR's head commit <sha>: <check> failed (<link>)`, goes into `decisions` verbatim with
+  the re-arm:
   `git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"`, then
   `launch <manifest> "<manifest stem>.diff" --from review-pr --decision "<its decision>"` and a new
   `pipeline-autoflow` workflow, started through the detour (`../SKILL.md` §`autoflow` step 3). The review step reads the failing job's log and states the failure as a
@@ -1140,9 +1145,23 @@ poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll
   `## Base merges` line is its record. The round fires on a clean merge of a shared file as on a
   conflict: git 2.33 cannot tell the two apart afterwards, and a textual merge of a file both sides
   changed is what a review is for.
+- **A conflict with the base** (#149). A sibling merged into the base after this run's review can leave
+  the PR `CONFLICTING`, and on a repo without CI the checks' `none` would still read `ready`. GitHub's
+  `mergeable` is its answer for its head, so the gate reads it after the head comparison, and before the
+  checks: GitHub runs no CI on a conflicting PR's merge ref, so its checks say nothing about the code that
+  would merge. `CONFLICTING` answers `fix` with verdict `conflicting` and the decision `Conflict with the
+  base on the PR's head commit <sha>: GitHub reports PR #<pr> CONFLICTING with its base; review-pr's
+  resolve step merges the base (engine.md §Catching up with the base)`, and the session does what it does
+  for a red. The review step names the conflict as a finding; the resolve step makes the merge its
+  catch-up override asks for (a textual conflict means both sides changed a file, so §Catching up with the
+  base gives that override), resolves it, runs the suite and pushes. At the next gate the merge round
+  reviews those resolutions when it is unspent; when it is spent they go on unreviewed, as the bullet
+  above says of any further merge. Once per run, counted from `decisions` apart from the other two
+  rounds: a conflict after it halts, naming `review-pr`.
+  `UNKNOWN` is a `wait`, as a pending check is, and a halt at the 120th read.
 - **In `interactive`** the finish step runs the same loop, `gh pr ready` on `ready` and then `proof_cli.php status <page> ready`, and shows any other
-  answer to the human; there is no automatic round, and no merge round: the human resolves the review
-  and sees the merge as it is made.
+  answer to the human; there is no automatic round, no merge round and no conflict round: the human
+  resolves the review, sees the merge as it is made, and on a `conflicting` answer merges the base.
 - **The merge watch stays on `state`** (§After the merge): once the PR is ready, CI on its head has
   settled.
 
