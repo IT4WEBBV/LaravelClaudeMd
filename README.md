@@ -173,7 +173,7 @@ Its tests: `bash statusline/tests/statusline.test.sh`; the rows' rendering is in
 
 `~/Applications/Proofs.app` opens the proof store index, `~/GitProjects/_proofs/index.html`, in Chrome: type
 "proofs" in Alfred or Spotlight, or drag it to the Dock. When the index does not exist yet it says so and creates
-nothing. Chrome, because the index's New/Updated markers read what a run page stored in `localStorage`, and
+nothing. Chrome, because the index's unread marks read what a run page stored in `localStorage`, and
 `file://` is one origin only in Chrome.
 
 The `session` hook compiles it from `skills/pipeline/apps/Proofs.applescript` when no `Proofs.app` is in
