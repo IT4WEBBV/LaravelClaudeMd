@@ -106,17 +106,19 @@ function proof_cli_status(array $arguments): int
 
 /**
  * `gh`'s answer on the run's PR, or null when there is none to ask about or `gh` cannot answer: the stored state then
- * stands, and a stale `OPEN` only means the run is not pruned this pass, which is the safe direction. An argv array,
- * never a shell string.
+ * stands, and a stale `OPEN` only means the run is not pruned this pass, which is the safe direction. The repo comes
+ * from `proof_run_name_with_owner()`, so a run filed before `nameWithOwner` existed is asked about like any other. An
+ * argv array, never a shell string.
  *
  * @return array{state: string, isDraft: bool}|null
  */
 function proof_cli_pr_view(array $run): ?array
 {
-    if (empty($run['pr']) || empty($run['nameWithOwner'])) {
+    $nameWithOwner = proof_run_name_with_owner($run);
+    if (empty($run['pr']) || $nameWithOwner === null) {
         return null;
     }
-    $argv = ['gh', 'pr', 'view', (string) $run['pr'], '--repo', (string) $run['nameWithOwner'], '--json', 'state,isDraft'];
+    $argv = ['gh', 'pr', 'view', (string) $run['pr'], '--repo', $nameWithOwner, '--json', 'state,isDraft'];
     $process = @proc_open($argv, [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes);
     if (! is_resource($process)) {
         return null;

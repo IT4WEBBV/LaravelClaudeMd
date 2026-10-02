@@ -457,6 +457,22 @@ function proof_run_json(array $run): string
     return json_encode($run, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION) . "\n";
 }
 
+/**
+ * The `owner/name` a run's PR lives in: its `nameWithOwner`, else a `repo` filed under the earlier naming scheme,
+ * which held `owner/name` itself (#161). Null for a bare repo name, or anything that is not a GitHub name: there is
+ * no PR to ask GitHub about.
+ */
+function proof_run_name_with_owner(array $run): ?string
+{
+    $nameWithOwner = trim((string) ($run['nameWithOwner'] ?? ''));
+    if ($nameWithOwner !== '') {
+        return $nameWithOwner;
+    }
+    $repo = trim((string) ($run['repo'] ?? ''));
+
+    return preg_match('~^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$~', $repo) === 1 ? $repo : null;
+}
+
 /** Days a merged or closed run is kept after its last filing. */
 const PROOF_FINISHED_RETENTION_DAYS = 7;
 

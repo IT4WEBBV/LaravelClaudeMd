@@ -933,7 +933,7 @@ command that made it so:
 | `halted`, with the reason | `dispatch_cli_halt()`: `finish`, `returned`, `brief`'s boundary check, `launch`'s invariant check | the manifest records a halt |
 | `ready` | the session that ran `gh pr ready`: the invoking session in `autoflow` (§The CI gate), the finish step in `interactive` | right after `gh pr ready` succeeded: `proof_cli.php status <page> ready` |
 | `merged`, `closed` | the session holding the merge watch (§After the merge, `orchestrate` step 6) | the watch prints `MERGED` or `CLOSED`, before any teardown |
-| any | the prune pass, on `prune` | `gh pr view --json state,isDraft`: merged, closed and an open ready PR are GitHub's to say; an open draft keeps `running` or `halted`, and turns a stale `ready` back into `running` |
+| any | the prune pass, on `prune` | `gh pr view --json state,isDraft`: merged, closed and an open ready PR are GitHub's to say; an open draft keeps `running` or `halted`, and turns a stale `ready` back into `running`. A run filed before `nameWithOwner` existed is asked about by its `repo` when that holds `owner/name`; a run with neither keeps its stored status |
 
 A command writes to `artifacts.proof` only when the manifest sets it, and never changes its answer or halts over it:
 a page that cannot be amended is one line on stderr. `finish`'s and `returned`'s `done` carries `proof`
