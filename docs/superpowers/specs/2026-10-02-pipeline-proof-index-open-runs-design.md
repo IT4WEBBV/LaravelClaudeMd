@@ -311,6 +311,9 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
     hides. It is computed in PHP; it does not follow the repo filter.
 13. **Does the empty store change?** No: `No runs recorded.`, no controls, no script.
 14. **Is anything about the run page changed?** No. Only the index, the predicate and the docs.
+15. **Is a run pruned on the day its retention ends, or after it?** After it: `updatedAt` must be strictly older
+    than 7 (or 14) days, as the 14-day rule compared (`<`). A merged run filed exactly 7 days ago is kept until the
+    next pass. (Added by the plan step.)
 
 ## Relation to other work
 
