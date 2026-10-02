@@ -229,6 +229,14 @@ $data = request()->validate([
 
 ## Workflow
 
+### Code changes go through `/pipeline`
+
+A change to a project's code runs through `/pipeline`, so the plan review, the PR review and the
+visual proof always happen: `autoflow` when it can run unattended, with `medium` for a small change.
+Without an issue, file one first; it is the run's work item. Done directly, without the pipeline:
+trivial edits only (a one-line fix, config or env, docs, a changelog fragment), and whatever I
+explicitly ask to be done by hand.
+
 ### Git Workflow
 
 - **No co-author**: Do not add `Co-Authored-By` lines to git commit messages.
