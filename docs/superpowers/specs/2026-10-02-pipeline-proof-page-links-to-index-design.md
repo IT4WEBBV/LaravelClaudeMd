@@ -127,6 +127,14 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
 7. **Does the browser check need the real store?** A copy of it, served over `php -S` (the Playwright MCP blocks
    `file:`), with one page re-rendered: real data, no write to the live store. Over `file://` the relative href
    resolves the same way, since the directory depth is the same.
+8. **Which fixtures do the two page tests use?** (Added by the `plan` step.) `proof_fixture_run()` carries no
+   `schema` key, so it already *is* a run filed before schema 2. The current-schema case therefore uses
+   `proof_current_run()` (`schema: 2`, defined beside the other schema-2 tests in `ProofRenderTest.php`), and the
+   pre-schema-2 case uses `proof_fixture_run(['schema' => 1])`, shaped like the existing "renders a run filed before
+   this change as before" case. Both assert the same literal `<nav>` line and its position.
+9. **Does any existing test pin what follows `<body>`?** (Added by the `plan` step.) Only the revision case, which
+   asserts `<body data-revision="3">\n` and `<body>\n`: the link starts on the next line, so both keep passing.
+   `Pest.php`'s `proof_test_page()` renders through `proof_render_run()` and asserts nothing about the layout.
 
 ## Relation to other work
 
