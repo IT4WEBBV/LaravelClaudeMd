@@ -187,6 +187,10 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
 9. **Is a changelog entry needed?** No: this repo has neither `.changelog/` nor `CHANGELOG.md`.
 10. **Should the two deleted runs be restored to verify on them?** No: owner decision, 2026-10-02, verify on a
     fixture.
+11. **Does the plan pin more than the cases under *Testing*?** Yes, three inputs those cases leave open (added by
+    the plan step): a `repo` with whitespace around `owner/name` is trimmed and used; a `repo` with a character
+    outside GitHub's set (`IT4WEBBV/Deploy;rm`) or whitespace inside is null; and an old-scheme run `gh` cannot answer
+    for is asked about by its repo and keeps its stored state, as a run with `nameWithOwner` does.
 
 ## Relation to other work
 
