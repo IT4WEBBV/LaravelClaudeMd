@@ -72,9 +72,9 @@ this plan: the plan argues from it, and its `## Assumptions` 14–21 are the ans
 | File | Responsibility |
 |---|---|
 | `skills/pipeline/checks/questions.php` (create) | `QuestionKind`, `PIPELINE_ANSWER`, `pipeline_open_questions()`, `pipeline_unanswered()`, `pipeline_follow_ups()` |
-| `skills/pipeline/checks/record.php` (modify) | `pipeline_record_action_problem()` requires `kind` on an `open-question` and refuses it elsewhere |
+| `skills/pipeline/checks/record.php` (modify) | requires `questions.php` (Task 1); `pipeline_record_action_problem()` requires `kind` on an `open-question` and refuses it elsewhere |
 | `skills/pipeline/checks/brief.php` (modify) | the actions line, the kind sentence, the PR body line, the proof lines, `pipeline_answer_round_line()` |
-| `skills/pipeline/checks/dispatch_cli.php` (modify) | requires `questions.php`; `finish` answers `ask` or `done` with `followUps`; `ci` answers `ask` before its reads |
+| `skills/pipeline/checks/dispatch_cli.php` (modify) | `finish` answers `ask` or `done` with `followUps`; `ci` answers `ask` before its reads |
 | `skills/pipeline/checks/ci.php` (modify) | `pipeline_ci_answer()` takes `$unanswered`; `pipeline_ci_ask()` |
 | `skills/pipeline/checks/proof.php` (modify) | requires `questions.php`; `proof_open_questions_problems()`, `proof_open_question_problem()` |
 | `skills/pipeline/checks/proof_cli.php` (modify) | `write` refuses a payload whose `openQuestions` items are not `{kind, question}` |
@@ -103,11 +103,13 @@ which validates nothing, and strings stay valid there.
 **Files:**
 - Create: `skills/pipeline/checks/questions.php`
 - Create: `skills/pipeline/checks/tests/QuestionsTest.php`
+- Modify: `skills/pipeline/checks/record.php` (requires `questions.php`)
 - Modify: `skills/pipeline/checks/tests/Pest.php` (the file list)
 
 **Interfaces:**
-- Consumes: `ActionDisposition::OpenQuestion` (`checks/record.php`, loaded by every caller: `dispatch_cli.php`
-  and `tests/Pest.php`).
+- Consumes: `ActionDisposition::OpenQuestion` (`checks/record.php`, loaded by `dispatch_cli.php` and
+  `tests/Pest.php`). `record.php` requires `questions.php` from this task on, so every entry point that loads
+  `record.php` (`dispatch_cli.php` for `record` and `brief`) has `QuestionKind` before Tasks 2 and 3 use it.
 - Produces:
   - `enum QuestionKind: string { Blocking = 'blocking'; FollowUp = 'follow-up'; Remark = 'remark' }` with
     `public static function listed(): string` and `public function label(): string`
@@ -221,7 +223,8 @@ Create `skills/pipeline/checks/questions.php`:
 /**
  * Open questions (`../references/engine.md` §Open questions): the kind a resolve step gives each, which ones are
  * still open, and how an owner's answer is recorded. Pure: it reads the manifest array and requires no other
- * check file; `ActionDisposition` comes from `record.php`, which every caller loads.
+ * check file. `pipeline_open_questions()` reads `ActionDisposition` from `record.php`, which requires this file;
+ * the proof path (`proof.php`) loads this file without `record.php` and uses `QuestionKind` only.
  */
 
 enum QuestionKind: string
@@ -317,15 +320,26 @@ function pipeline_follow_ups(array $manifest): array
 }
 ```
 
+In `skills/pipeline/checks/record.php`, add after the file's docblock, before `enum ActionDisposition`:
+
+```php
+require_once __DIR__ . '/questions.php';
+```
+
+`record.php` is the file whose `pipeline_record_action_problem()` reads `QuestionKind` (Task 2), and
+`dispatch_cli.php` loads it for every command, `brief` included (Task 3's `pipeline_leg_overrides()` names the
+kinds). There is no cycle: `questions.php` requires nothing, and its use of `ActionDisposition` sits inside a
+function body, resolved at call time.
+
 - [ ] **Step 4: Run the tests to see them pass**
 
-Run: `php -l skills/pipeline/checks/questions.php && ./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter QuestionsTest`
+Run: `php -l skills/pipeline/checks/questions.php && php -l skills/pipeline/checks/record.php && ./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter QuestionsTest`
 Expected: PASS, 5 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add skills/pipeline/checks/questions.php skills/pipeline/checks/tests/QuestionsTest.php skills/pipeline/checks/tests/Pest.php
+git add skills/pipeline/checks/questions.php skills/pipeline/checks/record.php skills/pipeline/checks/tests/QuestionsTest.php skills/pipeline/checks/tests/Pest.php
 git commit -m "feat(pipeline): open questions carry a kind, and the manifest says which blocking ones are unanswered (#146)"
 ```
 
@@ -592,6 +606,9 @@ reaches the owner:
   `launch --decision` (`../checks/questions.php`). A question is open while no decision starts with its
   prefix, so a mistyped prefix leaves it open and the gate asks again. Every question counts,
   `plan-approval` ones included; one a later loop-back made moot is answered by keeping what was built.
+  A `plan-approval` question is asked only after the run built one branch of its fork through
+  `review-pr`, so an answer that picks the other branch goes through the detour below and may spend a
+  `pr-review` loop-back.
 - **`finish` answers `ask`** while a `blocking` question is unanswered:
   `{"action":"ask","proof":…,"questions":[{id, gate, kind, question, note, decision}],"followUps":[{question, note}]}`,
   and otherwise `done` with `followUps` too (`[]` when there are none). The cursor says `done` either
@@ -606,8 +623,9 @@ reaches the owner:
   1. Ask every question in one `AskUserQuestion`: 2–4 options per question from its `note`, the one the
      PR built first, recommendation first.
   2. Record each answer: the question's `decision` with the owner's answer appended, as `--decision`.
-     Append the same lines to the PR body (fetch the body, append, `gh pr edit --body-file`, as a halt's
-     reason is appended), so the answer outlives the disposable manifest.
+     Append the same lines at the end of the PR body (fetch the body, append, `gh pr edit --body-file`,
+     as a halt's reason is appended), below the `## Open questions` section a fix round rewrites, so the
+     answer outlives the disposable manifest.
   3. Every answer keeps what the PR built: `launch <manifest> "<manifest stem>.diff" --decision "…"`…
      answers `done`; then the CI gate. Any answer changes the code: `launch <manifest> "<manifest
      stem>.diff" --from review-pr --decision "…"`… with all the answers, and a new workflow through the
@@ -656,7 +674,7 @@ git commit -m "feat(pipeline): resolve steps give each open question a kind, and
 ### Task 4: `finish` answers `ask` while a `blocking` question is unanswered
 
 **Files:**
-- Modify: `skills/pipeline/checks/dispatch_cli.php` (requires `questions.php`; `dispatch_cli_finish()`; new `dispatch_cli_finished()`)
+- Modify: `skills/pipeline/checks/dispatch_cli.php` (`dispatch_cli_finish()`; new `dispatch_cli_finished()`)
 - Modify: `skills/pipeline/checks/tests/DispatchCliTest.php`
 - Modify: `skills/pipeline/references/engine.md` (§`autoflow`'s command block and its `finish` bullet)
 - Modify: `skills/pipeline/references/manifest.md` (the `decisions` row)
@@ -728,13 +746,9 @@ Expected: FAIL — `finish` answers `['action' => 'done', 'proof' => null]`: no 
 
 - [ ] **Step 3: Write the implementation**
 
-In `skills/pipeline/checks/dispatch_cli.php`, add after `require_once __DIR__ . '/record.php';`:
+`dispatch_cli.php` has `questions.php` through `record.php` (Task 1); it needs no require of its own.
 
-```php
-require_once __DIR__ . '/questions.php';
-```
-
-In `dispatch_cli_finish()`, replace
+In `skills/pipeline/checks/dispatch_cli.php`, in `dispatch_cli_finish()`, replace
 
 ```php
         return $problem === null ? dispatch_cli_done($manifestPath, $manifest) : dispatch_cli_halt($manifestPath, $manifest, $leg, $problem);

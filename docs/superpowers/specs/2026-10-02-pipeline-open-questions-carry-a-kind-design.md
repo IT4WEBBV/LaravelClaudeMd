@@ -107,9 +107,10 @@ const PIPELINE_ANSWER = 'Answer to open question ';
   question text listed once (a fix round's resolve step may carry one again).
 
 The file reads the manifest array and nothing else (`$manifest['gate_ledger']`, `$manifest['decisions']`),
-so it requires no other check file. `dispatch_cli.php` and `proof.php` require it (`proof_cli.php` loads
-`proof.php` through `proof_store.php` without the dispatch files, and the page validates kinds), and
-`tests/Pest.php`'s list gains it.
+so it requires no other check file. `record.php` and `proof.php` require it: `record.php` because its
+action check reads `QuestionKind` and `dispatch_cli.php` loads it for every command, `brief` included;
+`proof.php` because `proof_cli.php` loads it through `proof_store.php` without the dispatch files, and the
+page validates kinds. `tests/Pest.php`'s list gains it.
 
 ### 2. The resolve steps write a kind (`checks/record.php`, `checks/brief.php`)
 
