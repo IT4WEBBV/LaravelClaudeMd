@@ -100,6 +100,7 @@ it('corrects a stale status from gh in the prune pass, keeping updatedAt and the
         'prState' => $view['state'], 'status' => $status, 'updatedAt' => $before['updatedAt'], 'revision' => $before['revision'],
     ]);
     expect(file_get_contents($page))->toContain('pill-' . $status['state']);
+    expect(proof_test_status_runs(file_get_contents(dirname($page, 3) . '/status.js'))[0]['status'])->toBe($status['state']);
 })->with([
     'a draft that went ready' => [['status' => ['state' => 'running']], ['state' => 'OPEN', 'isDraft' => false], ['state' => 'ready']],
     'a stale Ready put back in draft' => [['status' => ['state' => 'ready']], ['state' => 'OPEN', 'isDraft' => true], ['state' => 'running']],
@@ -129,6 +130,7 @@ it('prunes a run that opened no PR two weeks after its last filing, and drops it
     expect(is_dir("{$root}/Deploy/feature-stale"))->toBeFalse();
     expect(is_dir("{$root}/Deploy/feature-fresh"))->toBeTrue();
     expect(file_get_contents("{$root}/index.html"))->not->toContain('feature-stale/index.html')->toContain('href="Deploy/feature-fresh/index.html"');
+    expect(array_column(proof_test_status_runs(file_get_contents("{$root}/status.js")), 'key'))->toBe(['Deploy/feature-fresh']);
 });
 
 it('prunes a run gh now reports merged once its last filing is more than a week old', function () {
@@ -142,4 +144,23 @@ it('prunes a run gh now reports merged once its last filing is more than a week 
 
     expect($result['stdout'])->toBe("proof: pruned 1 run(s)\n");
     expect(is_dir("{$root}/Deploy/pr-5-logs"))->toBeFalse();
+});
+
+it('rewrites status.js in the store the page is in when a status is written', function () {
+    $page = proof_test_page();
+    $root = dirname($page, 3);
+
+    proof_status_cli(['status', $page, 'halted', '--reason', 'CI red']);
+
+    $runs = proof_test_status_runs(file_get_contents("{$root}/status.js"));
+    expect($runs)->toHaveCount(1);
+    expect($runs[0])->toMatchArray(['key' => 'Deploy/pr-5-logs', 'status' => 'halted', 'revision' => 1]);
+    expect(file_exists("{$root}/status.js.tmp"))->toBeFalse();
+});
+
+it('prints its count and names on stderr the index it cannot write', function () {
+    $root = sys_get_temp_dir() . '/proof-missing-' . uniqid();
+
+    expect(proof_status_cli(['prune'], [...proof_fake_gh(null), 'PIPELINE_PROOF_ROOT' => $root]))
+        ->toBe(['code' => 0, 'stdout' => "proof: pruned 0 run(s)\n", 'stderr' => "proof: cannot write {$root}/index.html\n"]);
 });

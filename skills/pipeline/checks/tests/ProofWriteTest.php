@@ -183,3 +183,32 @@ it('files revision 1 and Running first, then counts each write and never takes a
     expect(proof_write_stored($root))->toMatchArray(['revision' => 2, 'status' => ['state' => 'halted', 'reason' => 'CI red']]);
     expect(proof_write_stored($root))->not->toHaveKey('cost');
 });
+
+it('leaves status.js beside the index at every write, naming the run, its status and its revision', function () {
+    $root = sys_get_temp_dir() . '/proof-write-' . uniqid();
+
+    proof_write_cli(proof_write_payload(), $root);
+    $first = proof_test_status_runs(file_get_contents("{$root}/status.js"));
+    proof_write_cli(proof_write_payload(), $root);
+    $second = proof_test_status_runs(file_get_contents("{$root}/status.js"));
+
+    expect($first)->toHaveCount(1);
+    expect($first[0])->toMatchArray(['key' => 'Deploy/pr-5-logs', 'status' => 'running', 'revision' => 1]);
+    expect($second[0])->toMatchArray(['key' => 'Deploy/pr-5-logs', 'status' => 'running', 'revision' => 2]);
+    expect($second[0]['hash'])->not->toBe($first[0]['hash']);
+    expect(file_get_contents("{$root}/index.html"))->toContain('data-hash="' . $second[0]['hash'] . '"');
+    expect(glob("{$root}/*.tmp"))->toBe([]);
+});
+
+it('says which store file it cannot write, and leaves no temporary file', function () {
+    $root = sys_get_temp_dir() . '/proof-store-' . uniqid();
+    mkdir("{$root}/status.js", 0777, true); // a directory where the file goes: the rename over it fails
+
+    expect(proof_store_index($root))->toBe("cannot write {$root}/status.js");
+    expect(glob("{$root}/*.tmp"))->toBe([]);
+    expect(is_file("{$root}/index.html"))->toBeTrue();
+
+    $missing = sys_get_temp_dir() . '/proof-missing-' . uniqid();
+    expect(proof_store_index($missing))->toBe("cannot write {$missing}/index.html");
+    expect(is_dir($missing))->toBeFalse();
+});

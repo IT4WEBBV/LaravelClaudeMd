@@ -190,7 +190,10 @@ function proof_cli_prune(): int
         }
     }
 
-    file_put_contents($root . '/index.html', proof_render_index(proof_scan_runs($root)));
+    $problem = proof_store_index($root);
+    if ($problem !== null) {
+        fwrite(STDERR, "proof: {$problem}\n");
+    }
     echo "proof: pruned {$pruned} run(s)\n";
 
     return 0;

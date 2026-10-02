@@ -952,6 +952,18 @@ its client summary. **What changed since the last look** is per browser: opening
 *New*, one filed again since it was opened *Updated*, and drops a seen `ready` run among the rest. A run filed before
 `revision` existed gets no marker. Without `localStorage` nothing is marked and the order is the status order. Open it with `~/Applications/Proofs.app` (Alfred, Spotlight or the Dock; README §Proofs app).
 
+**The open index tab.** Every store write (a filing, `handoff`'s included, a status, the prune pass, a cost) writes
+`status.js` beside `index.html` from the same scan (`proof_store_index()`): per run its key (`<repo>/<run>`), status,
+revision, a hash of the run as stored, and its row as the index renders it. The index, opened by hand and left open
+in a tab, loads it every 30 seconds, and at once when the tab becomes visible or the window gains focus, through a
+`<script src="status.js?t=<now>">` (`fetch()` is refused over `file://`). It replaces the rows whose hash changed,
+inserts new runs and removes pruned ones in place, without a reload or a lost scroll position, then marks, orders and
+filters every row again. Its title counts the unread runs (*New* or *Updated*) that are not merged or closed, whatever
+the filters show (`(2) Proofs`, else `Proofs`), and its favicon is a dot: red when one of them is halted, else green
+when one is ready, else blue, else a grey ring. A run leaves both once its page is opened and the index is looked at
+again. An empty store's index reloads itself once a run appears. Two limits: the signal exists only while the index
+tab is open, and Chrome throttles timers in background tabs, so a change can take a minute or so to show.
+
 **Retention.** The prune pass runs after every `proof_cli.php write` and on `proof_cli.php prune`. It corrects each
 run's status from `gh` first (above), then removes a run whose status is `merged` or `closed` 7 days after its last
 filing (`updatedAt`), and a run that opened no PR 14 days after its last filing, whatever its status; a run whose PR
