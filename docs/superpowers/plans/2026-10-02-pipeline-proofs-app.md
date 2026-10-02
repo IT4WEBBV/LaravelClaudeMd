@@ -421,9 +421,15 @@ osacompile -o "$TMPDIR/ProofsMissing.app" "$TMPDIR/ProofsMissing.applescript"
 open "$TMPDIR/ProofsMissing.app"
 ```
 
-Then `screencapture -x "$TMPDIR/proofs-missing-alert.png"` and read the image.
+Then `sleep 1; screencapture -x "$TMPDIR/proofs-missing-alert.png"` and read the image: `open` returns before the
+applet draws its alert, so the pause gives it time. A capture that shows only the desktop means the terminal lacks
+the Screen Recording permission, not that the alert is missing.
 Expected: an alert titled `No proof store index yet` whose message names
 `/Users/jroelofs/GitProjects/_proofs-missing-152/index.html`.
+
+If the alert sits behind another window instead of in front, add `activate` as the first statement of
+`skills/pipeline/apps/Proofs.applescript` (after its header comments), rerun Task 2 Step 4, Task 3 Step 1 (rebuilding the app) and this
+step, and commit the source change with that reason: the one exception to this task's *Nothing to commit*.
 
 Then: `pkill -f ProofsMissing.app; test ! -e ~/GitProjects/_proofs-missing-152 && echo nothing-created; rm -rf "$TMPDIR/ProofsMissing.app" "$TMPDIR/ProofsMissing.applescript"`
 Expected: `nothing-created`.
