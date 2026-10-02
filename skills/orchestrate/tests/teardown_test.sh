@@ -344,4 +344,12 @@ has   skills/slots/SKILL.md 'orchestrate/teardown.py'
 has   skills/slots/SKILL.md 'opened its PR from'
 lacks skills/slots/SKILL.md 'commands.md` §Teardown pass'
 
+has CLAUDE.md '**Watch the PR you open.**'
+has CLAUDE.md '`timeout: 7200000`'
+has CLAUDE.md '[ "$s" != OPEN ]; do sleep 60; done; echo "PR #<P> $s"'
+has CLAUDE.md 'python3 ~/.claude/skills/orchestrate/teardown.py <checkout> <P> --repo <repo>'
+has CLAUDE.md '`cd <primary checkout> && python3 '
+has CLAUDE.md 'a pipeline step or a subagent arms none'
+has CLAUDE.md "the teardown's \`git pull --ff-only\`"
+
 echo "PASS teardown.py"
