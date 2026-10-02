@@ -302,7 +302,8 @@ names must be unique across the two repos.
 `DevOps-Claude-Config` is a colleague's personal config: link only its `skills/`, never its
 `settings.json` or `CLAUDE.md`. After changing a hook, run its tests in `hooks/tests/`. Machine
 setup and hook wiring: `README.md`. Playbooks for porting a LaravelTemplate feature into a project
-(slots, changelog automation, base image upgrade, Pest migration): `docs/playbooks/`.
+(slots, changelog automation, base image upgrade, Pest migration): `docs/playbooks/`. What the
+harness's worktree guards allow, and how to work within them: `docs/harness-worktrees.md`.
 
 - Read a skill in full (its `SKILL.md` and references) before giving an opinion on its design. Grep
   counts mislead: pipeline leg names such as `review-pr` and `handoff` collide with skill names.

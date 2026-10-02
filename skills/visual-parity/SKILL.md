@@ -173,6 +173,15 @@ Rules that catch what eyeballing misses:
 - **Dynamic regions** (video thumbnails, carousels, ad slots, randomized content) must be masked/hidden or they diff run-to-run.
 - **Dismiss consent/cookie overlays** on both sides, and **scroll to trigger lazy images** before screenshotting.
 - A reference's **production overlays** (surveys, chat widgets) may appear — hide them in the page before measuring.
+- **Expired auth profiles capture the login page.** `auth.*.json` storageState expires; re-mint it before every run, not only after `migrate:fresh`. The tell is the same % on every authenticated surface.
+- **The config's `rebuild:` URL points at one stack.** When the work lives in a slot, point `rebuild` at that slot for the run and confirm the report shows the slot's page; the primary stack is often down or on another branch.
+
+## Reporting a phase
+
+The owner reviews a port against the reference, so anything that is not plain layout must be visible:
+
+- **Deferred work gets a placeholder.** A widget or section moved to a later phase gets a small labelled placeholder in its spot ("wordt later toegevoegd"), not a blank area: an omission reads as lost functionality.
+- **List the non-layout changes** in the wrap-up, separate from the visual ones: renamed routes, changed middleware or gates, routes replaced by wire actions, dropped or restyled-away functionality, scope trims. They are the owner's to accept, not something to find by diffing the report.
 
 ## Red Flags — STOP
 
