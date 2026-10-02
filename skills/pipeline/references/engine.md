@@ -584,8 +584,9 @@ failure, running the step again is the repair.
 The `implement` step is no skill: this section is the whole procedure, and its brief points here. The
 rules it follows are sections of this file, named where they apply rather than restated.
 
-1. **Read.** The issue when the manifest has `artifacts.issue` (`gh issue view <n> --comments`), the spec
-   and the plan whole, and the PR (`gh pr view <pr>`).
+1. **Read.** The issue when the manifest has `artifacts.issue` (`gh issue view <n> --json body,comments`:
+   `--comments` alone prints the thread without the body), the spec and the plan whole, and the PR
+   (`gh pr view <pr>`).
 2. **Stack.** Bring the dev stack up first, without asking (§Dev-stack readiness).
 3. **Validate the names the plan relies on** against the code as it stands, before the first change:
    every file, class, function, route and config key the plan names, by grep or by reading. A base merged
