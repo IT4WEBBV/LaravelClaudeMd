@@ -66,7 +66,9 @@ the other machine on its own:
 - `session` — at startup: syncs both config repos (fast-forward only, never over local work) and
   links any skill that has no symlink yet (and any skill's `workflow/*.js` into
   `~/.claude/workflows/`, any skill's `agents/*.md` into `~/.claude/agents/`, and the status line
-  script when `~/.claude/statusline-command.sh` does not exist), then checks the launch directory.
+  script when `~/.claude/statusline-command.sh` does not exist), compiles any skill's
+  `apps/*.applescript` into `~/Applications/` when no app of that name exists, then checks the
+  launch directory.
 - `edit` — the repo owning the file being written, once per repo per session.
 - `checkout` — drops cached verdicts after a branch switch.
 
@@ -167,6 +169,28 @@ ln -sfn ~/GitProjects/LaravelClaudeMd/LaravelClaudeMd/statusline/statusline-comm
 Its tests: `bash statusline/tests/statusline.test.sh`; the rows' rendering is in the pipeline suite
 (`StatuslineTest.php`).
 
+## Proofs app
+
+`~/Applications/Proofs.app` opens the proof store index, `~/GitProjects/_proofs/index.html`, in Chrome: type
+"proofs" in Alfred or Spotlight, or drag it to the Dock. When the index does not exist yet it says so and creates
+nothing. Chrome, because the index's New/Updated markers read what a run page stored in `localStorage`, and
+`file://` is one origin only in Chrome.
+
+The `session` hook compiles it from `skills/pipeline/apps/Proofs.applescript` when no `Proofs.app` is in
+`~/Applications`, and never replaces one. A changed source reaches a machine by deleting the app and starting a
+session:
+
+```bash
+rm -rf ~/Applications/Proofs.app
+```
+
+For the terminal, an optional line in `~/.zshrc`; it replaces an older
+`alias proofs='open ~/GitProjects/_proofs/index.html'` where a machine has one:
+
+```bash
+alias proofs='open ~/Applications/Proofs.app'
+```
+
 ## Hook tests
 
 Run after changing the hook:
@@ -176,5 +200,6 @@ bash hooks/tests/git-freshness-sync.test.sh
 ```
 
 It builds throwaway repos under `$TMPDIR` and covers every branch of the base-branch sync,
-including the sibling-worktree case that is easy to get silently wrong, plus the config-repo sync
-and skill linking.
+including the sibling-worktree case that is easy to get silently wrong, plus the config-repo sync,
+skill linking and app building (the cases that compile print `skip` on a machine without
+`osacompile`).
