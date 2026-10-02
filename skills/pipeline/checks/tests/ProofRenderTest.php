@@ -509,16 +509,34 @@ it('gives each row what the index script needs, its status, its figures, and a c
     expect($html)->toContain('<select id="repo-filter"><option value="">All repos</option><option value="Asimo">Asimo</option><option value="Deploy">Deploy</option></select>');
 });
 
-it('carries the index script: seen markers, the attention order, the remembered filter and the copy code', function () {
+it('carries the index script: seen markers, the remembered filters and toggle, search, header sorting, local times and the copy code', function () {
     $html = proof_render_index([proof_index_entry('pr-5-logs', [])]);
 
     expect($html)->toContain('<body class="index">');
     expect($html)->toContain("storage.getItem('seen:' + row.dataset.run)");
-    expect($html)->toContain("storage.setItem('proof:repo', filter.value)");
+    expect($html)->toContain("remember('proof:repo', repo.value)")
+        ->toContain("remember('proof:status', status.value)")
+        ->toContain("remember('proof:finished', finished.checked ? '1' : '0')")
+        ->toContain("restore(repo, 'proof:repo')")
+        ->toContain("restore(status, 'proof:status')");
+    // The toggle governs only All statuses: an explicit Merged or Closed shows those rows whatever it says.
+    expect($html)->toContain("status.value === '' ? finished.checked || row.dataset.finished === '0' : row.dataset.status === status.value");
+    expect($html)->toContain("search.addEventListener('input', show)");
+    expect($html)->toContain("header.setAttribute('aria-sort'");
+    expect($html)->toContain("querySelectorAll('time[datetime]')");
     expect($html)->toContain("window.addEventListener('pageshow'");
     expect($html)->toContain('navigator.clipboard.writeText');
     expect($html)->not->toContain('showModal()');
     expect(proof_render_index([]))->not->toContain('<script')->not->toContain('repo-filter')->toContain('No runs recorded');
+});
+
+it('renders an index script that parses as JavaScript', function () {
+    $file = sys_get_temp_dir() . '/proof-index-' . uniqid() . '.js';
+    file_put_contents($file, proof_render_index_script());
+    exec('node --check ' . escapeshellarg($file) . ' 2>&1', $output, $code);
+    unlink($file);
+
+    expect($code)->toBe(0, implode("\n", $output));
 });
 
 it('escapes the repo, the title, the reason and the summary in the index', function () {

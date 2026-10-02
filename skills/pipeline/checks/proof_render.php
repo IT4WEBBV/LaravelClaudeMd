@@ -764,24 +764,53 @@ function proof_index_search(array $run): string
 
 /**
  * The index's script, on `DOMContentLoaded` and again on a `pageshow` from the back/forward cache (Back from a page is
- * how the index is reached again): per row with a revision `New` when this browser never opened it, `Updated` when it
- * was filed again since; a seen Ready row drops among the rest; the rows re-ordered by that rank and their time; the
- * repo filter applied and remembered. Without `localStorage` (a private window, blocked site data) no row is marked,
- * the order is PHP's, and the filter works without being remembered.
+ * how the index is reached again):
+ *  - each Updated `<time>` in the browser's time, `dd-mm HH:MM`, the full `YYYY-MM-DD HH:MM:SS` on hover;
+ *  - per row with a revision `New` when this browser never opened it, `Updated` when it was filed again since; a seen
+ *    Ready row drops among the rest (its rank);
+ *  - the rows in the attention order (rank, then newest first), or by the column whose header was clicked: its first
+ *    direction, reversed by a second click, empty keys last either way, ties in the attention order;
+ *  - a row shows when the repo filter, the status filter (or, under All statuses, the toggle) and every search term
+ *    let it; `#no-match` when none does.
+ * The repo filter, the status filter and the toggle are remembered (`proof:repo`, `proof:status`, `proof:finished`);
+ * the search and the sort are not. Without `localStorage` (a private window, blocked site data) no row is marked and
+ * every control works unremembered.
  */
 function proof_render_index_script(): string
 {
     return <<<'JS'
 (function () {
-  var body = document.getElementById('runs').tBodies[0];
-  var filter = document.getElementById('repo-filter');
+  var table = document.getElementById('runs');
+  var body = table.tBodies[0];
+  var headers = Array.prototype.slice.call(table.tHead.rows[0].cells);
   var rows = Array.prototype.slice.call(body.rows);
+  var repo = document.getElementById('repo-filter');
+  var status = document.getElementById('status-filter');
+  var search = document.getElementById('search');
+  var finished = document.getElementById('show-finished');
+  var empty = document.getElementById('no-match');
+  var sorted = null;
   var storage = null;
   try {
     storage = window.localStorage;
     storage.getItem('proof:repo');
   } catch (error) {
     storage = null;
+  }
+  function remember(key, value) {
+    try { if (storage) { storage.setItem(key, value); } } catch (error) {}
+  }
+  function restore(select, key) {
+    var saved = storage.getItem(key);
+    if (Array.prototype.some.call(select.options, function (option) { return option.value === saved; })) { select.value = saved; }
+  }
+  function pad(number) { return String(number).padStart(2, '0'); }
+  function local(time) {
+    var date = new Date(time.getAttribute('datetime'));
+    if (isNaN(date.getTime())) { return; }
+    var clock = pad(date.getHours()) + ':' + pad(date.getMinutes());
+    time.textContent = pad(date.getDate()) + '-' + pad(date.getMonth() + 1) + ' ' + clock;
+    time.title = date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + clock + ':' + pad(date.getSeconds());
   }
   function mark(row) {
     var revision = Number(row.dataset.revision || 0);
@@ -790,29 +819,68 @@ function proof_render_index_script(): string
     row.querySelector('.marker').textContent = state === 'seen' ? '' : state;
     row.dataset.rank = state === 'seen' && row.dataset.group === '1' ? '2' : row.dataset.group;
   }
+  function attention(a, b) {
+    return (Number(a.dataset.rank || a.dataset.group) - Number(b.dataset.rank || b.dataset.group))
+      || ((Date.parse(b.dataset.updated) || 0) - (Date.parse(a.dataset.updated) || 0));
+  }
+  function byColumn(a, b) {
+    var x = a.cells[sorted.index].dataset.sort;
+    var y = b.cells[sorted.index].dataset.sort;
+    if (x === '' || y === '') { return (x === '') - (y === ''); }
+    var difference = sorted.type === 'number' ? Number(x) - Number(y) : x.localeCompare(y, undefined, { sensitivity: 'base', numeric: true });
+    return sorted.direction === 'asc' ? difference : -difference;
+  }
   function order() {
-    rows.sort(function (a, b) {
-      return (Number(a.dataset.rank) - Number(b.dataset.rank))
-        || ((Date.parse(b.dataset.updated) || 0) - (Date.parse(a.dataset.updated) || 0));
-    });
+    rows.sort(attention);
+    if (sorted) { rows.sort(byColumn); }
     rows.forEach(function (row) { body.appendChild(row); });
+    headers.forEach(function (header, index) {
+      if (sorted && sorted.index === index) {
+        header.setAttribute('aria-sort', sorted.direction === 'asc' ? 'ascending' : 'descending');
+      } else {
+        header.removeAttribute('aria-sort');
+      }
+    });
+  }
+  function visible(row, terms) {
+    return (repo.value === '' || row.dataset.repo === repo.value)
+      && (status.value === '' ? finished.checked || row.dataset.finished === '0' : row.dataset.status === status.value)
+      && terms.every(function (term) { return row.dataset.search.indexOf(term) !== -1; });
   }
   function show() {
-    rows.forEach(function (row) { row.hidden = filter.value !== '' && row.dataset.repo !== filter.value; });
+    var terms = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    var shown = 0;
+    rows.forEach(function (row) {
+      row.hidden = !visible(row, terms);
+      shown += row.hidden ? 0 : 1;
+    });
+    empty.hidden = shown > 0;
   }
   function refresh() {
+    table.querySelectorAll('time[datetime]').forEach(local);
     if (storage) {
       rows.forEach(mark);
-      order();
-      var saved = storage.getItem('proof:repo');
-      if (Array.prototype.some.call(filter.options, function (option) { return option.value === saved; })) { filter.value = saved; }
+      restore(repo, 'proof:repo');
+      restore(status, 'proof:status');
+      finished.checked = storage.getItem('proof:finished') === '1';
     }
+    order();
     show();
   }
-  filter.addEventListener('change', function () {
-    try { if (storage) { storage.setItem('proof:repo', filter.value); } } catch (error) {}
-    show();
+  headers.forEach(function (header, index) {
+    var button = header.querySelector('button.sort');
+    if (!button) { return; }
+    button.addEventListener('click', function () {
+      var again = sorted && sorted.index === index;
+      var direction = again ? (sorted.direction === 'asc' ? 'desc' : 'asc') : header.dataset.sortFirst;
+      sorted = { index: index, type: header.dataset.sortType, direction: direction };
+      order();
+    });
   });
+  repo.addEventListener('change', function () { remember('proof:repo', repo.value); show(); });
+  status.addEventListener('change', function () { remember('proof:status', status.value); show(); });
+  finished.addEventListener('change', function () { remember('proof:finished', finished.checked ? '1' : '0'); show(); });
+  search.addEventListener('input', show);
   document.addEventListener('DOMContentLoaded', refresh);
   window.addEventListener('pageshow', function (event) { if (event.persisted) { refresh(); } });
 })();

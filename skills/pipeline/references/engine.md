@@ -940,9 +940,14 @@ a page that cannot be amended is one line on stderr. `finish`'s and `returned`'s
 filing: `revision` and `updatedAt` stay as they were. A run filed before statuses existed reads as its `prState`
 says: `MERGED` Merged, `CLOSED` Closed, else Running.
 
-**The index** lists the runs by attention: `halted` first, then `ready`, then the rest, each newest first. It
-filters by repo (remembered per browser), shows per run its status, PR, page, shots, time and cost, and copies its
-client summary. **What changed since the last look** is per browser: opening a page stores its `revision` under
+**The index** shows the open runs by attention: `halted` first, then `ready`, then the rest, each newest first;
+merged and closed runs are hidden until *Show merged and closed (n)* is ticked. It filters by repo and by status (a
+chosen `merged` or `closed` shows those runs whatever the toggle says), searches title, PR number, branch and client
+summary, and sorts by a click on a column header (a second click reverses; a reload restores the attention order).
+The repo filter, the status filter and the toggle are remembered per browser (`proof:repo`, `proof:status`,
+`proof:finished` in `localStorage`); the search and the sort are not. Per run it shows the status, PR, page, shots,
+time and cost, and its last filing as `d-m H:i` in the browser's time with the full timestamp on hover, and copies
+its client summary. **What changed since the last look** is per browser: opening a page stores its `revision` under
 `seen:<repo>/<run>` in `localStorage` (`file://` is one origin in Chrome), and the index marks a run never opened
 *New*, one filed again since it was opened *Updated*, and drops a seen `ready` run among the rest. A run filed before
 `revision` existed gets no marker. Without `localStorage` nothing is marked and the order is the status order.
