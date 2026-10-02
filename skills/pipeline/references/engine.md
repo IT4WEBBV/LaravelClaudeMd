@@ -950,7 +950,7 @@ time and cost, and its last filing as `d-m H:i` in the browser's time with the f
 its client summary. **What changed since the last look** is per browser: opening a page stores its `revision` under
 `seen:<repo>/<run>` in `localStorage` (`file://` is one origin in Chrome), and the index marks a run never opened
 *New*, one filed again since it was opened *Updated*, and drops a seen `ready` run among the rest. A run filed before
-`revision` existed gets no marker. Without `localStorage` nothing is marked and the order is the status order.
+`revision` existed gets no marker. Without `localStorage` nothing is marked and the order is the status order. Open it with `~/Applications/Proofs.app` (Alfred, Spotlight or the Dock; README §Proofs app).
 
 **Retention.** The prune pass runs after every `proof_cli.php write` and on `proof_cli.php prune`. It corrects each
 run's status from `gh` first (above), then removes a run whose status is `merged` or `closed` 7 days after its last

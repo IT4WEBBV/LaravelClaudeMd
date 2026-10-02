@@ -504,6 +504,22 @@ else
 fi
 echo
 
+echo "case 23: the repo's own app sources compile"
+if command -v osacompile >/dev/null 2>&1; then
+    sources=0
+    mkdir -p "$root/own-apps"
+    for script in "$here"/../../skills/*/apps/*.applescript; do
+        [ -f "$script" ] || continue
+        sources=$((sources + 1))
+        name=$(basename "$script" .applescript)
+        if osacompile -o "$root/own-apps/$name.app" "$script" >/dev/null 2>&1; then ok "$name.applescript compiles"; else fail "$name.applescript compiles"; fi
+    done
+    is "$([ "$sources" -gt 0 ] && echo yes || echo no)" "yes" "the repo ships at least one app source"
+else
+    echo "  skip  osacompile not found"
+fi
+echo
+
 echo "----------------------------------------"
 printf '%d passed, %d failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]
