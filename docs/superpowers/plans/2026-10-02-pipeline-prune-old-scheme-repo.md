@@ -278,7 +278,7 @@ The bare-repo fixture lands at `{$root}/Deploy/pr-404-reverb-service-type`.
 
 - [ ] **Step 4: Run them to see three fail**
 
-Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter 'old-scheme run|bare repo'`
+Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter 'old-scheme run|bare repo and no nameWithOwner'`
 Expected:
 - *asks gh about an old-scheme run by its repo*: FAIL at `is_file($gh['PROOF_GH_LOG'])` (false: today's
   `proof_cli_pr_view()` returns null before calling `gh`).
@@ -316,7 +316,7 @@ Expected: `No syntax errors detected in skills/pipeline/checks/proof_cli.php`
 
 - [ ] **Step 6: Run them to see all four pass**
 
-Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter 'old-scheme run|bare repo'`
+Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter 'old-scheme run|bare repo and no nameWithOwner'`
 Expected: PASS, 4 tests.
 
 - [ ] **Step 7: Name the fallback in engine.md**
