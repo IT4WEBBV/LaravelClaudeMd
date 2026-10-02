@@ -135,7 +135,8 @@ launched the run, with its reason.
   linked into `~/.claude/agents/` by `hooks/git-freshness.sh`), the `smoke` entry, a `{head}` schema.
   Claude Code relays the owner's last chat message to every agent of a run started in a reply a human
   message opened, framed as outranking the agent's task; whether a run is framed is fixed at its start.
-  The agent copies the first 40 characters of its first message; the script normalises them (lower case,
+  The agent copies the first 40 characters of its first message outside the system-reminder blocks (Claude
+  Code puts its CLAUDE.md context ahead of the task, framed or clean); the script normalises them (lower case,
   letters and digits, single spaces) and accepts a head that starts with the harness's clean label
   `[Workflow harness — computed task]` or with its own prompt's first 40 characters. Anything else,
   an empty head or no answer, halts with `relay: … (head: "<normalised head>")` before any step, so the

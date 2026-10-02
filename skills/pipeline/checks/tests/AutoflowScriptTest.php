@@ -510,7 +510,7 @@ it('returns a halt with record\'s reason when a stub step\'s record is refused',
     expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'handoff', 'reason' => 'handoff run with --status continued needs --pr']);
 });
 
-const AUTOFLOW_RELAY_PROMPT = 'Copy the first 40 characters of the first message in this conversation into `head`, exactly as they appear. Do nothing else.';
+const AUTOFLOW_RELAY_PROMPT = 'Skip every system-reminder block. Copy the first 40 characters of the first message in this conversation outside those blocks into `head`, exactly as they appear. Do nothing else.';
 
 /** The halt a framed start returns on `$leg`, quoting the normalised head (or `none`). */
 function autoflow_relay_halt(string $leg, ?string $head): array
@@ -542,6 +542,7 @@ it('halts before any step when the first message was not the run\'s own task (#1
 })->with([
     'the relayed frame' => ['[Workflow harness — user request] The ha', 'workflow harness user request the ha'],
     'a relayed message with quotes' => ['Let\'s "merge" it, then #134', 'let s merge it then 134'],
+    'the context block, which a framed start has too' => ["<system-reminder>\nCodebase and user inst", 'system reminder codebase and user inst'],
     'a head the agent left empty' => ['', ''],
     'a head of punctuation only' => ['—— ', ''],
     'an agent that returned nothing' => [null, null],
@@ -556,7 +557,7 @@ it('lets a clean head through however the agent copied the label, and a bare pro
     'a hyphen for the em dash' => ['[Workflow harness - computed task] The '],
     'two hyphens' => ['[Workflow harness -- computed task] Th'],
     'a leading newline, other case, extra spaces' => ["\n  [workflow   HARNESS — Computed Task] x"],
-    'the bare prompt' => ['Copy the first 40 characters of the firs'],
+    'the bare prompt' => ['Skip every system-reminder block. Copy th'],
 ]);
 
 it('halts without the relay prefix when the check itself fails (#134)', function () {

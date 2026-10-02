@@ -24,9 +24,10 @@ const COPIED = { design: { size: { type: 'string', enum: ['Bounded', 'Architectu
 const UNSATISFIABLE = { type: 'object', properties: { status: { type: 'string', enum: [] } }, required: ['status'] } // invalid: agent() throws before starting an agent — the smoke run's thrown error
 // #134: Claude Code relays the owner's last chat message to every agent of a run started in a reply a human
 // message opened. A clean run's first message starts with the harness's computed-task label (or, sent bare,
-// with this prompt); the label stays here, never in the prompt, so a framed agent cannot echo it.
+// with this prompt); the label stays here, never in the prompt, so a framed agent cannot echo it. Claude Code
+// puts its CLAUDE.md context, a system-reminder block, ahead of either, so the agent skips those blocks.
 const RELAY_LABEL = '[Workflow harness — computed task]'
-const RELAY_PROMPT = 'Copy the first 40 characters of the first message in this conversation into `head`, exactly as they appear. Do nothing else.'
+const RELAY_PROMPT = 'Skip every system-reminder block. Copy the first 40 characters of the first message in this conversation outside those blocks into `head`, exactly as they appear. Do nothing else.'
 const RELAY_SCHEMA = { type: 'object', properties: { head: { type: 'string' } }, required: ['head'] }
 
 function complete(tables) {
