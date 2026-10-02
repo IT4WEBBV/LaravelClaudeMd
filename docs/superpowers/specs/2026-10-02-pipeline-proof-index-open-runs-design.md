@@ -183,7 +183,8 @@ it. What it adds:
 4. **Order**: with no column chosen, #142's order (rank, then `data-updated` newest first). A click on a header's
    button sorts by that column in its first direction; a second click on the same header reverses it; a click on
    another header starts that one in its first direction. Numbers compare as numbers, text with
-   `localeCompare(…, {sensitivity: 'base'})`. An empty key sorts last in both directions. Ties keep the attention
+   `localeCompare(…, {sensitivity: 'base', numeric: true})`, so digit runs compare as numbers (`PR #412: …` before
+   `PR #1000: …`). An empty key sorts last in both directions. Ties keep the attention
    order (the sort runs over the rows in the default order and is stable). The sorted header gets `aria-sort`
    (`ascending` or `descending`), the others lose it; CSS shows `▲` or `▼` after the sorted button. The chosen
    column is not remembered: a reload shows the attention order again. A `pageshow` refresh re-applies whatever

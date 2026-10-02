@@ -884,7 +884,7 @@ function proof_render_index_script(): string
     var x = a.cells[sorted.index].dataset.sort;
     var y = b.cells[sorted.index].dataset.sort;
     if (x === '' || y === '') { return (x === '') - (y === ''); }
-    var difference = sorted.type === 'number' ? Number(x) - Number(y) : x.localeCompare(y, undefined, { sensitivity: 'base' });
+    var difference = sorted.type === 'number' ? Number(x) - Number(y) : x.localeCompare(y, undefined, { sensitivity: 'base', numeric: true });
     return sorted.direction === 'asc' ? difference : -difference;
   }
   function order() {
@@ -1045,7 +1045,11 @@ Type into the search box (`browser_type`), clearing it between terms, with the t
 
 Clear the search. Click the *PR* header button: the first visible row has the highest PR number, the rows without a
 PR come last, and the header has `aria-sort="descending"` and shows `▼`. Click it again: lowest first, rows without a
-PR still last, `▲`. Click *Run*: A–Z, `aria-sort="ascending"`, and *PR* lost its `aria-sort`. Reload: the attention
+PR still last, `▲`. Click *Run*: A–Z, `aria-sort="ascending"`, and *PR* lost its `aria-sort`; digit runs compare as numbers, where
+as plain text `PR #2036: …` would sort before `PR #484: …`. Tick *Show merged and closed* so two-, three- and
+four-digit PR numbers are all on screen; the visible `PR #<n>:` titles read in rising number:
+`() => { const n = [...document.querySelectorAll('#runs tbody tr:not([hidden])')].map(r => r.cells[3].dataset.sort).filter(t => /^PR #\d+:/.test(t)).map(t => parseInt(t.slice(4), 10)); return n.length > 1 && n.every((v, i) => i === 0 || n[i - 1] <= v); }`
+→ `true`. Untick the box again. Reload: the attention
 order again (halted, then ready, then the rest) and no header has `aria-sort`.
 
 - [ ] **Step 6: Updated in local time**
@@ -1068,4 +1072,5 @@ legible on both backgrounds and wrap onto several lines at 390 px; at 390 px
 Stop the `php -S` server and remove the `mktemp` dir itself, not only `_proofs` inside it:
 `rm -rf "$(dirname "$COPY")"`. Confirm the live store was not written:
 `grep -c 'class="controls"' ~/GitProjects/_proofs/index.html` prints `0` (no filing has rendered with the new code
-before the merge).
+before the merge). `grep -c` exits 1 when it counts nothing, so here exit status 1 with `0` printed is the expected
+outcome, not a failed command.
