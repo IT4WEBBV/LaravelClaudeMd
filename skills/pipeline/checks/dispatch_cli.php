@@ -185,6 +185,22 @@ function dispatch_cli_done(string $manifestPath, array $manifest): array
     return ['action' => 'done', 'proof' => $manifest['artifacts']['proof'] ?? null];
 }
 
+/**
+ * An `autoflow` `done` that holds: recorded as done, then `ask` while a `blocking` open question is unanswered,
+ * so the session asks the owner before the CI gate, else `done`; both carry the `follow-up` questions for the
+ * report (`../references/engine.md` §Open questions).
+ */
+function dispatch_cli_finished(string $manifestPath, array $manifest): array
+{
+    $done = dispatch_cli_done($manifestPath, $manifest);
+    $questions = pipeline_unanswered($manifest);
+    $followUps = pipeline_follow_ups($manifest);
+
+    return $questions === []
+        ? [...$done, 'followUps' => $followUps]
+        : ['action' => 'ask', 'proof' => $done['proof'], 'questions' => $questions, 'followUps' => $followUps];
+}
+
 /** Read from the committed spec, never stored; a spec that cannot be read is Architectural. */
 function dispatch_cli_design_size(array $manifest): DesignSize
 {
@@ -418,7 +434,7 @@ function dispatch_cli_finish(string $manifestPath, string $decisionJson): array
     if (($decision['action'] ?? null) === 'done') {
         $problem = $leg === 'review-pr' ? dispatch_cli_finish_problem($manifestPath, $manifest) : "the workflow returned done at {$leg}";
 
-        return $problem === null ? dispatch_cli_done($manifestPath, $manifest) : dispatch_cli_halt($manifestPath, $manifest, $leg, $problem);
+        return $problem === null ? dispatch_cli_finished($manifestPath, $manifest) : dispatch_cli_halt($manifestPath, $manifest, $leg, $problem);
     }
     $reason = trim((string) ($decision['reason'] ?? ''));
     $named = $decision['leg'] ?? null;

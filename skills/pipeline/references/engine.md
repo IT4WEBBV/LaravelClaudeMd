@@ -89,7 +89,8 @@ php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from 
 #   | {"action":"done"} | {"action":"halt","reason":…}
 # start: through the detour (SKILL.md §autoflow step 3): this reply ends on a background wait; the reply its notice opens calls the workflow pipeline-autoflow with that JSON as args, first; wait for its completion notice
 php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
-# → {"action":"done","proof":<artifacts.proof, or null>} | {"action":"halt","reason":…} | {"action":"halt","reason":"relay: …","relaunch":true}, once
+# → {"action":"done","proof":<artifacts.proof, or null>,"followUps":[…]} | {"action":"ask","proof":…,"questions":[…],"followUps":[…]} (§Open questions)
+#   | {"action":"halt","reason":…} | {"action":"halt","reason":"relay: …","relaunch":true}, once
 php "$CHECKS/dispatch_cli.php" ci <manifest> --poll <n>                  # after done: the CI gate, polled (§The CI gate)
 ```
 
@@ -171,6 +172,9 @@ launched the run, with its reason.
   **`gh pr ready <pr>`**, then `proof_cli.php status <proof> ready` with the `proof` `done` names
   (§The CI gate, §Who takes the PR out of draft, §The proof store); on a halt after `handoff`,
   §Failure policy's duties.
+  A `done` that holds answers `ask` instead while a `blocking` open question is unanswered: the cursor
+  still says `done`, and the session asks the owner and records the answers before the CI gate runs
+  (§Open questions). Both answers carry `followUps`, the `follow-up` questions for the report.
   A `relay:` halt also answers `relaunch: true` unless the cursor it overwrites already holds a `relay:`
   halt: the invoking session then runs `launch` again with no `--from` and no `--decision` and starts
   the run through the detour, with no PR body entry, no proof page and no question. A run that got past

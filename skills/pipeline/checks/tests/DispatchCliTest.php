@@ -615,8 +615,50 @@ it('finishes only after a review-pr resolve step whose return holds', function (
     expect(manifest_read($fixture['manifest'])['cursor'])->toMatchArray(['leg' => 'review-pr', 'status' => 'halted']);
 
     dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => ['leg' => 'review-pr', 'status' => 'continued'], 'gate_ledger' => [[...$open, 'actions' => [], 'outcome' => 'continued']]]);
-    expect($finish())->toBe(['action' => 'done', 'proof' => null]);
+    expect($finish())->toBe(['action' => 'done', 'proof' => null, 'followUps' => []]);
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-pr', 'status' => 'done']);
+});
+
+/** A finished `autoflow` run's review-pr resolve step that completed its entry with `$actions`; its `finish` answer. */
+function finish_with_actions(array $actions): array
+{
+    $open = boundary_open('pr-review');
+    $fixture = boundary_fixture('review-pr', 'resolve', ['cursor' => ['leg' => 'review-pr', 'status' => 'pending'], 'gate_ledger' => [$open]]);
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => ['leg' => 'review-pr', 'status' => 'continued'], 'gate_ledger' => [[...$open, 'actions' => $actions, 'outcome' => 'continued']]]);
+
+    return [...$fixture, 'answer' => dispatch_cli(['finish', $fixture['manifest'], '{"action":"done"}'])['json']];
+}
+
+it('answers ask on a done run with an unanswered blocking question, the cursor done all the same (#146)', function () {
+    $finished = finish_with_actions([
+        ['claim' => 'Keep the <x-time> tag?', 'disposition' => 'open-question', 'note' => '<x-time> (built), a plain div', 'kind' => 'blocking'],
+        ['claim' => 'File the date-format cleanup?', 'disposition' => 'open-question', 'note' => 'outside this PR', 'kind' => 'follow-up'],
+        ['claim' => 'self-end alignment', 'disposition' => 'open-question', 'note' => 'kept', 'kind' => 'remark'],
+    ]);
+
+    expect($finished['answer'])->toBe([
+        'action' => 'ask', 'proof' => null,
+        'questions' => [[
+            'id' => 'gate_ledger[0].actions[0]', 'gate' => 'pr-review', 'kind' => 'blocking', 'question' => 'Keep the <x-time> tag?', 'note' => '<x-time> (built), a plain div',
+            'decision' => 'Answer to open question gate_ledger[0].actions[0] ("Keep the <x-time> tag?"): ',
+        ]],
+        'followUps' => [['question' => 'File the date-format cleanup?', 'note' => 'outside this PR']],
+    ]);
+    expect(manifest_read($finished['manifest'])['cursor'])->toBe(['leg' => 'review-pr', 'status' => 'done']);
+});
+
+it('answers done with the follow-ups on a run with only follow-up and remark questions, and done after an answer launch recorded (#146)', function () {
+    $followUp = ['claim' => 'File the date-format cleanup?', 'disposition' => 'open-question', 'note' => 'outside this PR', 'kind' => 'follow-up'];
+    $remark = ['claim' => 'self-end alignment', 'disposition' => 'open-question', 'note' => 'kept', 'kind' => 'remark'];
+
+    expect(finish_with_actions([$followUp, $remark])['answer'])
+        ->toBe(['action' => 'done', 'proof' => null, 'followUps' => [['question' => 'File the date-format cleanup?', 'note' => 'outside this PR']]]);
+
+    $asked = finish_with_actions([['claim' => 'Queue or cron?', 'disposition' => 'open-question', 'note' => 'cron (built), queue', 'kind' => 'blocking']]);
+    $decision = $asked['answer']['questions'][0]['decision'] . 'cron, as built';
+    expect(dispatch_cli(['launch', $asked['manifest'], $asked['diff'], '--decision', $decision])['json'])->toBe(['action' => 'done']);
+    expect(manifest_read($asked['manifest']))->toMatchArray(['cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'decisions' => [$decision]]);
+    expect(pipeline_unanswered(manifest_read($asked['manifest'])))->toBe([]);
 });
 
 it('refuses done when the last snapshot is not review-pr\'s resolve step, or there is none', function () {
