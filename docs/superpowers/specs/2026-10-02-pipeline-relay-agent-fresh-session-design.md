@@ -208,6 +208,18 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
     name, and the reason tells the owner which command to run; a fresh session's start hook makes the link
     anyway when the hook is wired.
 11. **Changelog?** The repo has no `CHANGELOG.md` and no `.changelog/`: none.
+12. **Where is `PIPELINE_AGENTS_DIR` documented?** (Added by the plan step.) Only in
+    `dispatch_cli_relay_agent_problem()`'s docblock and the test helper, as `PIPELINE_PROOF_ROOT` is in
+    `proof_root()`'s: it is a test seam, not an owner setting, so engine.md does not name it. `launch` does not
+    read the hook's own `GIT_FRESHNESS_AGENTS_DIR`; both default to `$HOME/.claude/agents`.
+13. **Does the plan test more than *Testing* lists?** (Added by the plan step.) Yes, five cases that pin claims
+    this spec makes but its list does not exercise: the `$HOME/.claude/agents` default when
+    `PIPELINE_AGENTS_DIR` is empty; a CI fix round's `launch --from review-pr` on a `done` run without the link
+    (halts, the run stays `done`, no decision appended); a `fresh session:` halt over a `relay:` halt (still no
+    relaunch); the script's session halt carried through `finish` (recorded, no relaunch); and a thrown message
+    that names the type and `not found` apart (`the relay check failed: …`, not the session reason).
+14. **Does pipeline `SKILL.md`'s own *Remove when* name `launch`'s check too?** (Added by the plan step.) Yes,
+    beside engine.md's: both list what goes together, and a list that leaves the check out would strand it.
 
 ## Relation to other work
 
