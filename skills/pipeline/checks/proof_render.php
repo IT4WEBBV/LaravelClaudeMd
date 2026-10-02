@@ -95,6 +95,15 @@ td .reason { display:block; margin-top:.15rem; }
 tr.workflow th { color:var(--muted); font-weight:600; padding-top:.9rem; }
 tr.total th, tr.total td { font-weight:700; border-top:2px solid var(--line); }
 .marker { margin-left:.4rem; color:var(--ready); font-size:.7rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.unread-count { margin-left:.25rem; color:var(--ready); font-size:.7rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; vertical-align:middle; }
+tr.unread td { font-weight:700; }
+tr.read td { color:var(--muted); }
+.dot { display:none; width:1rem; height:1rem; margin:0 .3rem 0 0; padding:0; border:0; border-radius:50%; background:none; color:inherit; cursor:pointer; vertical-align:-.15rem; }
+tr.unread .dot, tr.read .dot { display:inline-flex; align-items:center; justify-content:center; }
+.dot::before { content:""; width:.55rem; height:.55rem; border-radius:50%; border:1.5px solid var(--muted); box-sizing:border-box; }
+tr.unread .dot::before { background:var(--ready); border-color:var(--ready); }
+.dot:hover::before, .dot:focus-visible::before { border-color:var(--fg); }
+.dot:focus-visible { outline:2px solid var(--ready); outline-offset:1px; }
 .controls { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem 1rem; margin:1rem 0; color:var(--muted); font-size:.875rem; }
 .controls label { display:flex; align-items:center; gap:.4rem; }
 .controls select, .controls input[type=search] { font:inherit; color:var(--fg); background:var(--card); border:1px solid var(--line); border-radius:.35rem; padding:.2rem .5rem; }
@@ -579,14 +588,15 @@ function proof_render_index(array $runs): string
             . "<div class=\"table-wrap\">\n<table id=\"runs\">\n" . proof_render_index_head() . "<tbody>\n"
             . implode('', array_map(proof_render_index_row(...), $runs))
             . "</tbody>\n</table>\n</div>\n<p id=\"no-match\" class=\"meta\" hidden>No runs match.</p>\n";
-    $script = "<script>\n" . proof_render_copy_script() . "\n" . proof_render_index_script() . "\n</script>\n";
+    $script = "<script>\n" . proof_render_copy_script() . "\n" . proof_render_unread_script() . "\n" . proof_render_index_script() . "\n</script>\n";
+    $heading = $runs === [] ? 'Pipeline proof store' : 'Pipeline proof store <span id="unread-count" class="unread-count"></span>';
 
     $styles = proof_render_styles();
 
     return "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
         . "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
         . "<title>Proofs</title>\n" . proof_render_favicon() . "<style>\n{$styles}\n</style>\n</head>\n<body class=\"index\">\n"
-        . "<h1>Pipeline proof store</h1>\n"
+        . "<h1>{$heading}</h1>\n"
         . $body
         . $script
         . "</body>\n</html>\n";
@@ -747,8 +757,8 @@ function proof_render_status_js(array $runs): string
 }
 
 /**
- * One run: what the index script reads (its hash last), its status, where it lives, its page, its figures, and its
- * summary to copy. `status.js` carries the same text, so a row the script inserts or replaces is this one; its copy
+ * One run: what the index script reads (its hash last), its status, where it lives, its page (after the dot that marks
+ * it read or unread, for a run with a seen number), its figures, and its summary to copy. `status.js` carries the same text, so a row the script inserts or replaces is this one; its copy
  * target is named by the run, so it never collides with another row's.
  */
 function proof_render_index_row(array $entry): string
@@ -789,12 +799,13 @@ function proof_render_index_row(array $entry): string
     $copy = $summary === ''
         ? ''
         : "<button type=\"button\" class=\"copy\" data-copy=\"{$target}\">Copy</button><span id=\"{$target}\" lang=\"nl\" hidden>" . proof_e($summary) . '</span>';
+    $dot = $seen === null ? '' : '<button type="button" class="dot"></button>';
 
     return "<tr{$attributes}>"
         . proof_render_index_cell($status->order(), proof_render_status($run))
         . proof_render_index_cell($repo, '<code>' . proof_e($repo) . '</code>')
         . proof_render_index_cell(empty($run['pr']) ? '' : (int) $run['pr'], $pr)
-        . proof_render_index_cell($title, '<a href="' . proof_e("{$key}/index.html") . '">' . proof_e($title) . '</a><span class="marker"></span>')
+        . proof_render_index_cell($title, $dot . '<a href="' . proof_e("{$key}/index.html") . '">' . proof_e($title) . '</a><span class="marker"></span>')
         . proof_render_index_cell($shots, (string) $shots, 'num')
         . proof_render_index_cell($cost === [] ? '' : $totals['seconds'], $cost === [] ? '' : proof_minutes($totals['seconds']), 'num')
         . proof_render_index_cell($cost === [] ? '' : $totals['cost'], $cost === [] ? '' : proof_millions($totals['cost']), 'num')
@@ -839,16 +850,38 @@ function proof_index_search(array $run): string
 }
 
 /**
+ * The unread rule (`../references/engine.md` §The proof store, *What changed since the last look*): one global function
+ * the index script calls and the tests run under `node`. `seen` is the row's number (`proof_run_seen()`, 0 without a
+ * revision: never unread), `stored` what this browser holds under the run's `seen:` key (null when it never opened the
+ * page, `'0'` when the owner marked it unread, which opening a page never stores), `status` the row's status. Returns
+ * `''` for a read row, else the hint of what the row needs now: New, then Halted or Ready by its status, then Unread
+ * for a row marked by hand, else Updated.
+ */
+function proof_render_unread_script(): string
+{
+    return <<<'JS'
+function proofUnread(seen, stored, status) {
+  if (!seen) { return ''; }
+  if (stored === null) { return 'New'; }
+  if (Number(stored) >= seen) { return ''; }
+  return status === 'halted' ? 'Halted' : status === 'ready' ? 'Ready' : stored === '0' ? 'Unread' : 'Updated';
+}
+JS;
+}
+
+/**
  * The index's script. With a table, on `DOMContentLoaded` and again on a `pageshow` from the back/forward cache (Back
  * from a page is how the index is reached again):
  *  - each Updated `<time>` in the browser's time, `dd-mm HH:MM`, the full `YYYY-MM-DD HH:MM:SS` on hover;
- *  - per row with a revision `New` when this browser never opened it, `Updated` when it was filed again since
- *    (`unread()`, the one rule #160 replaces); a seen Ready row drops among the rest (its rank);
+ *  - per row with a seen number the hint `proofUnread()` gives (`unread()`), the row `unread` (bold, a filled dot) or
+ *    `read` (muted, an outline dot) and the dot's label; a seen Ready row drops among the rest (its rank). A click on
+ *    the dot stores the row's number (read) or `'0'` (unread) and marks, orders and filters again at once;
  *  - the rows in the attention order (rank, then newest first), or by the column whose header was clicked: its first
  *    direction, reversed by a second click, empty keys last either way, ties in the attention order;
  *  - a row shows when the repo filter, the status filter (or, under All statuses, the toggle) and every search term
  *    let it; `#no-match` when none does;
- *  - the tab (`tab()`): the title counts the unread runs that are not merged or closed, whatever the filters show
+ *  - the tab (`tab()`): the title and the heading's `#unread-count` count the unread runs that are not merged or
+ *    closed, whatever the filters show
  *    (`(2) Proofs`, else `Proofs`), and the favicon is the link's halted, ready, unread or none icon, in that order.
  * It polls `status.js` every 30 seconds, when the tab becomes visible, when the window gains focus and after a
  * `pageshow` from the cache, through a script tag, since `fetch()` is refused over `file://` (`poll()`): a row whose
@@ -856,7 +889,8 @@ function proof_index_search(array $run): string
  * filtered again and the tab updated (`apply()`); the page is never reloaded. A failed load changes nothing. Without a
  * table (an empty store) it only polls, and reloads once `status.js` names a run.
  * The repo filter, the status filter and the toggle are remembered (`proof:repo`, `proof:status`, `proof:finished`);
- * the search and the sort are not. Without `localStorage` (a private window, blocked site data) no row is marked,
+ * the search and the sort are not. Without `localStorage` (a private window, blocked site data) no row is marked or
+ * styled, no dot shows,
  * nothing is unread, and every control works unremembered.
  */
 function proof_render_index_script(): string
@@ -904,6 +938,7 @@ function proof_render_index_script(): string
   var finished = document.getElementById('show-finished');
   var finishedCount = document.getElementById('finished-count');
   var empty = document.getElementById('no-match');
+  var count = document.getElementById('unread-count');
   var template = document.createElement('template');
   var sorted = null;
   function remember(key, value) {
@@ -922,15 +957,20 @@ function proof_render_index_script(): string
     time.title = date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + clock + ':' + pad(date.getSeconds());
   }
   function unread(row) {
-    var seen = Number(row.dataset.seen || 0);
-    if (!storage || !seen) { return ''; }
-    var stored = storage.getItem('seen:' + row.dataset.run);
-    return stored === null ? 'New' : Number(stored) < seen ? 'Updated' : '';
+    return storage ? proofUnread(Number(row.dataset.seen || 0), storage.getItem('seen:' + row.dataset.run), row.dataset.status) : '';
   }
+  // A row without a dot (a run filed before revisions) returns before the class toggles, so it is never styled read.
   function mark(row) {
     var state = unread(row);
+    var dot = row.querySelector('button.dot');
     row.querySelector('.marker').textContent = state;
     row.dataset.rank = state === '' && row.dataset.seen && row.dataset.group === '1' ? '2' : row.dataset.group;
+    if (!dot) { return; }
+    var label = state === '' ? 'Mark as unread' : 'Mark as read';
+    row.classList.toggle('unread', state !== '');
+    row.classList.toggle('read', state === '');
+    dot.setAttribute('aria-label', label);
+    dot.title = label;
   }
   function attention(a, b) {
     return (Number(a.dataset.rank || a.dataset.group) - Number(b.dataset.rank || b.dataset.group))
@@ -973,6 +1013,7 @@ function proof_render_index_script(): string
     var unseen = rows.filter(function (row) { return row.dataset.finished === '0' && unread(row) !== ''; });
     function has(state) { return unseen.some(function (row) { return row.dataset.status === state; }); }
     var icon = favicon.dataset[has('halted') ? 'halted' : has('ready') ? 'ready' : unseen.length ? 'unread' : 'none'];
+    count.textContent = unseen.length ? unseen.length + ' unread' : '';
     document.title = unseen.length ? '(' + unseen.length + ') Proofs' : 'Proofs';
     if (favicon.getAttribute('href') === icon) { return; }
     var next = favicon.cloneNode();
@@ -1039,6 +1080,20 @@ function proof_render_index_script(): string
   status.addEventListener('change', function () { remember('proof:status', status.value); show(); });
   finished.addEventListener('change', function () { remember('proof:finished', finished.checked ? '1' : '0'); show(); });
   search.addEventListener('input', show);
+  body.addEventListener('click', function (event) {
+    var dot = event.target.closest('button.dot');
+    if (!dot || !storage) { return; }
+    var row = dot.closest('tr');
+    try {
+      storage.setItem('seen:' + row.dataset.run, unread(row) === '' ? '0' : row.dataset.seen);
+    } catch (error) {
+      return;
+    }
+    mark(row);
+    order();
+    show();
+    tab();
+  });
   document.addEventListener('DOMContentLoaded', refresh);
   window.addEventListener('pageshow', function (event) { if (event.persisted) { refresh(); check(); } });
 })();

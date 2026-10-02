@@ -510,6 +510,7 @@ it('gives each row what the index script needs, its status, its figures, and a c
     expect($html)->toContain('<td class="num" data-sort=""></td><td class="num" data-sort=""></td>');
     expect($html)->toContain("<button type=\"button\" class=\"copy\" data-copy=\"{$copy}\">Copy</button><span id=\"{$copy}\" lang=\"nl\" hidden>De logboeken lopen mee.</span>");
     expect(substr_count($html, 'class="copy"'))->toBe(1);
+    expect(substr_count($html, 'class="dot"'))->toBe(1);
     expect($html)->toContain('<select id="repo-filter"><option value="">All repos</option><option value="Asimo">Asimo</option><option value="Deploy">Deploy</option></select>');
 });
 
@@ -749,7 +750,7 @@ it('names the index tab Proofs and gives it a favicon link with the four icons t
     expect(rawurldecode($icons['ready']))->toContain("fill='#16a34a'");
     expect(rawurldecode($icons['unread']))->toContain("fill='#2563eb'");
     expect(rawurldecode($icons['none']))->toContain("fill='none'")->toContain("stroke='#71717a'");
-    expect($html)->toContain("<title>Proofs</title>\n")->toContain('<h1>Pipeline proof store</h1>');
+    expect($html)->toContain("<title>Proofs</title>\n")->toContain('<h1>Pipeline proof store <span id="unread-count" class="unread-count"></span></h1>');
     expect($html)->toContain('<link rel="icon" id="favicon" href="' . proof_e($icons['none']) . '" data-none="' . proof_e($icons['none'])
         . '" data-halted="' . proof_e($icons['halted']) . '" data-ready="' . proof_e($icons['ready']) . '" data-unread="' . proof_e($icons['unread']) . "\">\n");
     expect(strpos($html, 'id="favicon"'))->toBeLessThan(strpos($html, '</head>'));
@@ -777,8 +778,86 @@ it('carries the poll and the tab signal in the index script', function () {
         ->toContain('current.dataset.hash === entry.hash')
         ->toContain("createElement('template')")
         ->toContain('function unread(row)')
-        ->toContain("if (!storage || !seen) { return ''; }")
+        ->toContain("proofUnread(Number(row.dataset.seen || 0)")
         ->toContain("row.dataset.finished === '0' && unread(row) !== ''")
         ->toContain("getElementById('finished-count')")
         ->toContain('location.reload()');
+});
+
+it('reads a row as unread by the rule, and names what it needs now', function () {
+    $calls = [
+        'no number' => [0, null, 'halted', ''],
+        'never opened' => [3, null, 'running', 'New'],
+        'opened at its number' => [3, '3', 'halted', ''],
+        'opened above its number' => [3, '4', 'ready', ''],
+        'halted since' => [5, '3', 'halted', 'Halted'],
+        'ready since' => [5, '3', 'ready', 'Ready'],
+        'filed again since' => [5, '3', 'running', 'Updated'],
+        'marked unread, running' => [5, '0', 'running', 'Unread'],
+        'marked unread, halted' => [5, '0', 'halted', 'Halted'],
+        'merged below its number' => [5, '3', 'merged', 'Updated'],
+    ];
+    $arguments = json_encode(array_values(array_map(fn (array $call): array => array_slice($call, 0, 3), $calls)));
+    $script = proof_render_unread_script()
+        . "\nconsole.log(JSON.stringify({$arguments}.map(function (call) { return proofUnread(call[0], call[1], call[2]); })));";
+
+    exec('node -e ' . escapeshellarg($script) . ' 2>&1', $output, $code);
+
+    expect($code)->toBe(0, implode("\n", $output));
+    expect(array_combine(array_keys($calls), json_decode(implode('', $output), true)))
+        ->toBe(array_map(fn (array $call): string => $call[3], $calls));
+});
+
+it('puts the dot before the title of a run with a seen number, and none on a run without one', function () {
+    $row = proof_render_index_row(proof_index_entry('pr-5-logs', ['revision' => 3]));
+
+    expect($row)->toContain('<td data-sort="PR #412: product summary grid"><button type="button" class="dot"></button><a href="Deploy/pr-5-logs/index.html">PR #412: product summary grid</a><span class="marker"></span></td>');
+    expect(proof_render_index_row(proof_index_entry('pr-6-old', [])))->not->toContain('class="dot"');
+});
+
+it('counts the unread runs beside the heading of a store with runs, and leaves an empty store\'s heading alone', function () {
+    expect(proof_render_index([proof_index_entry('pr-5-logs', ['revision' => 1])]))
+        ->toContain('<h1>Pipeline proof store <span id="unread-count" class="unread-count"></span></h1>');
+    expect(proof_render_index([]))->toContain("<h1>Pipeline proof store</h1>\n")->not->toContain('id="unread-count"');
+});
+
+it('renders the unread rule before the index script, and both parse as JavaScript', function () {
+    $html = proof_render_index([proof_index_entry('pr-5-logs', ['revision' => 1])]);
+    $file = sys_get_temp_dir() . '/proof-unread-' . uniqid() . '.js';
+    file_put_contents($file, proof_render_unread_script() . "\n" . proof_render_index_script());
+    exec('node --check ' . escapeshellarg($file) . ' 2>&1', $output, $code);
+    unlink($file);
+
+    expect($code)->toBe(0, implode("\n", $output));
+    expect(strpos($html, 'function proofUnread(seen, stored, status)'))->toBeGreaterThan(0)
+        ->toBeLessThan(strpos($html, 'function unread(row)'));
+});
+
+it('carries the inbox wiring in the index script, and styles a row only once the script marked it', function () {
+    $script = proof_render_index_script();
+    $styles = proof_render_styles();
+
+    expect($script)->toContain("return storage ? proofUnread(Number(row.dataset.seen || 0), storage.getItem('seen:' + row.dataset.run), row.dataset.status) : '';")
+        ->toContain("row.classList.toggle('unread', state !== '')")
+        ->toContain("row.classList.toggle('read', state === '')")
+        ->toContain("var label = state === '' ? 'Mark as unread' : 'Mark as read';")
+        ->toContain("dot.setAttribute('aria-label', label)")
+        ->toContain("body.addEventListener('click'")
+        ->toContain("event.target.closest('button.dot')")
+        ->toContain("storage.setItem('seen:' + row.dataset.run, unread(row) === '' ? '0' : row.dataset.seen)")
+        ->toContain("getElementById('unread-count')")
+        ->toContain("count.textContent = unseen.length ? unseen.length + ' unread' : ''")
+        ->toContain("row.dataset.rank = state === '' && row.dataset.seen && row.dataset.group === '1' ? '2' : row.dataset.group")
+        ->not->toContain('dataset.revision');
+    // Without localStorage `mark()` never runs, so no row is unread or read and every dot stays hidden.
+    expect($script)->toContain('if (storage) { rows.forEach(mark); }');
+    expect($styles)->toContain('tr.unread td { font-weight:700; }')
+        ->toContain('tr.read td { color:var(--muted); }')
+        ->toContain('.dot { display:none;')
+        ->toContain('tr.unread .dot, tr.read .dot { display:inline-flex;')
+        ->toContain('border:1.5px solid var(--muted);')
+        ->toContain('tr.unread .dot::before { background:var(--ready); border-color:var(--ready); }')
+        ->toContain('.dot:hover::before, .dot:focus-visible::before { border-color:var(--fg); }')
+        ->toContain('.dot:focus-visible { outline:')
+        ->toContain('.unread-count {');
 });
