@@ -912,8 +912,8 @@ replaced, never appended to; `[]` empties one), and a key it leaves out is kept.
    Its page shows the client summary and the explainer as *Pending*.
 2. **`verify-ui`** (a UI run) adds the shots and a first client summary and explainer.
 3. **The finish step** (`review-pr`'s resolve step, every run) writes the client summary and the
-   explainer as the finished work stands, the suite line under `checks`, and the final open questions
-   and ledger.
+   explainer as the finished work stands, the suite line under `checks`, and the final open questions,
+   each with its kind, and the ledger.
 
 An agent's write takes `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, so it
 lands in the directory `handoff` filed; a run without `artifacts.proof` gets its page from that write,
@@ -1004,7 +1004,7 @@ characters in five runs.
 | `headline` | one or two sentences: what was verified and the outcome. Rendered as the lead under the explainer |
 | `problem`, `solution` | the technical account; prose, blank lines become paragraphs |
 | `checks` | `tests`, `staticAnalysis` (scope-qualified), `format`, `suppressions` (list) |
-| `openQuestions` | list, carried verbatim |
+| `openQuestions` | list of `{kind, question}`: `question` verbatim, `kind` one of `blocking`, `follow-up`, `remark` (§Open questions), shown as a label before the text. `write` refuses a payload with any other item; a run filed before kinds keeps its string items, shown without a label |
 | `ledger` | list of `{gate, outcome, note}` |
 | `shots` | list of `{title, caption, route, badges, state}`. `title` is at most 70 characters and names the state shown ("Unreachable swarm"); `caption` says what the shot proves and has no limit. `state` is **required**: `before`, `after` or `defect`, the ribbon on the shot; a `before` directly followed by an `after` renders as one pair. A badge's `note` also shows on hover |
 | `shotSources` | absolute paths of the screenshots, in `shots` order, `null` for a shot carried forward with its `file`; ingested into the run's `shots/` as `<NN>-<route>-<hash>.png`, so a new shot never overwrites a carried one |
@@ -1018,7 +1018,7 @@ shot and before the pass returns, whatever its status; before it writes the page
 --abbrev-ref HEAD` names the branch. Pairing is positional: in `shots` each before shot is immediately
 followed by its after shot, so shoot the before shots on the base, then the after shots in the same order,
 and interleave them in the payload. When the base cannot render the state (a migration it does not
-expect), the before shot is left out and that is an open question, never a halt. A pass that finds a
+expect), the before shot is left out and that is an open question of kind `remark`, never a halt. A pass that finds a
 defect shoots it as `defect`; the next pass carries the earlier defect shots forward (their `file`,
 `null` in `shotSources`) beside its own.
 

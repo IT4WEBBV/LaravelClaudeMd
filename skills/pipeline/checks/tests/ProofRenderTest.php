@@ -189,6 +189,21 @@ it('renders open questions verbatim and flags suppressions as not yet judged', f
     expect($html)->toContain('not yet judged');
 });
 
+it('labels each open question with its kind, and a string filed before kinds without one (#146)', function () {
+    $html = proof_render_run(proof_fixture_run(['openQuestions' => [
+        ['kind' => 'blocking', 'question' => 'Keep the <x-time> tag?'],
+        ['kind' => 'follow-up', 'question' => 'File the cleanup?'],
+        ['kind' => 'remark', 'question' => 'self-end alignment'],
+        'Filed before kinds.',
+    ]]));
+
+    expect($html)->toContain("<h2>Open questions</h2>\n<ul>\n")
+        ->toContain('<li><strong>Blocking:</strong> Keep the &lt;x-time&gt; tag?</li>')
+        ->toContain('<li><strong>Follow-up:</strong> File the cleanup?</li>')
+        ->toContain('<li><strong>Remark:</strong> self-end alignment</li>')
+        ->toContain('<li>Filed before kinds.</li>');
+});
+
 it('states the analysed scope rather than an unqualified all-clear', function () {
     $html = proof_render_run(proof_fixture_run());
 

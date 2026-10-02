@@ -28,7 +28,11 @@ function proof_cli_write(string $payloadPath): int
 
     // Nothing is filed until the run as it will be filed passes: a page written anyway would carry its title into
     // the store index for good. The leg sees no page path on stdout, fixes the payload, writes again.
-    $filed = proof_store_file($payload, date('c'), fn (array $run): array => [...proof_validate_run($run), ...proof_validate_prose($run)]);
+    $filed = proof_store_file($payload, date('c'), fn (array $run): array => [
+        ...proof_validate_run($run),
+        ...proof_validate_prose($run),
+        ...proof_open_questions_problems($payload),
+    ]);
     if ($filed['page'] === null) {
         fwrite(STDERR, "proof: payload rejected, nothing written:\n  - " . implode("\n  - ", $filed['problems']) . "\n");
 

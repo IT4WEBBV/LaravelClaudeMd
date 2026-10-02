@@ -113,7 +113,7 @@ it('keeps work-on out of the sections that describe a step', function () {
 it('keeps engine.md §The proof store in lock-step with the fields the store files and checks', function () {
     $section = lockstep_section('engine.md', 'The proof store');
 
-    foreach (['clientSummary', 'explainer', 'worktree', 'base', 'state', ...PROOF_STORE_KEYS, ...array_column(ProofShotState::cases(), 'value')] as $field) {
+    foreach (['clientSummary', 'explainer', 'worktree', 'base', 'state', ...PROOF_STORE_KEYS, ...array_column(ProofShotState::cases(), 'value'), ...array_column(QuestionKind::cases(), 'value')] as $field) {
         expect($section)->toContain("`{$field}`");
     }
     expect($section)->toContain('at most ' . PROOF_SUMMARY_MAX . ' characters');
