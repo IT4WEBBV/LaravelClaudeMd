@@ -200,6 +200,16 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
    GitHub link is an ordinary navigation, which `target` sends to a new tab.
 10. **Does the Proofs app change anything?** No: `Proofs.applescript` opens the index in the default browser, where
     `target="_blank"` opens a tab as anywhere else.
+11. **The helper's name and place?** (added by the `plan` step) `proof_render_diff_ref(array $run): string`, directly
+    after `proof_render_ref()` in `proof_render.php`, so the two reference builders sit together and the plan's tasks
+    name one function.
+12. **Is the rule also pinned on the rows `status.js` carries?** (added by the `plan` step) Yes, one assertion in the
+    index case: the row `proof_render_status_js()` writes for a run with a PR carries the new-tab PR link. The rows are
+    `proof_render_index_row()`'s text today, but they are what an open index swaps in, so a later change that built
+    them apart would otherwise go unnoticed.
+13. **Is "every other tag carries no `target=`" too strict for later store links?** (added by the `plan` step) No: it
+    is the rule the issue states (the store stays in the tab), and a later store link that wanted a new tab would be a
+    change of that rule, which should fail a test.
 
 ## Relation to other work
 
