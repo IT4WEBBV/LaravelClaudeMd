@@ -92,6 +92,87 @@ payload_field() {
         | head -1
 }
 
+# Undo a JSON string's escapes: \n and \t become a newline and a tab, any other
+# escaped character becomes that character (\" \\ \/, but also \r as r and
+# \uXXXX as uXXXX: no path we resolve needs those).
+json_unescape() {
+    awk '{
+        out = ""
+        for (i = 1; i <= length($0); i++) {
+            c = substr($0, i, 1)
+            if (c == "\\" && i < length($0)) {
+                i++
+                c = substr($0, i, 1)
+                if (c == "n") c = "\n"
+                else if (c == "t") c = "\t"
+            }
+            out = out c
+        }
+        print out
+    }'
+}
+
+# A string field of the payload with its JSON escapes respected, which
+# payload_field does not do: a Bash command routinely holds quotes.
+payload_string() {
+    printf '%s' "$payload" \
+        | sed -nE 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"((\\.|[^"\\])*)".*/\1/p' \
+        | head -1 \
+        | json_unescape
+}
+
+# Each word that follows `cd` or `git -C` at a command boundary (line start,
+# ; & | ( or whitespace), up to whitespace, ; & | or ), one per line, as
+# written. awk's match() rather than grep -o, whose handling of a ^ inside an
+# alternation differs between BSD and GNU.
+bash_words() {
+    awk '{
+        line = " " $0
+        while (match(line, /[;&|( \t](cd|git[ \t]+-C)[ \t]+[^ \t;&|)]+/)) {
+            word = substr(line, RSTART + 1, RLENGTH - 1)
+            sub(/^(cd|git[ \t]+-C)[ \t]+/, "", word)
+            print word
+            line = substr(line, RSTART + RLENGTH)
+        }
+    }'
+}
+
+# The absolute path a word from a Bash command names: surrounding quotes
+# stripped, a leading ~ as $HOME, a relative path against directory $2. Status
+# 1 for a word only the shell could resolve (a variable, a substitution).
+resolve_word() {
+    local word=$1
+
+    word=${word#\"}
+    word=${word#\'}
+    word=${word%\"}
+    word=${word%\'}
+    case "$word" in
+        '' | *'$'* | *'`'*) return 1 ;;
+        '~')                word=$HOME ;;
+        '~/'*)              word="$HOME/${word#'~/'}" ;;
+    esac
+
+    absolute_path "$word" "$2"
+}
+
+# The directories a Bash call works in: every existing one its command names
+# with cd or git -C, else directory $1, the call's cwd. A word that does not
+# resolve is a miss, visible as a missing freshness line.
+bash_targets() {
+    local cwd=$1 word dir found=""
+
+    while IFS= read -r word; do
+        [ -n "$word" ] || continue
+        dir=$(resolve_word "$word" "$cwd") || continue
+        [ -d "$dir" ] || continue
+        printf '%s\n' "$dir"
+        found=1
+    done <<< "$(payload_string command | bash_words)"
+
+    [ -n "$found" ] || printf '%s\n' "$cwd"
+}
+
 session_id=$(payload_field session_id)
 cache_dir="${TMPDIR:-/tmp}/claude-git-freshness/${session_id:-nosession}"
 
@@ -630,7 +711,7 @@ touch_targets() {
         Read | Edit | Write | MultiEdit) path=$(payload_field file_path) ;;
         NotebookEdit)                    path=$(payload_field notebook_path) ;;
         Glob | Grep)                     path=$(payload_field path); path=${path:-$cwd} ;;
-        Bash)                            path=$cwd ;;
+        Bash)                            bash_targets "$cwd"; return 0 ;;
         *)                               return 0 ;;
     esac
 

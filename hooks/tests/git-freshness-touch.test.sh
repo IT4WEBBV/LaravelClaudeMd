@@ -269,6 +269,41 @@ is "$skill_read" "" "a read in a config repo after the session synced it is sile
 contains "$control" "work on 'feature'" "without the session's claim the same read reports the repo"
 echo
 
+# ---------------------------------------------------------------------------
+echo "case 8: Bash calls check the directories their command names, else the cwd"
+# Every fixture's checkout is called work, so each gets its own branch name for
+# the assertions to tell the reports apart: "work on 'bashone'".
+repo=$(fixture bashone 0)
+two=$(fixture bashtwo 0)
+git -C "$repo" checkout -q -b bashone
+git -C "$two" checkout -q -b bashtwo
+bash_payload() { # bash_payload <session> <cwd> <command, JSON-escaped>
+    tool_payload "$1" Bash "$2" "$(printf '{"command":"%s","description":"x"}' "$3")"
+}
+out=$(run_hook touch "$(bash_payload t-bash1 "$root/plain" "git -C $repo status")")
+contains "$out" "bashone" "git -C <repo> checks that repo from a cwd in no repo"
+out=$(run_hook touch "$(bash_payload t-bash2 "$root/plain" "cd \\\"$repo\\\" && ls")")
+contains "$out" "bashone" "cd \"<repo>\" (escaped quotes in the JSON) checks that repo"
+out=$(run_hook touch "$(bash_payload t-bash3 "$repo" "ls -la")")
+contains "$out" "bashone" "a command naming no directory checks the cwd"
+out=$(run_hook touch "$(bash_payload t-bash4 "$root/plain" "ls -la")")
+is "$out" "" "a command naming no directory, from a cwd in no repo, prints nothing"
+out=$(run_hook touch "$(bash_payload t-bash5 "$repo" "cd \$WORKTREE && make")")
+contains "$out" "bashone" "a variable falls back to the cwd"
+out=$(run_hook touch "$(bash_payload t-bash5b "$repo" "cd \\\"$root/plain/a b\\\" && ls")")
+contains "$out" "bashone" "a quoted path with a space (not resolved) falls back to the cwd"
+out=$(printf '%s' "$(bash_payload t-bash6 "$root/plain" "ls\\n(cd ../plain; git -C ~/bashone/work log)")" \
+    | HOME="$root" bash "$hook" touch 2>/dev/null)
+contains "$out" "bashone" "a relative cd and a ~ path inside a subshell, on the line after an escaped newline"
+out=$(run_hook touch "$(bash_payload t-bash7 "$root/plain" "git -C $repo status && git -C $two status")")
+one_json_line "$out" "two repos in one command"
+contains "$out" "bashone" "the first repo is checked"
+contains "$out" "bashtwo" "the second repo is checked"
+out=$(run_hook touch "$(bash_payload t-bash8 "$repo" "git -C $two status")")
+contains "$out" "bashtwo" "the named repo is checked"
+lacks "$out" "bashone" "the cwd repo is not checked when the command names a directory"
+echo
+
 echo "----------------------------------------"
 printf '%d passed, %d failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]
