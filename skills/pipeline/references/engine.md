@@ -938,8 +938,10 @@ command that made it so:
 A command writes to `artifacts.proof` only when the manifest sets it, and never changes its answer or halts over it:
 a page that cannot be amended is one line on stderr. `finish`'s and `returned`'s `done` carries `proof`
 (`artifacts.proof`, or null), the page the session marks ready. A status or a cost written into a filed run is no
-filing: `revision` and `updatedAt` stay as they were. A run filed before statuses existed reads as its `prState`
-says: `MERGED` Merged, `CLOSED` Closed, else Running.
+filing: `revision` and `updatedAt` stay as they were. A change of status to `halted` or `ready`, by any writer above,
+raises the run's `attention` instead, which the index compares (*What changed since the last look*); `halted` again,
+any other status and a cost raise nothing. A run filed before statuses existed reads as its `prState` says: `MERGED`
+Merged, `CLOSED` Closed, else Running.
 
 **The index** shows the open runs by attention: `halted` first, then `ready`, then the rest, each newest first;
 merged and closed runs are hidden until *Show merged and closed (n)* is ticked. It filters by repo and by status (a
@@ -994,8 +996,8 @@ characters in five runs.
 | `ledger` | list of `{gate, outcome, note}` |
 | `shots` | list of `{title, caption, route, badges, state}`. `title` is at most 70 characters and names the state shown ("Unreachable swarm"); `caption` says what the shot proves and has no limit. `state` is **required**: `before`, `after` or `defect`, the ribbon on the shot; a `before` directly followed by an `after` renders as one pair. A badge's `note` also shows on hover |
 | `shotSources` | absolute paths of the screenshots, in `shots` order, `null` for a shot carried forward with its `file`; ingested into the run's `shots/` as `<NN>-<route>-<hash>.png`, so a new shot never overwrites a carried one |
-| `addedTests` | **the store's, never a payload's**: per test file, the cases the branch adds (`added`, tagged *new*) or changes (`changed`), extracted at every write by git in `worktree`; kept as filed when git cannot answer. A payload's `addedTests`, `schema`, `createdAt`, `updatedAt`, `revision`, `status` and `cost` are ignored |
-| `revision`, `status`, `cost` | **the store's, never a payload's**: `revision` counts the run's filings (`handoff`'s and every `write`); `status` is `{state, reason}`, the reason only with `halted` (above); `cost` is the figures `run_cost_cli.php` files, per workflow `{workflow, span, steps}` |
+| `addedTests` | **the store's, never a payload's**: per test file, the cases the branch adds (`added`, tagged *new*) or changes (`changed`), extracted at every write by git in `worktree`; kept as filed when git cannot answer. A payload's `addedTests`, `schema`, `createdAt`, `updatedAt`, `revision`, `attention`, `status` and `cost` are ignored |
+| `revision`, `attention`, `status`, `cost` | **the store's, never a payload's**: `revision` counts the run's filings (`handoff`'s and every `write`); `attention` counts the times its status turned `halted` or `ready` (absent until the first); `status` is `{state, reason}`, the reason only with `halted` (above); `cost` is the figures `run_cost_cli.php` files, per workflow `{workflow, span, steps}` |
 
 **Before, after and defect shots.** `verify-ui` takes before shots only when the spec names a before
 state to show: it checks out the base detached in the run's worktree (`git checkout --detach

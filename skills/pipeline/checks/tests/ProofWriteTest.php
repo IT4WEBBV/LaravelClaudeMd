@@ -212,3 +212,13 @@ it('says which store file it cannot write, and leaves no temporary file', functi
     expect(proof_store_index($missing))->toBe("cannot write {$missing}/index.html");
     expect(is_dir($missing))->toBeFalse();
 });
+
+it('keeps the stored attention through a filing, and never takes a payload\'s', function () {
+    $root = sys_get_temp_dir() . '/proof-write-' . uniqid();
+    proof_write_cli(proof_write_payload(), $root);
+    file_put_contents("{$root}/Deploy/pr-5-logs/run.json", proof_run_json([...proof_write_stored($root), 'attention' => 1]));
+
+    proof_write_cli(proof_write_payload(['attention' => 40]), $root);
+
+    expect(proof_write_stored($root))->toMatchArray(['revision' => 2, 'attention' => 1]);
+});

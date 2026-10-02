@@ -189,9 +189,11 @@ function proof_store_added_tests(array $run): array|string
 
 /**
  * Applies `$change` to the run filed beside `$page`, then re-renders the page, and the index and `status.js` of the
- * store the page is in (`dirname($page, 3)`, never `proof_root()`, so a test store and the real one never mix). Not a filing:
- * `updatedAt` and `revision` stay as they are, since the index's Updated counts filings and the prune pass's grace
- * period measures the last one. Never a warning on stdout: a command that amends still prints one answer.
+ * store the page is in (`dirname($page, 3)`, never `proof_root()`, so a test store and the real one never mix). Not a
+ * filing: `updatedAt` and `revision` stay as they are, since the index's Updated counts filings and the prune pass's
+ * grace period measures the last one. A change that turns the status Halted or Ready raises `attention`
+ * (`proof_count_attention()`), which the index compares, so an opened run is unread again. Never a warning on stdout:
+ * a command that amends still prints one answer.
  *
  * @param callable(array): array $change
  * @return ?string null, or why nothing was written
@@ -206,7 +208,7 @@ function proof_store_amend(string $page, callable $change): ?string
     if ($run === null) {
         return "no run at {$dir}";
     }
-    $run = $change($run);
+    $run = proof_count_attention($run, $change($run));
     $root = dirname($page, 3);
     $files = [
         "{$dir}/run.json" => fn (): string => proof_run_json($run),

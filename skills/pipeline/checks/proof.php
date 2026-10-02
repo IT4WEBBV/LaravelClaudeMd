@@ -20,10 +20,11 @@ const PROOF_SUMMARY_MAX = 400;
 
 /**
  * The keys the store owns. A payload's values for them are ignored, and `shotSources` is consumed, never stored.
- * `revision` counts the run's filings, `status` is where the run stands (`ProofRunStatus`), `cost` its time and cost
- * per workflow (`proof_add_cost()`).
+ * `revision` counts the run's filings, `attention` the times its status turned Halted or Ready
+ * (`proof_count_attention()`), `status` is where the run stands (`ProofRunStatus`), `cost` its time and cost per
+ * workflow (`proof_add_cost()`).
  */
-const PROOF_STORE_KEYS = ['addedTests', 'schema', 'createdAt', 'updatedAt', 'shotSources', 'revision', 'status', 'cost'];
+const PROOF_STORE_KEYS = ['addedTests', 'schema', 'createdAt', 'updatedAt', 'shotSources', 'revision', 'attention', 'status', 'cost'];
 
 /** `a, b or c`: an enum's values as a refusal names them. */
 trait ProofNamedCases
@@ -94,6 +95,12 @@ enum ProofRunStatus: string
     public function finished(): bool
     {
         return in_array($this, [self::Merged, self::Closed], true);
+    }
+
+    /** Halted or Ready, the statuses `group()` puts first: they make an opened run unread again (`proof_count_attention()`). */
+    public function callsOwner(): bool
+    {
+        return $this->group() < 2;
     }
 
     /** The Status column's sort key: the attention order, then merged before closed. */
@@ -260,6 +267,21 @@ function proof_merge_run(array $stored, array $payload, array $defaults = []): a
     $owned = array_flip(PROOF_STORE_KEYS);
 
     return [...array_diff_key($defaults, $owned), ...$stored, ...array_diff_key($payload, $owned)];
+}
+
+/**
+ * `$after` with `attention` one above `$before`'s when the change turned the run's status into one that calls its
+ * owner (`ProofRunStatus::callsOwner()`), so an opened run that halts or turns ready is unread again. The same status
+ * again, any other status and a change that leaves the status alone return `$after` unchanged.
+ */
+function proof_count_attention(array $before, array $after): array
+{
+    $status = ProofRunStatus::of($after);
+    if ($status === ProofRunStatus::of($before) || ! $status->callsOwner()) {
+        return $after;
+    }
+
+    return [...$after, 'attention' => (int) ($before['attention'] ?? 0) + 1];
 }
 
 /**

@@ -268,3 +268,18 @@ it('changes the run\'s hash in status.js when it files a cost', function () {
     // The Time column now shows the filed span (780 s, as the case above files it).
     expect($after['row'])->toContain('>' . proof_minutes(780.0) . '</td>');
 });
+
+it('leaves attention as it was when it files a cost', function () {
+    $dir = cost_run([
+        'a1' => ['implement:run', implode("\n", [
+            cost_call('m1', 0, 0, 300000, 2000, null, '10:07:00.000'),
+            cost_tool_use('t1', '10:08:00.000'),
+            cost_tool_result('t1', '10:20:00.000'),
+        ]), ['status' => 'continued']],
+    ]);
+    $page = proof_test_page(['status' => ['state' => 'halted', 'reason' => 'CI red'], 'attention' => 1]);
+
+    checks_cli('run_cost_cli.php', [$dir, $page]);
+
+    expect(proof_read_run(dirname($page)))->toMatchArray(['attention' => 1, 'revision' => 1])->toHaveKey('cost');
+});
