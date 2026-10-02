@@ -46,9 +46,11 @@
 # yet is linked, and so is a skill's workflow script (skills/<skill>/workflow/*.js)
 # that has none in ~/.claude/workflows, a skill's agent definition
 # (skills/<skill>/agents/*.md) that has none in ~/.claude/agents, and the status
-# line script when ~/.claude/statusline-command.sh does not exist, so each reaches
-# every machine with its next session instead of waiting for a manual relink. An
-# existing entry is never replaced.
+# line script when ~/.claude/statusline-command.sh does not exist; a skill's
+# AppleScript app (skills/<skill>/apps/*.applescript) is compiled into
+# ~/Applications when no app of that name is there. So each reaches every machine
+# with its next session instead of waiting for a manual relink. An existing entry
+# is never replaced.
 #
 # Beyond that it touches nothing: your branch, your index and your working tree
 # are left alone, merges are predicted in a throwaway index, and deciding whether
@@ -70,6 +72,7 @@ config_repos="${GIT_FRESHNESS_CONFIG_REPOS-$HOME/GitProjects/LaravelClaudeMd/Lar
 skills_dir="${GIT_FRESHNESS_SKILLS_DIR-$HOME/.claude/skills}"
 workflows_dir="${GIT_FRESHNESS_WORKFLOWS_DIR-$HOME/.claude/workflows}"
 agents_dir="${GIT_FRESHNESS_AGENTS_DIR-$HOME/.claude/agents}"
+apps_dir="${GIT_FRESHNESS_APPS_DIR-$HOME/Applications}"
 statusline="${GIT_FRESHNESS_STATUSLINE-$HOME/.claude/statusline-command.sh}"
 config_fetch_seconds=5  # tighter than max_fetch_seconds: the session repo still has to fit in the hook timeout
 
@@ -460,6 +463,33 @@ link_new_skill_files() {
     done
 }
 
+# Compile each AppleScript a skill in repo $1 ships under skills/<skill>/apps/*.applescript
+# into the apps dir as <name>.app when no app of that name is there yet, reported as
+# "built new app <name>". A built app does not follow its source: an existing app is
+# never replaced, whoever put it there, and a changed source reaches a machine by
+# deleting the app (README §Proofs app). It compiles into a temp dir and moves the
+# bundle in, so a source that fails to compile leaves nothing the skip rule would keep.
+# Same dir rules as link_new_skill_files; without osacompile (not macOS) it does nothing.
+build_new_skill_apps() {
+    local repo=$1 script name tmp
+
+    command -v osacompile >/dev/null 2>&1 || return 0
+    [ ! -L "$apps_dir" ] && mkdir -p "$apps_dir" 2>/dev/null || return 0
+
+    for script in "$repo"/skills/*/apps/*.applescript; do
+        [ -f "$script" ] || continue
+        name=$(basename "$script" .applescript)
+        { [ -e "$apps_dir/$name.app" ] || [ -L "$apps_dir/$name.app" ]; } && continue
+        tmp=$(mktemp -d "${TMPDIR:-/tmp}/git-freshness-app.XXXXXX") || continue
+        osacompile -o "$tmp/$name.app" "$script" >/dev/null 2>&1 \
+            && mv "$tmp/$name.app" "$apps_dir/$name.app" 2>/dev/null \
+            && config_tags="${config_tags}${config_tags:+, }built new app $name"
+        rm -rf "$tmp"
+    done
+
+    return 0
+}
+
 # Link the status line script a config repo ships (statusline/statusline-command.sh) when the
 # machine has nothing at the status line path yet. An existing file or link is never replaced:
 # swapping a machine-local copy for the link is the README's one-time setup step.
@@ -513,6 +543,7 @@ sync_config_repos() {
         link_new_skills "$repo"
         link_new_skill_files "$repo" workflow js "$workflows_dir" workflow
         link_new_skill_files "$repo" agents md "$agents_dir" agent
+        build_new_skill_apps "$repo"
         link_statusline "$repo"
     done <<< "$(config_repo_list)"
 }

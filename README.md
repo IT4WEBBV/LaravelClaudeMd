@@ -66,7 +66,9 @@ the other machine on its own:
 - `session` — at startup: syncs both config repos (fast-forward only, never over local work) and
   links any skill that has no symlink yet (and any skill's `workflow/*.js` into
   `~/.claude/workflows/`, any skill's `agents/*.md` into `~/.claude/agents/`, and the status line
-  script when `~/.claude/statusline-command.sh` does not exist), then checks the launch directory.
+  script when `~/.claude/statusline-command.sh` does not exist), compiles any skill's
+  `apps/*.applescript` into `~/Applications/` when no app of that name exists, then checks the
+  launch directory.
 - `edit` — the repo owning the file being written, once per repo per session.
 - `checkout` — drops cached verdicts after a branch switch.
 
@@ -176,5 +178,6 @@ bash hooks/tests/git-freshness-sync.test.sh
 ```
 
 It builds throwaway repos under `$TMPDIR` and covers every branch of the base-branch sync,
-including the sibling-worktree case that is easy to get silently wrong, plus the config-repo sync
-and skill linking.
+including the sibling-worktree case that is easy to get silently wrong, plus the config-repo sync,
+skill linking and app building (the cases that compile print `skip` on a machine without
+`osacompile`).
