@@ -96,6 +96,18 @@ enum ProofRunStatus: string
         return in_array($this, [self::Merged, self::Closed], true);
     }
 
+    /** The Status column's sort key: the attention order, then merged before closed. */
+    public function order(): int
+    {
+        return match ($this) {
+            self::Halted => 0,
+            self::Ready => 1,
+            self::Running => 2,
+            self::Merged => 3,
+            self::Closed => 4,
+        };
+    }
+
     /** The stored status, else what an older run's `prState` implies: MERGED, CLOSED, else Running. */
     public static function of(array $run): self
     {

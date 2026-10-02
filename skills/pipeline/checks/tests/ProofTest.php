@@ -333,3 +333,7 @@ it('files a workflow\'s cost once, replacing its own entry and appending another
     expect(proof_cost_totals([$again, $resume]))->toBe(['seconds' => 120.0, 'cost' => 1500000.0]);
     expect(proof_cost_totals([]))->toBe(['seconds' => 0.0, 'cost' => 0.0]);
 });
+
+it('orders all five statuses for a sort on the Status column: halted, ready, running, merged, closed', function () {
+    expect(array_map(fn (ProofRunStatus $status) => $status->order(), ProofRunStatus::cases()))->toBe([2, 0, 1, 3, 4]);
+});
