@@ -1105,8 +1105,8 @@ runs (#77), while `review-pr:review` reads the diff, not CI.
 - **`implement` does not wait on CI in `autoflow`.** It adds the `ci` label before its first push (§Who
   takes the PR out of draft), pushes and returns.
   `review-pr:review` runs while CI runs. In `interactive` it watches its push's checks (§Implement).
-- **One gate, in the session that runs `gh pr ready`:** the invoking session once `finish` prints `done`
-  in `autoflow`, the finish step in `interactive`. `dispatch_cli.php ci <manifest> --poll <n>`
+- **One gate, in the session that runs `gh pr ready`:** the invoking session once `finish` prints `done`,
+  or `ask` and every answer is recorded, in `autoflow`, the finish step in `interactive`. `dispatch_cli.php ci <manifest> --poll <n>`
   (`../checks/ci.php`) reads the worktree's `HEAD` (`git rev-parse HEAD`; a git error halts at once), then
   the PR's head commit, whether it merges into its base, and its checks once (`gh pr view <pr> --json
   headRefOid,mergeable,statusCheckRollup`), writes nothing, and prints one JSON line. GitHub's head has to
@@ -1117,6 +1117,7 @@ runs (#77), while `review-pr:review` reads the diff, not CI.
 
 | Verdict on the head commit | Answer |
 |---|---|
+| `ask`: a `blocking` open question no decision answers (`autoflow`) | `ask`, with the questions, before git or gh is read; it spends no round (§Open questions) |
 | `merge`: a merge since the last completed review met the branch's changes (`autoflow`) | `fix` the first time in a run, before the PR is read; after that round the gate goes on to the rows below |
 | `mismatch`: GitHub's head is not the worktree's `HEAD` | `wait`; `halt` at the third read, naming both shas: a push GitHub shows within seconds, and one it does not show by then did not land |
 | `conflicting`: GitHub reports the PR `CONFLICTING` with its base | `fix` the first time in a run; `halt` once that round is spent |
@@ -1135,6 +1136,9 @@ poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll
 ```
 
 - **`ready`** → `gh pr ready <pr>`, then `php "$CHECKS/proof_cli.php" status <proof> ready`, `<proof>` the `proof` that `finish`'s `done` named (null: nothing to mark).
+- **`ask`** → the questions go to the owner as on `finish`'s `ask` (§Open questions); once every answer
+  is recorded, the gate runs again. The poll loop ends on it at the first read, as on every answer but
+  `wait`. It is the backstop for a resume, a skipped ask or an answer recorded under a mistyped prefix.
 - **`fix`** → one automatic round per run for each of the gate's three records: a red CI (owner, #85), a
   merge the review did not see and a conflict with the base (both below). The answer's `decision`, for a
   red `CI red on the PR's head commit <sha>: <check> failed (<link>)`, goes into `decisions` verbatim with
@@ -1182,7 +1186,7 @@ poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll
   rounds: a conflict after it halts, naming `review-pr`.
   `UNKNOWN` is a `wait`, as a pending check is, and a halt at the 120th read.
 - **In `interactive`** the finish step runs the same loop, `gh pr ready` on `ready` and then `proof_cli.php status <page> ready`, and shows any other
-  answer to the human; there is no automatic round, no merge round and no conflict round: the human
+  answer to the human; there is no automatic round, no merge round, no conflict round and no `ask`: the human
   resolves the review, sees the merge as it is made, and on a `conflicting` answer merges the base.
 - **The merge watch stays on `state`** (§After the merge): once the PR is ready, CI on its head has
   settled.

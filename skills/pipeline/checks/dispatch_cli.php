@@ -482,7 +482,8 @@ function dispatch_cli_ui(string $diffPath): ?string
 /**
  * The CI gate's reads (`../references/engine.md` §The CI gate): the worktree's `HEAD`, then the PR's head
  * commit, its mergeability and its checks in one gh call, the merges since the last completed review in an
- * `autoflow` run, and what the session does next. It never writes the manifest, so polling it changes
+ * `autoflow` run, and what the session does next; while a `blocking` open question is unanswered in an
+ * `autoflow` run, `ask` before git or gh is read. It never writes the manifest, so polling it changes
  * nothing.
  */
 function dispatch_cli_ci(string $manifestPath, int $poll): array
@@ -498,6 +499,10 @@ function dispatch_cli_ci(string $manifestPath, int $poll): array
     $pr = $manifest['artifacts']['pr'] ?? null;
     if ($pr === null) {
         return pipeline_halt('the CI gate needs a PR: artifacts.pr is not set');
+    }
+    $unanswered = $manifest['mode'] === 'autoflow' ? pipeline_unanswered($manifest) : [];
+    if ($unanswered !== []) {
+        return pipeline_ci_ask($unanswered);
     }
     $worktree = rtrim($manifest['worktree'], '/');
     [$code, $head, $error] = pipeline_git_run($worktree, ['rev-parse', 'HEAD']);

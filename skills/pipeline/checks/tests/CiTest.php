@@ -114,6 +114,21 @@ it('answers one review round for a merge the last review did not see, before the
     expect(pipeline_ci_answer(ci_manifest([$decision]), $green, 'abc123', true, 1, ['a.php']))->toBe(['action' => 'ready', 'verdict' => 'green', 'sha' => 'abc123']);
 });
 
+it('answers ask while a blocking open question is unanswered, before a merge round, a mismatch, an unreadable PR or a green head (#146)', function () {
+    $questions = [[
+        'id' => 'gate_ledger[0].actions[0]', 'gate' => 'pr-review', 'kind' => 'blocking', 'question' => 'Queue or cron?', 'note' => 'cron (built), queue',
+        'decision' => 'Answer to open question gate_ledger[0].actions[0] ("Queue or cron?"): ',
+    ]];
+    $ask = ['action' => 'ask', 'questions' => $questions];
+    $green = ci_view([ci_run('ci', 'COMPLETED', 'SUCCESS')]);
+
+    expect(pipeline_ci_answer(ci_manifest(), $green, 'def456', true, 1, ['a.php'], $questions))->toBe($ask);
+    expect(pipeline_ci_answer(ci_manifest(), $green, 'def456', true, 3, [], $questions))->toBe($ask);
+    expect(pipeline_ci_answer(ci_manifest(), null, 'abc123', true, 120, [], $questions))->toBe($ask);
+    expect(pipeline_ci_answer(ci_manifest(), $green, 'abc123', true, 1, [], $questions))->toBe($ask);
+    expect(pipeline_ci_answer(ci_manifest(), $green, 'abc123', true, 1, [], []))->toBe(['action' => 'ready', 'verdict' => 'green', 'sha' => 'abc123']);
+});
+
 it('counts the merge round and the CI fix round apart', function () {
     $merge = "Unreviewed merge on the PR's head commit def456: a merge since the last completed review met this branch's changes in a.php";
     $ci = "CI red on the PR's head commit abc123: CI / ci failed (https://github.com/acme/app/actions/runs/11/job/ci)";
