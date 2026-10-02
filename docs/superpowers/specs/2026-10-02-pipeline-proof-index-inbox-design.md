@@ -90,8 +90,10 @@ green or blue by the unread runs' statuses. Two gaps keep it from reading as an 
 
 ### The counter: `proof.php`
 
-- `ProofRunStatus::callsOwner(): bool`: true for Halted and Ready, false for Running, Merged and Closed. Its
-  docblock: the statuses that make an opened run unread again (`proof_count_attention()`).
+- `ProofRunStatus::callsOwner(): bool`: true for Halted and Ready, false for Running, Merged and Closed. Today that
+  is the same partition as `group() < 2`, so it is written as `group() < 2` rather than as a second list of cases. Its
+  docblock: the statuses that make an opened run unread again (`proof_count_attention()`), the ones `group()` puts
+  first.
 - `proof_count_attention(array $before, array $after): array` returns `$after`, with `attention` one above
   `$before`'s (`(int) ($before['attention'] ?? 0) + 1`) when `ProofRunStatus::of($after)` differs from
   `ProofRunStatus::of($before)` and `callsOwner()`; otherwise `$after` unchanged. Halted to Halted (a second halt
@@ -134,7 +136,8 @@ which the index compares; `revision` and `updatedAt` still stay as they are. `pr
   - `.dot`: hidden by default, so without `localStorage` (no row marked read or unread) the rows look as today;
     shown in `tr.unread` and `tr.read`. A round button with no border or background of its own, about 1rem across
     for the hit area, drawing a `.55rem` circle (`::before`): filled `var(--ready)` on an unread row, an outline in
-    `var(--line)` on a read one, `var(--muted)` on hover and focus. A visible focus ring.
+    `var(--muted)` on a read one (the row is itself muted, so a `var(--line)` outline would not be seen), `var(--fg)` on
+    hover and focus. A visible focus ring.
   - `.unread-count`: `var(--ready)`, the size and weight of `.marker`, a little space after the heading text.
 - **`status.js`** (`proof_render_status_js()`): each entry gains `seen` (`proof_run_seen()`, null without a revision)
   beside `revision`, which stays. The row it carries is the new row, so a poll brings the dot and `data-seen` along.
@@ -197,7 +200,8 @@ Pest, beside the existing tests in `skills/pipeline/checks/tests/`. Each fails t
 the attribute or the markup does not exist yet.
 
 **`ProofTest.php` (pure)**
-- `callsOwner()` is true for Halted and Ready, false for Running, Merged and Closed.
+- `callsOwner()` is true for Halted and Ready, false for Running, Merged and Closed, the same partition as
+  `group() < 2` (asserted against it, not as an unrelated fact).
 - `proof_count_attention()`: Running to Halted, Running to Ready and Halted to Ready raise `attention` by one (from
   absent to 1, and from 1 to 2); Halted to Halted, Ready to Ready, anything to Running, Merged or Closed, and a change
   that leaves the status alone (a cost) return the run unchanged. A run without a stored status reads as its

@@ -122,8 +122,9 @@ it('keeps the store\'s revision, attention, status and cost over a payload\'s', 
 Append to the same file:
 
 ```php
-it('calls the owner for a halted or ready run, never for a running, merged or closed one', function () {
-    expect(array_map(fn (ProofRunStatus $status) => $status->callsOwner(), ProofRunStatus::cases()))->toBe([false, true, true, false, false]);
+it('calls the owner for a halted or ready run, never for a running, merged or closed one: the statuses group() puts first', function () {
+    expect(array_map(fn (ProofRunStatus $status) => $status->callsOwner(), ProofRunStatus::cases()))->toBe([false, true, true, false, false])
+        ->toBe(array_map(fn (ProofRunStatus $status) => $status->group() < 2, ProofRunStatus::cases()));
 });
 
 it('raises attention by one when a change turns the status halted or ready, and only then', function (array $before, array $after, array $counted) {
@@ -192,10 +193,10 @@ const PROOF_STORE_KEYS = ['addedTests', 'schema', 'createdAt', 'updatedAt', 'sho
 In `ProofRunStatus`, after `finished()` (line 97), add:
 
 ```php
-    /** Halted or Ready: the statuses that make an opened run unread again (`proof_count_attention()`). */
+    /** Halted or Ready, the statuses `group()` puts first: they make an opened run unread again (`proof_count_attention()`). */
     public function callsOwner(): bool
     {
-        return in_array($this, [self::Halted, self::Ready], true);
+        return $this->group() < 2;
     }
 ```
 
@@ -743,7 +744,9 @@ it('carries the inbox wiring in the index script, and styles a row only once the
         ->toContain('tr.read td { color:var(--muted); }')
         ->toContain('.dot { display:none;')
         ->toContain('tr.unread .dot, tr.read .dot { display:inline-flex;')
+        ->toContain('border:1.5px solid var(--muted);')
         ->toContain('tr.unread .dot::before { background:var(--ready); border-color:var(--ready); }')
+        ->toContain('.dot:hover::before, .dot:focus-visible::before { border-color:var(--fg); }')
         ->toContain('.dot:focus-visible { outline:')
         ->toContain('.unread-count {');
 });
@@ -834,15 +837,16 @@ tr.unread td { font-weight:700; }
 tr.read td { color:var(--muted); }
 .dot { display:none; width:1rem; height:1rem; margin:0 .3rem 0 0; padding:0; border:0; border-radius:50%; background:none; color:inherit; cursor:pointer; vertical-align:-.15rem; }
 tr.unread .dot, tr.read .dot { display:inline-flex; align-items:center; justify-content:center; }
-.dot::before { content:""; width:.55rem; height:.55rem; border-radius:50%; border:1.5px solid var(--line); box-sizing:border-box; }
+.dot::before { content:""; width:.55rem; height:.55rem; border-radius:50%; border:1.5px solid var(--muted); box-sizing:border-box; }
 tr.unread .dot::before { background:var(--ready); border-color:var(--ready); }
-.dot:hover::before, .dot:focus-visible::before { border-color:var(--muted); }
+.dot:hover::before, .dot:focus-visible::before { border-color:var(--fg); }
 .dot:focus-visible { outline:2px solid var(--ready); outline-offset:1px; }
 ```
 
-The status pill keeps its own colour on a muted row: `.pill-*` set `color` on the pill itself. Hover and focus turn
-the circle's edge `var(--muted)` on either row (the spec's *`var(--muted)` on hover and focus*); the filled circle
-stays filled.
+The status pill keeps its own colour on a muted row: `.pill-*` set `color` on the pill itself. The read row's outline is
+`var(--muted)`, not `var(--line)`: the row is itself muted, and a `var(--line)` circle (`#e4e4e7` on white) would not
+be seen, while the dot is the only way to mark a row unread. Hover and focus turn the circle's edge `var(--fg)` on
+either row (the spec's *`var(--fg)` on hover and focus*); the filled circle stays filled.
 
 - [ ] **Step 6: The index script**
 
@@ -860,6 +864,7 @@ Replace Task 2's `unread()` and `mark()` with:
   function unread(row) {
     return storage ? proofUnread(Number(row.dataset.seen || 0), storage.getItem('seen:' + row.dataset.run), row.dataset.status) : '';
   }
+  // A row without a dot (a run filed before revisions) returns before the class toggles, so it is never styled read.
   function mark(row) {
     var state = unread(row);
     var dot = row.querySelector('button.dot');
@@ -1129,10 +1134,13 @@ Click the dot (`Mark as read`), `() => probe()` → `cls: "read"`, `marker: ""`,
 `S ready`, poll now → `marker: "Ready"`, `cls: "unread"`, the favicon is the ready icon. Open the page and come back
 (re-probe, poll now) → `cls: "read"`. `S merged`, poll now → `cls: "read"`, `marker: ""`, `title: "Proofs"`.
 
-- [ ] **Step 8: Phone width and dark mode**
+- [ ] **Step 8: Phone width, light mode and dark mode**
 
 `browser_resize` to 390×844: `() => document.documentElement.scrollWidth <= window.innerWidth` → `true` (the table
-scrolls inside `.table-wrap`), and a screenshot shows the heading count and the dots. `browser_emulate_media` with
+scrolls inside `.table-wrap`), and a screenshot shows the heading count and the dots. Back at 1280×900 in light
+mode, with at least one read row (open a run and come back as in Step 4), a screenshot close enough to see the read
+row's outline dot: it must be plainly visible on the white background beside the muted text, or the look is not
+done. `browser_emulate_media` with
 `colorScheme: "dark"`, `browser_resize` back to 1280×900, and a screenshot: the filled dot, the outline dot and the
 muted rows are all visible on the dark background. Reset the colour scheme.
 
