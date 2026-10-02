@@ -44,6 +44,7 @@ it('marks a page halted with its reason, leaves revision and updatedAt, and re-r
     expect($result)->toMatchArray(['code' => 0, 'stdout' => '', 'stderr' => '']);
     expect($run['status'])->toBe(['state' => 'halted', 'reason' => 'CI red on the head commit']);
     expect($run)->toMatchArray(['revision' => $before['revision'], 'updatedAt' => $before['updatedAt'], 'attention' => 1]);
+    expect(file_get_contents($page))->toContain("<body data-seen=\"2\">\n");
     expect(file_get_contents($page))->toContain('<span class="pill pill-halted">Halted</span> <span class="reason">CI red on the head commit</span>');
     expect(file_get_contents(dirname($page, 3) . '/index.html'))->toContain('pill-halted')->toContain('href="Deploy/pr-5-logs/index.html"');
 });
@@ -157,7 +158,7 @@ it('rewrites status.js in the store the page is in when a status is written', fu
 
     $runs = proof_test_status_runs(file_get_contents("{$root}/status.js"));
     expect($runs)->toHaveCount(1);
-    expect($runs[0])->toMatchArray(['key' => 'Deploy/pr-5-logs', 'status' => 'halted', 'revision' => 1]);
+    expect($runs[0])->toMatchArray(['key' => 'Deploy/pr-5-logs', 'status' => 'halted', 'revision' => 1, 'seen' => 2]);
     expect(glob("{$root}/*.tmp"))->toBe([]);
 });
 
@@ -188,3 +189,12 @@ it('raises attention when a status turns halted or ready, and not for merged, cl
     'halted, resumed, halted again' => [[['halted', '--reason', 'CI red'], ['running'], ['halted', '--reason', 'CI red']], 2],
     'halted, then ready' => [[['halted', '--reason', 'CI red'], ['ready']], 2],
 ]);
+
+it('leaves the seen number at the revision when a status turns merged, closed or running', function (string $status) {
+    $page = proof_test_page();
+
+    proof_status_cli(['status', $page, $status]);
+
+    expect(proof_test_status_runs(file_get_contents(dirname($page, 3) . '/status.js'))[0])->toMatchArray(['revision' => 1, 'seen' => 1]);
+    expect(file_get_contents($page))->toContain("<body data-seen=\"1\">\n");
+})->with(['merged', 'closed', 'running']);

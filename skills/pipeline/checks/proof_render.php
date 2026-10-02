@@ -177,17 +177,18 @@ function proof_render_script(): string
 }
 
 /**
- * Opening a page stores its revision under `seen:<repo>/<run>`, the last two directories of its own path (a trailing
- * `index.html` dropped), which are what the index links to: `file://` is one origin in Chrome, so the index reads it.
+ * Opening a page stores its run's seen number (`proof_run_seen()`, the body's `data-seen`) under `seen:<repo>/<run>`,
+ * the last two directories of its own path (a trailing `index.html` dropped), which are what the index links to:
+ * `file://` is one origin in Chrome, so the index reads it.
  */
 function proof_render_seen_script(): string
 {
     return <<<'JS'
 (function () {
-  var revision = document.body.dataset.revision;
-  if (!revision) { return; }
+  var seen = document.body.dataset.seen;
+  if (!seen) { return; }
   var run = location.pathname.replace(/\/index\.html$/, '').split('/').filter(Boolean).slice(-2).map(decodeURIComponent).join('/');
-  try { localStorage.setItem('seen:' + run, revision); } catch (error) {}
+  try { localStorage.setItem('seen:' + run, seen); } catch (error) {}
 })();
 JS;
 }
@@ -550,11 +551,12 @@ function proof_render_run(array $run): string
     $body .= "<dialog class=\"zoom\" id=\"zoom\"></dialog>\n<script>\n" . proof_render_script() . "\n</script>\n";
 
     $styles = proof_render_styles();
-    $revision = isset($run['revision']) ? ' data-revision="' . (int) $run['revision'] . '"' : '';
+    $seen = proof_run_seen($run);
+    $seenAttribute = $seen === null ? '' : " data-seen=\"{$seen}\"";
 
     return "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
         . "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-        . '<title>' . proof_e($title) . "</title>\n<style>\n{$styles}\n</style>\n</head>\n<body{$revision}>\n"
+        . '<title>' . proof_e($title) . "</title>\n<style>\n{$styles}\n</style>\n</head>\n<body{$seenAttribute}>\n"
         . $body
         . "</body>\n</html>\n";
 }
@@ -724,8 +726,9 @@ function proof_index_row_hash(array $entry): string
 
 /**
  * `status.js`, which the open index polls (`proof_render_index_script()`): per run in the attention order its key,
- * status, revision (null before revisions existed), hash and row. JSON's default escaping keeps it one valid script
- * whatever a title holds (`/`, U+2028 and U+2029 escaped); it is a file of its own, so no value can end a tag.
+ * status, revision and seen number (`proof_run_seen()`; both null before revisions existed), hash and row. JSON's
+ * default escaping keeps it one valid script whatever a title holds (`/`, U+2028 and U+2029 escaped); it is a file of
+ * its own, so no value can end a tag.
  *
  * @param list<array{dir: string, run: array}> $runs
  */
@@ -735,6 +738,7 @@ function proof_render_status_js(array $runs): string
         'key' => proof_index_key($entry),
         'status' => ProofRunStatus::of($entry['run'])->value,
         'revision' => isset($entry['run']['revision']) ? (int) $entry['run']['revision'] : null,
+        'seen' => proof_run_seen($entry['run']),
         'hash' => proof_index_row_hash($entry),
         'row' => proof_render_index_row($entry),
     ], proof_index_order($runs));
@@ -759,6 +763,7 @@ function proof_render_index_row(array $entry): string
     $totals = proof_cost_totals($cost);
     $updated = proof_updated_time($run);
     $summary = trim((string) ($run['clientSummary'] ?? ''));
+    $seen = proof_run_seen($run);
 
     // The prune pass removes a run that opened no PR two weeks after its last filing, so the index only names it.
     $pr = empty($run['pr'])
@@ -775,7 +780,7 @@ function proof_render_index_row(array $entry): string
         'status' => $status->value,
         'finished' => $status->finished() ? '1' : '0',
         'updated' => (string) ($run['updatedAt'] ?? ''),
-        ...(isset($run['revision']) ? ['revision' => (string) (int) $run['revision']] : []),
+        ...($seen === null ? [] : ['seen' => (string) $seen]),
         'search' => proof_index_search($run),
         'hash' => proof_index_row_hash($entry),
     ];
@@ -917,15 +922,15 @@ function proof_render_index_script(): string
     time.title = date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + clock + ':' + pad(date.getSeconds());
   }
   function unread(row) {
-    var revision = Number(row.dataset.revision || 0);
-    if (!storage || !revision) { return ''; }
-    var seen = storage.getItem('seen:' + row.dataset.run);
-    return seen === null ? 'New' : Number(seen) < revision ? 'Updated' : '';
+    var seen = Number(row.dataset.seen || 0);
+    if (!storage || !seen) { return ''; }
+    var stored = storage.getItem('seen:' + row.dataset.run);
+    return stored === null ? 'New' : Number(stored) < seen ? 'Updated' : '';
   }
   function mark(row) {
     var state = unread(row);
     row.querySelector('.marker').textContent = state;
-    row.dataset.rank = state === '' && row.dataset.revision && row.dataset.group === '1' ? '2' : row.dataset.group;
+    row.dataset.rank = state === '' && row.dataset.seen && row.dataset.group === '1' ? '2' : row.dataset.group;
   }
   function attention(a, b) {
     return (Number(a.dataset.rank || a.dataset.group) - Number(b.dataset.rank || b.dataset.group))

@@ -382,3 +382,9 @@ it('raises attention by one when a change turns the status halted or ready, and 
         ['status' => ['state' => 'halted', 'reason' => 'r'], 'cost' => [['workflow' => 'wf_a']]],
     ],
 ]);
+
+it('gives a run the number its page stores when opened: its revision plus its attention', function () {
+    expect(proof_run_seen(['revision' => 3, 'attention' => 2]))->toBe(5);
+    expect(proof_run_seen(['revision' => 3]))->toBe(3);
+    expect(proof_run_seen(['attention' => 2]))->toBeNull();
+});

@@ -398,17 +398,19 @@ it('puts a halted run\'s reason beside its pill, escaped', function () {
     expect($html)->toContain('<p class="status"><span class="pill pill-halted">Halted</span> <span class="reason">CI red on &lt;b&gt;abc&lt;/b&gt;</span></p>');
 });
 
-it('names the revision in the meta line and on the body, and leaves both out for a run without one', function () {
-    $html = proof_render_run(proof_current_run(['revision' => 3]));
-    expect($html)->toContain(' · revision 3</p>')->toContain("<body data-revision=\"3\">\n");
+it('names the revision in the meta line, puts the seen number on the body, and leaves both out for a run without a revision', function () {
+    $html = proof_render_run(proof_current_run(['revision' => 3, 'attention' => 2]));
+    expect($html)->toContain(' · revision 3</p>')->toContain("<body data-seen=\"5\">\n")->not->toContain('data-revision');
 
+    expect(proof_render_run(proof_current_run(['revision' => 3])))->toContain("<body data-seen=\"3\">\n");
     expect(proof_render_run(proof_current_run()))->not->toContain(' · revision')->toContain("<body>\n");
 });
 
-it('records the page as seen at its revision, keyed by its repo and run directories, before the copy and zoom code', function () {
+it('records the page as seen at its number, keyed by its repo and run directories, before the copy and zoom code', function () {
     $html = proof_render_run(proof_current_run(['revision' => 3]));
 
-    expect($html)->toContain("localStorage.setItem('seen:' + run, revision)");
+    expect($html)->toContain('var seen = document.body.dataset.seen;');
+    expect($html)->toContain("localStorage.setItem('seen:' + run, seen)");
     expect($html)->toContain(".split('/').filter(Boolean).slice(-2)");
     expect(strpos($html, "localStorage.setItem('seen:'"))->toBeLessThan(strpos($html, 'navigator.clipboard.writeText'));
     expect(strpos($html, 'navigator.clipboard.writeText'))->toBeLessThan(strpos($html, 'showModal()'));
@@ -497,8 +499,11 @@ it('gives each row what the index script needs, its status, its figures, and a c
     $html = proof_render_index([$ready, $halted]);
     $copy = 'summary-' . substr(sha1('Deploy/pr-5-logs'), 0, 8);
 
-    expect($html)->toContain('<tr data-run="Deploy/pr-5-logs" data-repo="Deploy" data-group="1" data-status="ready" data-finished="0" data-updated="2026-10-01T10:00:00+02:00" data-revision="3" data-search="pr #412: product summary grid #412 feature/orders-export de logboeken lopen mee." data-hash="' . proof_index_row_hash($ready) . '">');
+    expect($html)->toContain('<tr data-run="Deploy/pr-5-logs" data-repo="Deploy" data-group="1" data-status="ready" data-finished="0" data-updated="2026-10-01T10:00:00+02:00" data-seen="3" data-search="pr #412: product summary grid #412 feature/orders-export de logboeken lopen mee." data-hash="' . proof_index_row_hash($ready) . '">');
     expect($html)->toContain('<tr data-run="Asimo/feature-old" data-repo="Asimo" data-group="0" data-status="halted" data-finished="0" data-updated="2026-09-01T10:00:00+02:00" data-search="pr #412: product summary grid #412 feature/orders-export" data-hash="' . proof_index_row_hash($halted) . '">');
+    expect(proof_render_index_row(proof_index_entry('pr-7-x', ['revision' => 3, 'attention' => 2])))
+        ->toContain(' data-updated="2026-08-25T15:30:00+02:00" data-seen="5" data-search=');
+    expect($html)->not->toContain('data-revision');
     expect($html)->toContain('<td data-sort="0"><span class="pill pill-halted">Halted</span> <span class="reason">CI red</span></td>');
     expect($html)->toContain('index.html">PR #412: product summary grid</a><span class="marker"></span></td>');
     expect($html)->toContain('<td class="num" data-sort="1200">20.0 min</td><td class="num" data-sort="2310000">2.31M</td>');
@@ -561,7 +566,7 @@ it('names a row\'s copy target by its run, the same on every render', function (
     expect(proof_render_index_row(proof_index_entry('pr-6-other', ['clientSummary' => 'x'])))->not->toContain($id);
 });
 
-it('renders status.js with each run\'s key, status, revision, hash and row, in the attention order', function () {
+it('renders status.js with each run\'s key, status, revision, seen number, hash and row, in the attention order', function () {
     $ready = proof_index_entry('pr-5-logs', ['revision' => 3, 'status' => ['state' => 'ready'], 'updatedAt' => '2026-10-01T10:00:00+02:00']);
     $halted = proof_index_entry('pr-6-old', ['status' => ['state' => 'halted', 'reason' => 'CI red'], 'updatedAt' => '2026-09-01T10:00:00+02:00']);
 
@@ -572,17 +577,20 @@ it('renders status.js with each run\'s key, status, revision, hash and row, in t
         'key' => 'Deploy/pr-5-logs',
         'status' => 'ready',
         'revision' => 3,
+        'seen' => 3,
         'hash' => proof_index_row_hash($ready),
         'row' => proof_render_index_row($ready),
     ]);
     // A run filed before revisions existed has none, and gets no marker.
-    expect($runs[0])->toMatchArray(['status' => 'halted', 'revision' => null]);
+    expect($runs[0])->toMatchArray(['status' => 'halted', 'revision' => null, 'seen' => null]);
     expect(proof_index_row_hash($ready))->toMatch('/^[0-9a-f]{12}$/');
     expect($runs[1]['row'])->toContain(' data-hash="' . proof_index_row_hash($ready) . '">');
+    expect(proof_test_status_runs(proof_render_status_js([proof_index_entry('pr-7-x', ['revision' => 3, 'attention' => 2])]))[0])
+        ->toMatchArray(['revision' => 3, 'seen' => 5]);
     expect(proof_test_status_runs(proof_render_status_js([])))->toBe([]);
 });
 
-it('changes a run\'s hash when its status, revision or cost changes, and only then', function () {
+it('changes a run\'s hash when its status, revision, attention or cost changes, and only then', function () {
     $entry = proof_index_entry('pr-5-logs', ['revision' => 1, 'status' => ['state' => 'running']]);
     $hash = proof_index_row_hash($entry);
     $with = fn (array $changes): string => proof_index_row_hash(['dir' => $entry['dir'], 'run' => [...$entry['run'], ...$changes]]);
@@ -590,6 +598,7 @@ it('changes a run\'s hash when its status, revision or cost changes, and only th
     expect(proof_index_row_hash($entry))->toBe($hash);
     expect($with(['status' => ['state' => 'halted', 'reason' => 'CI red']]))->not->toBe($hash);
     expect($with(['revision' => 2]))->not->toBe($hash);
+    expect($with(['attention' => 1]))->not->toBe($hash);
     expect($with(['cost' => [['workflow' => 'wf_a', 'span' => 60.0, 'steps' => []]]]))->not->toBe($hash);
     expect(proof_index_row_hash(['dir' => '/store/Asimo/pr-5-logs', 'run' => $entry['run']]))->not->toBe($hash);
 });
@@ -768,7 +777,7 @@ it('carries the poll and the tab signal in the index script', function () {
         ->toContain('current.dataset.hash === entry.hash')
         ->toContain("createElement('template')")
         ->toContain('function unread(row)')
-        ->toContain("if (!storage || !revision) { return ''; }")
+        ->toContain("if (!storage || !seen) { return ''; }")
         ->toContain("row.dataset.finished === '0' && unread(row) !== ''")
         ->toContain("getElementById('finished-count')")
         ->toContain('location.reload()');

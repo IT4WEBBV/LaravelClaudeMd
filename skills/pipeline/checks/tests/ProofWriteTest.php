@@ -193,8 +193,8 @@ it('leaves status.js beside the index at every write, naming the run, its status
     $second = proof_test_status_runs(file_get_contents("{$root}/status.js"));
 
     expect($first)->toHaveCount(1);
-    expect($first[0])->toMatchArray(['key' => 'Deploy/pr-5-logs', 'status' => 'running', 'revision' => 1]);
-    expect($second[0])->toMatchArray(['key' => 'Deploy/pr-5-logs', 'status' => 'running', 'revision' => 2]);
+    expect($first[0])->toMatchArray(['key' => 'Deploy/pr-5-logs', 'status' => 'running', 'revision' => 1, 'seen' => 1]);
+    expect($second[0])->toMatchArray(['key' => 'Deploy/pr-5-logs', 'status' => 'running', 'revision' => 2, 'seen' => 2]);
     expect($second[0]['hash'])->not->toBe($first[0]['hash']);
     expect(file_get_contents("{$root}/index.html"))->toContain('data-hash="' . $second[0]['hash'] . '"');
     expect(glob("{$root}/*.tmp"))->toBe([]);
@@ -221,4 +221,6 @@ it('keeps the stored attention through a filing, and never takes a payload\'s', 
     proof_write_cli(proof_write_payload(['attention' => 40]), $root);
 
     expect(proof_write_stored($root))->toMatchArray(['revision' => 2, 'attention' => 1]);
+    expect(proof_test_status_runs(file_get_contents("{$root}/status.js"))[0])->toMatchArray(['revision' => 2, 'seen' => 3]);
+    expect(file_get_contents("{$root}/Deploy/pr-5-logs/index.html"))->toContain("<body data-seen=\"3\">\n");
 });

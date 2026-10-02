@@ -285,6 +285,16 @@ function proof_count_attention(array $before, array $after): array
 }
 
 /**
+ * The number a run page stores under `seen:<repo>/<run>` when it is opened, and the index compares with: `revision +
+ * attention`. Both only grow, so the sum grows whenever either does; a run without `attention` gets its revision, which
+ * is what every browser stored before `attention` existed. Null for a run filed before revisions existed.
+ */
+function proof_run_seen(array $run): ?int
+{
+    return isset($run['revision']) ? (int) $run['revision'] + (int) ($run['attention'] ?? 0) : null;
+}
+
+/**
  * `$run` with one workflow's time and cost filed (`pipeline_run_cost_record()`): it replaces the entry of the same
  * `workflow`, else it is appended, so filing the same transcript dir twice changes nothing and a resume or a CI fix
  * round adds its own.
