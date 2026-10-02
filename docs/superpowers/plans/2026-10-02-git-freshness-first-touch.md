@@ -18,7 +18,8 @@ run's own branch, and `fetch_if_stale` returns non-zero when its fetch did not f
 Tests are plain bash scripts in `hooks/tests/`.
 
 **Spec:** `docs/superpowers/specs/2026-10-02-git-freshness-first-touch-design.md`. Read it with this plan: the plan
-argues from it, and its `## Assumptions` 1–21 are the answers this plan builds on (14–21 were added by the plan step).
+argues from it, and its `## Assumptions` 1–24 are the answers this plan builds on (14–21 were added by the plan step,
+22–24 by the plan review's resolve step).
 
 ## Global Constraints
 
@@ -64,6 +65,9 @@ argues from it, and its `## Assumptions` 1–21 are the answers this plan builds
    `file_path`, not the one inside the escaped content. Pinned in Task 2's case 6.
 5. **One Bash command touching two new repos** (`git -C <a> status && git -C <b> status`) — both checked, one valid
    JSON line holding both reports. Pinned in Task 3's case 8.
+6. **A skill read in a session whose config repo sits on a branch behind** — silent, because `session` claimed the
+   config repo (spec assumption 22), while the same read in a session that never claimed it reports the repo. Pinned in
+   Task 2's case 7.
 
 ---
 
@@ -425,6 +429,7 @@ git commit -m "refactor(hooks): git-freshness collects repo reports and emits on
   - `touch_targets` — prints the paths the payload's tool call acts on, one per line. Task 3 replaces its `Bash`
     line.
   - `check_first_touches <event> <paths, one per line>` — claims and checks each new repo, then emits one object.
+  - `sync_config_repos` (existing) also claims each config repo's marker.
 
 - [ ] **Step 1: Write cases 2–7**
 
@@ -516,6 +521,17 @@ contains "$sess" '"hookEventName":"SessionStart"' "session checks its launch rep
 is "$touch_after" "" "the first touch after a session launched in that repo (a subdirectory) is silent"
 again=$(run_hook session "{\"session_id\":\"t-session\",\"cwd\":\"$repo\"}")
 contains "$again" "nothing incoming" "a second SessionStart (resume, /clear) still checks"
+# Every skill is a symlink into a config repo's primary checkout: a skill read
+# must not check it again (spec assumption 22).
+cfg=$(fixture configrepo 2)
+git -C "$cfg" checkout -q -b feature
+sess=$(printf '%s' "{\"session_id\":\"t-config\",\"cwd\":\"$root/plain\"}" \
+    | GIT_FRESHNESS_CONFIG_REPOS="$cfg" bash "$hook" session 2>/dev/null)
+skill_read=$(run_hook touch "$(read_payload t-config "$cfg/app.php")")
+control=$(run_hook touch "$(read_payload t-config-control "$cfg/app.php")")
+contains "$sess" "skills from 'feature'" "session flags the config repo on a branch"
+is "$skill_read" "" "a read in a config repo after the session synced it is silent"
+contains "$control" "work on 'feature'" "without the session's claim the same read reports the repo"
 echo
 ```
 
@@ -525,8 +541,8 @@ Run: `bash hooks/tests/git-freshness-touch.test.sh`
 Expected: case 1 passes; cases 2–6 fail because `touch` is still an unknown mode that prints nothing (e.g.
 `FAIL  first touch: exactly one line`, `FAIL  main equals origin/main` with `got '2'`, `FAIL  the touched repo was
 fetched`). In case 7, `FAIL  touch claims the repo`; its two "is silent" / "no-op" lines pass for now only because
-`touch` prints nothing at all, and they start to mean something once Step 4 is in. Ends `… passed, N failed` with
-N > 0.
+`touch` prints nothing at all, and they start to mean something once Step 4 is in; so does the config-repo "is
+silent" line, while its control line fails. Ends `… passed, N failed` with N > 0.
 
 - [ ] **Step 3: Add the path and marker functions**
 
@@ -589,12 +605,15 @@ check_first_touches() {
         toplevel=$(repo_toplevel "$target") || continue
         [ -n "$toplevel" ] || continue
         claim_repo "$toplevel" || continue
-        check_repo "$toplevel"
+        check_repo "$toplevel" </dev/null
     done <<< "$2"
 
     [ -z "$repo_context" ] || emit "$event" "$repo_context" "$repo_summary"
 }
 ```
+
+`check_repo` reads `/dev/null`, as `sync_config_repos` already does for its background fetch: the loop's own input is
+the here-string, and nothing the check starts may eat it.
 
 `payload_field path` matches only the key `"path"` (its pattern starts at the quote), so `"file_path"`,
 `"notebook_path"` and `"transcript_path"` never match it; an escaped `\"file_path\"` inside tool content never
@@ -627,6 +646,17 @@ In the `session)` branch, replace `        check_repo "$repo"` with:
 ```
 
 (`repo` is absolute here: the payload's `cwd` or `$PWD`, captured before `sync_config_repos` changes directory.)
+
+In `sync_config_repos`, in its second loop, directly after the line
+`        git rev-parse --git-dir >/dev/null 2>&1 || continue`, add:
+
+```bash
+        # Every skill is a symlink into this checkout, so nearly every session
+        # reads a file here. The session has just synced it: a skill read must
+        # not check it again and tell a session that does not work here to
+        # raise it and wait.
+        claim_repo "$(git rev-parse --show-toplevel)" || :
+```
 
 - [ ] **Step 5: Run both suites**
 
@@ -716,8 +746,9 @@ checked …` (today Bash checks the cwd only).
 In `hooks/git-freshness.sh`, directly below `payload_field`, add:
 
 ```bash
-# Undo a JSON string's escapes: \" \\ \/ become the character, \n and \t a
-# newline and a tab. \uXXXX is left as uXXXX: no path we resolve needs it.
+# Undo a JSON string's escapes: \n and \t become a newline and a tab, any other
+# escaped character becomes that character (\" \\ \/, but also \r as r and
+# \uXXXX as uXXXX: no path we resolve needs those).
 json_unescape() {
     awk '{
         out = ""
@@ -1247,8 +1278,9 @@ re-checks.`) with:
 
 ```bash
 #   session    SessionStart — bring the config repos up to date (see
-#              sync_config_repos), then check the directory the session was
-#              launched in and mark its repo as touched.
+#              sync_config_repos, which also marks each config repo as
+#              touched: every skill read lands there), then check the
+#              directory the session was launched in and mark its repo too.
 #
 #   touch      PreToolUse on Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep|Bash
 #              — check each repo the tool call acts on, the first time this
@@ -1256,7 +1288,8 @@ re-checks.`) with:
 #              paths; for Bash, the cd and git -C words, else the cwd). It runs
 #              before the tool, so a first Read already sees the fast-forwarded
 #              main and the warning arrives before any work lands on an old
-#              base. Later touches in the repo cost one rev-parse.
+#              base. Later touches in the repo cost the payload parsing and
+#              a rev-parse per named path.
 #
 #   edit       PostToolUse on Edit|Write — the legacy wiring: the same check on
 #              the written file's repo, sharing touch's markers, so with both
@@ -1282,7 +1315,7 @@ with
 
 ```json
   "PreToolUse": [
-    { "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep|Bash", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh touch", "timeout": 20, "statusMessage": "Checking git freshness…" } ] }
+    { "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep|Bash", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh touch", "timeout": 20 } ] }
   ],
   "PostToolUse": [
 ```
@@ -1302,10 +1335,14 @@ Replace the modes list (`` `git-freshness.sh` has three modes: `` through the `c
   Glob/Grep, and for Bash every directory named by `cd <dir>` or `git -C <dir>` (else the working
   directory). It fast-forwards local `main`/`master` when safe, reports a working branch behind its
   base with "raise it and wait" (not for a `/pipeline` run's own branch), and says "freshness
-  unknown" when the fetch does not finish. Later touches in the same repo are silent.
+  unknown" when the fetch does not finish. Later touches in the same repo are silent, and so are
+  touches in the config repos, which `session` has just synced. It has no status message: on this
+  matcher it would flash on every tool call.
 - `edit` — the earlier wiring (PostToolUse on `Edit|Write`). It shares `touch`'s per-repo markers,
   so with both wired it does nothing; a machine that still has it wired should replace it with the
-  `touch` entry above.
+  `touch` entry above. Before removing `edit` on the first machine, check once that a `touch` report
+  reaches the model: in a new session, read a file in a repo whose branch is behind and ask what
+  the hook reported. If it does not, keep `edit` wired and leave `touch` out.
 - `checkout` — drops cached verdicts after a branch switch.
 ```
 
@@ -1348,6 +1385,20 @@ with
   initiative. Without the hook, check by hand before the first touch of a repo:
 ```
 
+and, in the same bullet, replace
+
+```markdown
+  There the brief answers the hook's warning. Every other checkout keeps raise-and-wait.
+```
+
+with
+
+```markdown
+  There the brief answers the hook's warning. A warning in a run's step about a checkout the brief does
+  not name (the checkout the step was launched in, a config repo) is not the run's to act on: the step
+  leaves that checkout alone and does not halt on it. Every other checkout keeps raise-and-wait.
+```
+
 - [ ] **Step 4: Run both suites once more**
 
 Run: `bash -n hooks/git-freshness.sh && bash hooks/tests/git-freshness-touch.test.sh && bash hooks/tests/git-freshness-sync.test.sh`
@@ -1368,11 +1419,11 @@ git commit -m "docs(hooks): the touch mode in the hook header, README wiring and
 |---|---|
 | *When it runs*: matcher, target table, repo resolution, `mkdir` claim, one object per call | 2 (Bash row: 3), README wiring: 6 |
 | *Bash command parsing* | 3 |
-| *Slot and pipeline worktrees* (own toplevel, shared fetch) | 2 (case 4), fetch sharing is `newest_fetch_mtime`, unchanged |
+| *Slot and pipeline worktrees* (own toplevel, fetch shared in one order) | 2 (case 4), fetch sharing is `newest_fetch_mtime`, unchanged |
 | *What the check reports*: working-branch line, summary, upstream skip, pipeline exemption, header rewrite | 4 |
 | *A fetch that does not finish* | 5 |
-| *`session`, `edit` and unknown modes* | 1 (unknown, emit), 2 (session claim, edit shares markers) |
+| *`session`, `edit` and unknown modes* | 1 (unknown, emit), 2 (session claim, config repos claimed, edit shares markers) |
 | *`check_repo` emits through the caller* | 1 |
 | *Documentation* | 6 (header rationale: 4) |
-| *Testing* cases 1–10 | touch suite cases 2, 3, 9, 10, 4, 5, 8, 14, 12, 1 |
-| Assumptions 14–21 | 4 (14, 16, 17), 2 (15, 20, 21), 5 (18), 4 (19) |
+| *Testing* cases 1–11 | touch suite cases 2, 3, 9, 10, 4, 5, 8, 14, 12, 1, 7 |
+| Assumptions 14–24 | 4 (14, 16, 17), 2 (15, 20, 21, 22), 5 (18), 4 (19), 6 (23: CLAUDE.md), 24 accepted, no task |

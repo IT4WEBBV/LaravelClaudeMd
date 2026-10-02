@@ -52,8 +52,9 @@ issue's acceptance names.
 ### When it runs: the `touch` mode
 
 `~/.claude/settings.json` wires a PreToolUse hook with matcher
-`Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep|Bash` running `git-freshness.sh touch` (timeout 20, status message
-"Checking git freshness…"). For each call:
+`Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep|Bash` running `git-freshness.sh touch` (timeout 20, no status
+message: on this matcher it would flash on every tool call of the session, for a hook that is a no-op after the first
+touch). For each call:
 
 1. **Resolve the target paths** from the payload's `tool_name`:
 
@@ -76,7 +77,8 @@ issue's acceptance names.
 4. **Check each claimed repo** with `check_repo` and print **one** hook JSON object for the call, with
    `hookEventName: "PreToolUse"` and the reports of every repo checked joined in `additionalContext`. No
    `permissionDecision` is set, so the permission flow is untouched. A call whose repos were all claimed already
-   prints nothing: later touches cost one `bash` start, a `sed` over the payload and one `git rev-parse`.
+   prints nothing: later touches cost a `bash` start, the payload parsing (for Bash also a `sed` and two `awk`s over
+   the command, and a `-d` test per named word) and one `git rev-parse` per named path.
 
 The cache dir stays `${TMPDIR:-/tmp}/claude-git-freshness/<session_id>`, and `checkout` mode still drops it after a
 `git checkout`, so the next touch re-checks the switched branch.
@@ -92,9 +94,14 @@ and when no word resolves, to the `cwd`. A miss is visible as a missing freshnes
 ### Slot and pipeline worktrees
 
 Each worktree has its own `--show-toplevel`, so a slot or a pipeline worktree is its own repo with its own marker
-and its own branch, as the issue asks. The fetch is shared: `fetch_if_stale` skips the network when the newest of
-the worktree's own and the common dir's `FETCH_HEAD` is under 15 minutes old (`newest_fetch_mtime`, unchanged), and
-the remote refs it moves live in the common dir. So touching a slot right after its primary costs no second fetch.
+and its own branch, as the issue asks. The fetch is shared only in part: `fetch_if_stale` skips the network when the
+newest of the worktree's own and the common dir's `FETCH_HEAD` is under 15 minutes old (`newest_fetch_mtime`,
+unchanged), and the remote refs it moves live in the common dir. `FETCH_HEAD` itself is per worktree, so this holds in
+one order only: a slot touched right after its primary costs no second fetch (the primary's `FETCH_HEAD` is the common
+dir's), while a slot touched first, or a second slot, fetches again. Sibling worktrees checked within seconds of each
+other, as an `/orchestrate` batch's step agents are, can also fetch concurrently and collide on the remote-ref locks;
+the loser reports `freshness unknown` (see *A fetch that does not finish*), which carries no instruction
+(assumption 18).
 
 ### What the check reports
 
@@ -141,10 +148,21 @@ with the tag `freshness unknown`. It never blocks the tool: the hook still exits
 `sync_config_repos` calls `fetch_if_stale` in a background subshell and ignores its status, so session start is
 unchanged.
 
+The cap is per repo and the hook's timeout (20 s) is per call. One Bash command naming two repos, both past the TTL
+and both unreachable, spends two capped fetches and can outrun the timeout; Claude Code then drops the hook's output,
+and because both markers were claimed first, neither repo is reported again in that session. This is accepted
+(assumption 24): it needs two unreachable repos in one call, and it costs a missing line, never a blocked tool.
+
 ### `session`, `edit` and unknown modes
 
 - `session` still syncs the config repos and checks the launch directory (the issue rules out a sweep, not this),
   and now claims the launch repo's marker, so the first touch in that repo does not report it a second time.
+- `session` also claims each config repo's marker (its `--show-toplevel`) in `sync_config_repos`, which already
+  fetches it, fast-forwards its base and flags a checkout not on its base ("skills from '`<branch>`'"). Every skill in
+  `~/.claude/skills` is a symlink into a config repo's primary checkout, so nearly every session, and every
+  `/pipeline` step agent through its brief's pointer to `engine.md`, reads a file there. Without the claim that read
+  would check the primary checkout, and a checkout on a branch behind `origin/main` would put "raise it and wait" in
+  sessions that do not work there (assumption 22).
 - `edit` stays, as the same code as `touch` with `hookEventName: "PostToolUse"`, for a machine whose
   `settings.json` still wires it: both modes share markers, so with both wired the PreToolUse touch claims first and
   the PostToolUse edit is a no-op.
@@ -164,7 +182,10 @@ report stays, as context only (`suppressOutput`).
   the modes list describes `touch`, marks `edit` as the legacy wiring to remove, and *Hook tests* names the new
   test file.
 - `CLAUDE.md` *Never work against a stale checkout*: the hook checks each repo on the session's first touch;
-  "Without the hook, check by hand before the first edit" becomes "before the first touch".
+  "Without the hook, check by hand before the first edit" becomes "before the first touch". Its `/pipeline`
+  exception gains one sentence: in a run's step, a warning about a checkout the brief does not name (the checkout the
+  step was launched in, a config repo) is not the run's to act on; the step leaves that checkout alone and does not
+  halt on it (assumption 23).
 - The hook's header comment: the modes, and the reporting rationale above.
 
 `~/.claude/settings.json` itself is not changed by this work (see *Assumptions*).
@@ -198,6 +219,9 @@ report stays, as context only (`suppressOutput`).
    behind line and no raise instruction.
 10. **Unknown mode.** `git-freshness.sh nonsense` with a payload prints nothing and changes nothing (no config sync:
     `GIT_FRESHNESS_CONFIG_REPOS` points at a fixture whose `main` stays behind).
+11. **Config repos are claimed at session start.** A config-repo fixture on `feature`, behind: after a session, a
+    Read of a file in it prints nothing; the same Read under another session id reports the repo, so the line is not
+    vacuous.
 
 The existing `git-freshness-sync.test.sh` keeps passing unchanged, including its case 11 (`edit` caches per repo)
 and the session cases, which now exercise `check_repo` through the collect-then-emit path.
@@ -265,6 +289,22 @@ Added by the `plan` step, where the plan needed an answer this spec did not give
     checks regardless of the claim's result.
 21. **Which directory does `session` mark?** The launch directory's `--show-toplevel`, so a session launched in a
     repo's subdirectory silences the first touch anywhere in that repo.
+
+Added by the `review-plan` resolve step, answering the plan review:
+
+22. **Does a skill read check the config repo's primary checkout?** No: `session` claims each config repo's marker
+    while it syncs it, so the first read through `~/.claude/skills` costs a `rev-parse` and prints nothing. Cost: a
+    session working in a config repo's primary checkout gets no first-touch line there; it keeps the session-start
+    "skills from '`<branch>`'" tag and the sync notes. Work on a config repo through a pipeline worktree is unaffected
+    (own toplevel, own marker).
+23. **What does a `/pipeline` step agent do with a warning about a checkout its brief does not name** (its launch
+    checkout, checked at SessionStart or through a Bash command's `cwd`; a config repo where SessionStart did not run
+    for it)? Nothing: `CLAUDE.md`'s pipeline exception says so. The step works only in its worktree, so the warning is
+    not about its work, and a step agent cannot raise anything.
+24. **A deadline shared across one hook call?** No. Two repos past the TTL and unreachable in one Bash command can
+    outrun the 20 s hook timeout and leave both unreported for the session (*A fetch that does not finish*); accepted
+    as rare and harmless rather than adding a budget passed through `check_repo`. A miss found in practice is a
+    follow-up.
 
 ## What was read and probed
 
