@@ -228,7 +228,8 @@ In `dispatch_cli_launch()`, the problem chain becomes:
 ```
 
 It returns through `pipeline_halt($problem)` before `--from`'s re-arm and the `--decision` write, as the other
-links do.
+links do. That also puts it before `manifest_finished()`: a plain `launch` on a `done` run, on a machine without
+the link, answers the `fresh session:` reason instead of `done` (spec Assumption 7, an accepted trade-off).
 
 - [ ] **Step 5: Run the tests to see them pass**
 

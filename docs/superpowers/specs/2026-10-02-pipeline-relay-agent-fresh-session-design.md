@@ -196,8 +196,14 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
    resuming it in place; a fixed prefix is how `relay:` is already recognised. No code reads it today (`finish`
    only needs it not to be `relay:`), so no `dispatch_cli_is_…` helper is added.
 7. **Does `launch`'s check also guard a `done` manifest?** Yes, it sits in the problem chain before
-   `manifest_finished()`, like the agents and tier checks. A `launch` on a finished run happens only with `--from
-   review-pr` (the CI fix round), which starts a workflow anyway.
+   `manifest_finished()`, like the agents and tier checks. A `launch` on a finished run happens with `--from
+   review-pr` (the CI fix round, which starts a workflow anyway) and also without `--from`: engine.md's finished
+   rule, orchestrate's Step 7 resuming from cursors and commands.md §Launch all expect a plain `launch` on a `done`
+   run to answer `done`. The trade-off is accepted: on a machine without the link such a `launch` reports the
+   `fresh session:` reason instead of `done`. The check cannot move below `manifest_finished()`, because the
+   `--from` re-arm and the `--decision` write come before the finished check in `dispatch_cli_launch()` and must
+   not happen on a machine that cannot run the workflow; the cost is one misleading message on a machine that is
+   already misconfigured.
 8. **Does a smoke run get the check?** Not `launch`'s: smoke `args` are built by hand. Its relay check still
    halts with the session reason when the type is missing, which on a machine without the link misnames the cause
    as the session's; acceptable for a hand-run smoke test.
