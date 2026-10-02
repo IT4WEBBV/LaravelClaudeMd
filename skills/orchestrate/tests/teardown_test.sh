@@ -93,6 +93,36 @@ still_there() { # <worktree> <branch>
   git -C "$SHOP" rev-parse --verify -q "refs/heads/$2" >/dev/null || fail "branch $2 was deleted"
 }
 
+gone() { # <worktree> <branch>
+  [ ! -d "$1" ] || fail "$1 is still there"
+  ! git -C "$SHOP" rev-parse --verify -q "refs/heads/$2" >/dev/null || fail "branch $2 is still there"
+  ! git -C "$SHOP" worktree list --porcelain | grep -qxF "worktree $1" || fail "git still lists $1"
+}
+
+slot_script() { # commits to $SHOP a scripts/worktree.sh that logs, then removes slot <N> as the real one does
+  mkdir -p "$SHOP/scripts"
+  cat > "$SHOP/scripts/worktree.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "worktree.sh $*" >> "$TEARDOWN_LOG"
+[ "${TEARDOWN_WORKTREE_EXIT:-0}" -eq 0 ] || { echo "ERROR: docker compose down -v failed" >&2; exit 1; }
+slot="$(pwd -P)-$2"
+branch="$(git -C "$slot" branch --show-current)"
+git worktree remove --force "$slot"
+[ "${3:-}" != --force-local-branch-removal ] || git branch -D -q "$branch"
+STUB
+  git -C "$SHOP" add scripts/worktree.sh
+  git -C "$SHOP" commit -q -m "worktree.sh"
+}
+
+slot() { # <dir>: a fixture with scripts/worktree.sh and the slot $SLOT (Shop-4) on feature/issue-4-x, merged
+  fixture "$1"
+  slot_script
+  SLOT="$(dirname "$SHOP")/Shop-4"
+  worktree "$SLOT" feature/issue-4-x
+  TEARDOWN_GH="$(pr "$SLOT")"
+  export TEARDOWN_GH
+}
+
 # An untracked file: nothing removed, the clean check names it.
 case_start dirty; linked dirty
 touch "$WT/notes.txt"
@@ -189,5 +219,98 @@ for path in "$WT/sub" "$TMP/nowhere"; do
   grep -q '^usage: ' "$TMP/err" || fail "no usage on stderr for $path: $(cat "$TMP/err")"
 done
 not_logged "gh "
+
+# Merged, a linked worktree under the primary, given with a trailing slash: the worktree and branch go.
+case_start linked; linked linked
+teardown "$TMP" "$WT/" 12
+ends 0 "teardown: removed worktree $WT and branch b"
+says "ok clean"; says "ok owners"
+gone "$WT" b
+
+# A worktree under .claude/worktrees in a repo with scripts/worktree.sh is a linked worktree, not a slot.
+case_start nested-in-slot-repo; fixture nested-in-slot-repo
+slot_script
+WT="$SHOP/.claude/worktrees/b"
+worktree "$WT" b
+TEARDOWN_GH="$(pr "$WT")"
+teardown "$TMP" "$WT" 12
+ends 0 "teardown: removed worktree $WT and branch b"
+not_logged "worktree.sh"
+gone "$WT" b
+
+# Merged, a slot: worktree.sh removes it, its stack and its branch.
+case_start slot; slot slot
+teardown "$TMP" "$SLOT" 12
+ends 0 "teardown: removed slot 4 ($SLOT), its stack and branch feature/issue-4-x"
+logged "worktree.sh remove 4 --force-local-branch-removal"
+gone "$SLOT" feature/issue-4-x
+
+# The page is the manifest's artifacts.proof, marked before worktree.sh runs.
+case_start manifest; slot manifest
+printf '.claude/pipeline/\n' >> "$SHOP/.git/info/exclude"
+mkdir -p "$SLOT/.claude/pipeline"
+printf '{"artifacts":{"proof":"%s"}}\n' "$TMP/run/index.html" > "$SLOT/.claude/pipeline/feature-issue-4-x.json"
+teardown "$TMP" "$SLOT" 12
+ends 0 "teardown: removed slot 4 ($SLOT), its stack and branch feature/issue-4-x"
+marked="$(grep -n "status $TMP/run/index.html merged" "$LOG" | cut -d: -f1 || true)"
+removed="$(grep -n "worktree.sh remove 4" "$LOG" | cut -d: -f1 || true)"
+[ -n "$marked" ] && [ -n "$removed" ] && [ "$marked" -lt "$removed" ] \
+  || fail "the page was not marked before worktree.sh ran: $(cat "$LOG")"
+
+# --proof overrides the manifest's page.
+case_start proof-flag; linked proof-flag
+printf '.claude/pipeline/\n' >> "$SHOP/.git/info/exclude"
+mkdir -p "$WT/.claude/pipeline"
+printf '{"artifacts":{"proof":"%s"}}\n' "$TMP/run/index.html" > "$WT/.claude/pipeline/b.json"
+teardown "$TMP" "$WT" 12 --proof "$TMP/other/index.html"
+ends 0 "teardown: removed worktree $WT and branch b"
+logged "status $TMP/other/index.html merged"
+not_logged "$TMP/run/index.html"
+
+# A failing mark is printed and the removal still happens.
+case_start mark-fails; linked mark-fails
+export TEARDOWN_PHP_EXIT=1
+teardown "$TMP" "$WT" 12 --proof "$TMP/page.html"
+ends 0 "teardown: removed worktree $WT and branch b"
+says "page: not marked: proof: status not written: no such page"
+gone "$WT" b
+
+# A removal command that fails: exit 3, the command named, nothing after it run.
+case_start stopped; slot stopped
+export TEARDOWN_WORKTREE_EXIT=1
+teardown "$TMP" "$SLOT" 12
+ends 3 "teardown: stopped at bash scripts/worktree.sh remove 4 --force-local-branch-removal: nothing done yet"
+says "ERROR: docker compose down -v failed"
+still_there "$SLOT" feature/issue-4-x
+
+# Merged from the primary checkout: back on main at origin's main, the branch gone, restart.sh only named.
+case_start primary; fixture primary
+mkdir -p "$SHOP/scripts"
+printf '#!/usr/bin/env bash\necho restarted >> "$TEARDOWN_LOG"\n' > "$SHOP/scripts/restart.sh"
+git -C "$SHOP" add scripts/restart.sh
+git -C "$SHOP" commit -q -m "restart.sh"
+git -C "$SHOP" push -q origin main >/dev/null 2>&1
+git -C "$SHOP" switch -q -c feature/x
+git -C "$SHOP" commit -q --allow-empty -m "the feature"
+git -C "$SHOP" push -q origin feature/x feature/x:main >/dev/null 2>&1   # the merge: origin's main moves to the head
+TEARDOWN_GH="$(pr "$SHOP")"
+teardown "$TMP" "$SHOP" 12
+ends 0 "teardown: $SHOP back on main at $(git -C "$ORIGIN" rev-parse --short main); removed branch feature/x; not run: ./scripts/restart.sh (it reseeds the database)"
+[ "$(git -C "$SHOP" branch --show-current)" = main ] || fail "the primary checkout is not on main"
+[ "$(git -C "$SHOP" rev-parse HEAD)" = "$(git -C "$ORIGIN" rev-parse main)" ] || fail "main is not at origin's main"
+! git -C "$SHOP" rev-parse --verify -q refs/heads/feature/x >/dev/null || fail "feature/x is still there"
+not_logged "restarted"
+
+# The primary checkout's local main diverged: stopped at the pull, after the switch, the branch kept.
+case_start diverged; fixture diverged
+git -C "$SHOP" commit -q --allow-empty -m "local only, never pushed"
+git -C "$SHOP" switch -q -c feature/x origin/main
+git -C "$SHOP" commit -q --allow-empty -m "the feature"
+git -C "$SHOP" push -q origin feature/x feature/x:main >/dev/null 2>&1
+TEARDOWN_GH="$(pr "$SHOP")"
+teardown "$TMP" "$SHOP" 12
+ends 3 "teardown: stopped at git pull --ff-only origin main: done: git switch main"
+[ "$(git -C "$SHOP" branch --show-current)" = main ] || fail "the switch to main did not happen"
+git -C "$SHOP" rev-parse --verify -q refs/heads/feature/x >/dev/null || fail "feature/x was deleted"
 
 echo "PASS teardown.py"

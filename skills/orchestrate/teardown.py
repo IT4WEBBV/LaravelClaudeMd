@@ -32,6 +32,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 PROOF_CLI = os.path.join(os.path.dirname(HERE), "pipeline", "checks", "proof_cli.php")
 OWNERS = os.path.join(HERE, "owners.py")
 PAGE_STATUS = {"MERGED": "merged", "CLOSED": "closed"}
+RESTART_NOTE = "; not run: ./scripts/restart.sh (it reseeds the database)"
 
 
 def run(command, cwd, stdin=None):
@@ -49,6 +50,29 @@ def end(line, code):
 
 def inside(path, root):
     return path == root or path.startswith(root + "/")
+
+
+class Stopped(Exception):
+    def __init__(self, command, done):
+        super().__init__(command)
+        self.command, self.done = command, done
+
+
+class Steps:
+    """Removal commands, run in order from the primary checkout; the first that fails stops the rest."""
+
+    def __init__(self, cwd):
+        self.cwd, self.done = cwd, []
+
+    def run(self, *command):
+        line = " ".join(command)
+        result = run(list(command), self.cwd)
+        if result.returncode != 0:
+            sys.stdout.write(result.stdout + result.stderr)
+            sys.stdout.flush()
+            raise Stopped(line, self.done)
+        self.done.append(line)
+        return result.stdout
 
 
 @dataclass
@@ -91,7 +115,10 @@ class Checkout:
 
 
 class LinkedWorktree(Checkout):
-    pass
+    def remove(self, pr, steps):
+        steps.run("git", "worktree", "remove", self.path)
+        steps.run("git", "branch", "-D", pr.head)
+        return f"removed worktree {self.path} and branch {pr.head}"
 
 
 class Slot(Checkout):
@@ -99,10 +126,23 @@ class Slot(Checkout):
         super().__init__(path, primary)
         self.number = number
 
+    def remove(self, pr, steps):
+        steps.run("bash", "scripts/worktree.sh", "remove", self.number, "--force-local-branch-removal")
+        if run(["git", "rev-parse", "--verify", "--quiet", "refs/heads/" + pr.head], self.primary).returncode == 0:
+            steps.run("git", "branch", "-D", pr.head)
+        return f"removed slot {self.number} ({self.path}), its stack and branch {pr.head}"
+
 
 class PrimaryCheckout(Checkout):
     def outside(self, cwd):
         return True  # the primary checkout stays on disk
+
+    def remove(self, pr, steps):
+        steps.run("git", "switch", pr.base)
+        steps.run("git", "pull", "--ff-only", "origin", pr.base)
+        steps.run("git", "branch", "-D", pr.head)
+        line = f"{self.path} back on {pr.base} at {self.git('rev-parse', '--short', 'HEAD')}; removed branch {pr.head}"
+        return line + (RESTART_NOTE if os.path.isfile(os.path.join(self.path, "scripts", "restart.sh")) else "")
 
 
 def primary_checkout(path):
@@ -199,6 +239,12 @@ def main():
     failed = [name for name, ok, _ in results if not ok]
     if failed:
         end("nothing removed: " + ", ".join(failed), 1)
+
+    try:
+        end(checkout.remove(pr, Steps(checkout.primary)), 0)
+    except Stopped as stopped:
+        done = "done: " + ", ".join(stopped.done) if stopped.done else "nothing done yet"
+        end(f"stopped at {stopped.command}: {done}", 3)
 
 
 if __name__ == "__main__":
