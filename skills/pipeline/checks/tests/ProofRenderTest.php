@@ -140,13 +140,13 @@ it('omits the list marker when a badge number is not numeric', function () {
 it('links the PR reference to GitHub with an absolute URL', function () {
     $html = proof_render_run(proof_fixture_run(['pr' => 967, 'prState' => 'MERGED']));
 
-    expect($html)->toContain('<a href="https://github.com/IT4WEBBV/ViewieMedia/pull/967">#967 (MERGED)</a>');
+    expect($html)->toContain('<a href="https://github.com/IT4WEBBV/ViewieMedia/pull/967" target="_blank" rel="noopener">#967 (MERGED)</a>');
 });
 
 it('links the issue the run is for, from the payload field', function () {
     $html = proof_render_run(proof_fixture_run(['issue' => 919]));
 
-    expect($html)->toContain('<a href="https://github.com/IT4WEBBV/ViewieMedia/issues/919">issue #919</a>');
+    expect($html)->toContain('<a href="https://github.com/IT4WEBBV/ViewieMedia/issues/919" target="_blank" rel="noopener">issue #919</a>');
 });
 
 it('derives the issue number from the branch when the payload carries none', function () {
@@ -230,7 +230,7 @@ it('links the PR column of the index to the PR on GitHub', function () {
         ['dir' => '/store/ViewieMedia/pr-412-orders-export', 'run' => proof_fixture_run(['pr' => 412, 'prState' => 'OPEN'])],
     ]);
 
-    expect($html)->toContain('<td data-sort="412"><a href="https://github.com/IT4WEBBV/ViewieMedia/pull/412">#412 OPEN</a></td>');
+    expect($html)->toContain('<td data-sort="412"><a href="https://github.com/IT4WEBBV/ViewieMedia/pull/412" target="_blank" rel="noopener">#412 OPEN</a></td>');
 });
 
 it('keeps the PR column as plain text for a run that names no repo to link into', function () {
@@ -677,7 +677,7 @@ it('gives each sortable cell its key, and an empty key where there is nothing to
 
     expect($html)->toContain('<td data-sort="4"><span class="pill pill-closed">Closed</span></td>'
         . '<td data-sort="Deploy"><code>Deploy</code></td>'
-        . '<td data-sort="5"><a href="https://github.com/IT4WEBBV/ViewieMedia/pull/5">#5 OPEN</a></td>'
+        . '<td data-sort="5"><a href="https://github.com/IT4WEBBV/ViewieMedia/pull/5" target="_blank" rel="noopener">#5 OPEN</a></td>'
         . '<td data-sort="PR #5: logs"><a href="Deploy/pr-5-logs/index.html">PR #5: logs</a><span class="marker"></span></td>'
         . '<td class="num" data-sort="2">2</td><td class="num" data-sort="1200">20.0 min</td><td class="num" data-sort="2310000">2.31M</td>'
         . '<td data-sort="1790886553"><time datetime="2026-10-01T20:29:13+00:00" title="2026-10-01T20:29:13+00:00">01-10 20:29</time></td>');
@@ -861,3 +861,61 @@ it('carries the inbox wiring in the index script, and styles a row only once the
         ->toContain('.dot:focus-visible { outline:')
         ->toContain('.unread-count {');
 });
+
+/** Every `<a>` opening tag: one to GitHub opens a new tab, any other (the store's own) stays in this one. */
+function proof_expect_github_links_in_a_new_tab(string $html, int $atLeast): void
+{
+    preg_match_all('/<a [^>]*>/', $html, $tags);
+
+    expect(count($tags[0]))->toBeGreaterThanOrEqual($atLeast);
+    expect($tags[0])->each(fn ($tag) => str_starts_with($tag->value, '<a href="https://github.com/')
+        ? $tag->toContain(' target="_blank" rel="noopener"')
+        : $tag->not->toContain('target='));
+}
+
+it('opens every GitHub link on a run page in a new tab, and keeps the link back in this one', function () {
+    // PR, Files changed, issue and ← All proofs: an empty match cannot pass.
+    proof_expect_github_links_in_a_new_tab(proof_render_run(proof_fixture_run(['issue' => 919])), 4);
+});
+
+it('opens the PR link of the index in a new tab, and keeps the run link in this one, in status.js too', function () {
+    $entry = ['dir' => '/store/ViewieMedia/pr-412-orders-export', 'run' => proof_fixture_run(['pr' => 412, 'prState' => 'OPEN'])];
+
+    // The PR column and the title link.
+    proof_expect_github_links_in_a_new_tab(proof_render_index([$entry]), 2);
+    expect(proof_test_status_runs(proof_render_status_js([$entry]))[0]['row'])
+        ->toContain('<a href="https://github.com/IT4WEBBV/ViewieMedia/pull/412" target="_blank" rel="noopener">#412 OPEN</a>')
+        ->toContain('<a href="ViewieMedia/pr-412-orders-export/index.html">');
+    expect(proof_render_index([$entry]))->not->toContain('Files changed');
+});
+
+it('links the PR\'s diff right after the PR reference on the run page', function () {
+    $html = proof_render_run(proof_fixture_run(['pr' => 967, 'prState' => 'MERGED']));
+
+    expect($html)->toContain(
+        '<a href="https://github.com/IT4WEBBV/ViewieMedia/pull/967" target="_blank" rel="noopener">#967 (MERGED)</a>'
+        . ' · <a href="https://github.com/IT4WEBBV/ViewieMedia/pull/967/files" target="_blank" rel="noopener">Files changed</a>'
+    );
+    expect(substr_count($html, 'Files changed'))->toBe(1);
+    expect(proof_render_run(proof_fixture_run(['pr' => '967'])))
+        ->toContain('<a href="https://github.com/IT4WEBBV/ViewieMedia/pull/967/files" target="_blank" rel="noopener">Files changed</a>');
+    expect(proof_render_run(proof_current_run(['pr' => 967])))
+        ->toContain('<a href="https://github.com/IT4WEBBV/ViewieMedia/pull/967/files" target="_blank" rel="noopener">Files changed</a>');
+});
+
+it('has no diff link for a run without a PR', function () {
+    $html = proof_render_run(proof_fixture_run(['pr' => null, 'prState' => null]));
+
+    expect($html)->not->toContain('Files changed')->not->toContain('/files');
+    expect($html)->toContain('<code>ViewieMedia</code> · no PR · <code>feature/orders-export</code>');
+});
+
+it('has no diff link for a run that names no repo to link into', function (?string $nameWithOwner) {
+    $html = proof_render_run(proof_fixture_run(['nameWithOwner' => $nameWithOwner]));
+
+    expect($html)->not->toContain('Files changed');
+    expect($html)->toContain('<code>ViewieMedia</code> · #412 (OPEN) · <code>feature/orders-export</code>');
+})->with([
+    'missing' => [null],
+    'blank' => ['   '],
+]);

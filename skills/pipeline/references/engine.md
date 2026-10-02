@@ -919,7 +919,8 @@ The page opens with the **client summary** (Dutch, for the hour registration, wi
 headline and the technical Problem and Solution, **Tests this PR adds**, the shots, the checks, the open
 questions and the ledger. A store-wide `index.html` is the join from a PR back to its page.
 Above the heading, an *← All proofs* link goes to the store index (`../../index.html`, relative, so it works over
-`file://`).
+`file://`). Every link to GitHub, on a run page and in the index, opens a new tab (`target="_blank" rel="noopener"`);
+the store's own links stay in the tab. Next to the PR, *Files changed* links the PR's diff (`/pull/<P>/files`).
 
 **Each run has a status**, on its page under the heading and in the index's first column: `running`, `halted`
 (with the reason), `ready` (*Ready for review*), `merged`, `closed`. A command writes what it already knows; a
@@ -992,7 +993,7 @@ characters in five runs.
 
 | Field | What it holds |
 |---|---|
-| `repo`, `nameWithOwner`, `branch`, `pr`, `issue`, `prState`, `mode` | where the run belongs; `nameWithOwner` makes the PR and issue references links |
+| `repo`, `nameWithOwner`, `branch`, `pr`, `issue`, `prState`, `mode` | where the run belongs; `nameWithOwner` makes the PR, *Files changed* and issue references links |
 | `worktree`, `base` | the run's worktree and the branch its PR goes into, filed by `handoff`; every write diffs `origin/<base>...HEAD` there for `addedTests` |
 | `title` | **required, at most 70 characters.** The run's name: page heading, browser tab, store index. `PR #430: service logs that follow`, not a sentence of findings |
 | `clientSummary` | **required on every agent `write`.** One to three Dutch sentences for the hour registration: what the client gets, in the client's words, at most 400 characters. No `#<number>`, no backtick, and not the branch name (whole, or the part after its first `/`, as a word of its own) |
