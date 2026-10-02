@@ -200,3 +200,49 @@ it('names the families a step\'s calls ran on, in first-seen order, and none for
         'run: 0.27M weighted over 2 steps in 4.0 min; largest step peak 130k (review-plan:review)',
     ]));
 });
+
+it('records a workflow\'s figures for the proof page: its dir name, its span and per step what it prints', function () {
+    $steps = [
+        ['label' => 'implement:run', 'calls' => 41, 'cost' => 2310000.0, 'peak' => 182000, 'models' => ['sonnet'], 'start' => 100.0, 'end' => 880.0, 'wall' => 780.0, 'waiting' => 312.0],
+        ['label' => 'review-pr:review', 'calls' => 3, 'cost' => 10.0, 'peak' => 5, 'models' => [], 'start' => 900.0, 'end' => 1000.0, 'wall' => 100.0, 'waiting' => 0.0],
+    ];
+
+    expect(pipeline_run_cost_record('wf_71c2e8b3-c2a', $steps))->toBe(['workflow' => 'wf_71c2e8b3-c2a', 'span' => 900.0, 'steps' => [
+        ['label' => 'implement:run', 'models' => ['sonnet'], 'cost' => 2310000.0, 'calls' => 41, 'peak' => 182000, 'wall' => 780.0, 'waiting' => 312.0],
+        ['label' => 'review-pr:review', 'models' => [], 'cost' => 10.0, 'calls' => 3, 'peak' => 5, 'wall' => 100.0, 'waiting' => 0.0],
+    ]]);
+});
+
+it('files the figures into the page it is given, once per workflow, and prints exactly what it printed before', function () {
+    $dir = cost_run([
+        'a1' => ['implement:run', implode("\n", [
+            cost_call('m1', 0, 0, 300000, 2000, null, '10:07:00.000'),
+            cost_tool_use('t1', '10:08:00.000'),
+            cost_tool_result('t1', '10:20:00.000'),
+        ]), ['status' => 'continued']],
+    ]);
+    $page = proof_test_page();
+    $printed = checks_cli('run_cost_cli.php', [$dir])['stdout'];
+
+    expect(checks_cli('run_cost_cli.php', [$dir, $page]))->toBe(['code' => 0, 'stdout' => $printed]);
+    checks_cli('run_cost_cli.php', [$dir, $page]);
+
+    $run = proof_read_run(dirname($page));
+    expect($run['cost'])->toBe([['workflow' => 'wf_abc-123', 'span' => 780.0, 'steps' => [
+        ['label' => 'implement:run', 'models' => [], 'cost' => 40000.0, 'calls' => 1, 'peak' => 300000, 'wall' => 780.0, 'waiting' => 720.0],
+    ]]]);
+    expect($run['revision'])->toBe(1);
+    expect(file_get_contents($page))->toContain('<h2>Time and cost</h2>');
+});
+
+it('prints as before and exits 0 given a page with no run beside it, and files nothing for a run it could not measure', function () {
+    $dir = cost_run(['a1' => ['implement:run', cost_call('m1', 0, 0, 1000, 10, null, '10:00:00.000'), ['status' => 'continued']]]);
+    $missing = sys_get_temp_dir() . '/proof-missing-' . uniqid() . '/Deploy/pr-9-x/index.html';
+
+    expect(checks_cli('run_cost_cli.php', [$dir, $missing]))->toBe(['code' => 0, 'stdout' => checks_cli('run_cost_cli.php', [$dir])['stdout']]);
+    expect(is_dir(dirname($missing)))->toBeFalse();
+
+    $page = proof_test_page();
+    expect(checks_cli('run_cost_cli.php', ['/nonexistent', $page]))->toBe(['code' => 0, 'stdout' => 'run: not measured (no step transcripts)']);
+    expect(proof_read_run(dirname($page)))->not->toHaveKey('cost');
+});

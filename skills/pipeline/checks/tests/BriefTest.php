@@ -295,7 +295,8 @@ it('leaves the PR draft at the autoflow finish step for the session that launche
     expect($brief)
         ->toContain('Push your commits and leave the PR draft; the session that launched the run marks it ready after the CI gate (engine.md §The CI gate).')
         ->toContain('On a loop-back, stop there: no suite.')
-        ->not->toContain('gh pr ready');
+        ->not->toContain('gh pr ready')
+        ->not->toContain('proof_cli.php status');
     expect(strpos($brief, 'm.actions.json'))->toBeLessThan(strpos($brief, 'After `record`, the last action is `proof_cli.php open`'));
 });
 
@@ -303,7 +304,7 @@ it('has the interactive finish step run the CI gate before gh pr ready', functio
     $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
 
     expect(pipeline_brief(brief_manifest('review-pr', ['gate_ledger' => [$open]]), 'review-pr', '/tmp/m.json'))
-        ->toContain('Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`; show any other answer to the human. After `record`, the last action is `proof_cli.php open`');
+        ->toContain('Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`, then `proof_cli.php status <the path write printed> ready`; show any other answer to the human. After `record`, the last action is `proof_cli.php open`');
 });
 
 it('makes a recorded red CI a finding of review-pr\'s review and resolve steps, and only then', function () {

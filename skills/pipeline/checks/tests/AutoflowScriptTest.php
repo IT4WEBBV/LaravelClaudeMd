@@ -217,7 +217,7 @@ it('walks stub steps that write what their briefs ask to done, through a retried
 
     expect($replay['labels'])->toBe(['design:plan', 'review-plan:review', 'review-plan:resolve', 'handoff:run', 'implement:run', 'review-pr:review', 'review-pr:review', 'review-pr:resolve']);
     expect($replay['result'])->toBe(['action' => 'done']);
-    expect(dispatch_cli(['finish', $start['manifest'], '{"action":"done"}'])['json'])->toBe(['action' => 'done']);
+    expect(dispatch_cli(['finish', $start['manifest'], '{"action":"done"}'])['json'])->toBe(['action' => 'done', 'proof' => null]);
 });
 
 const AUTOFLOW_STOP = ['status' => 'halted', 'reason' => 'stub stop'];
@@ -490,7 +490,7 @@ it('walks from design:plan to done with every step writing through record (the r
 
     expect($replay['labels'])->toBe(['design:plan', 'review-plan:review', 'review-plan:resolve', 'handoff:run', 'implement:run', 'review-pr:review', 'review-pr:resolve']);
     expect($replay['result'])->toBe(['action' => 'done']);
-    expect(dispatch_cli(['finish', $fixture['manifest'], '{"action":"done"}'])['json'])->toBe(['action' => 'done']);
+    expect(dispatch_cli(['finish', $fixture['manifest'], '{"action":"done"}'])['json'])->toBe(['action' => 'done', 'proof' => null]);
 
     $manifest = manifest_read($fixture['manifest']);
     $head = pipeline_git($dir, ['rev-parse', 'HEAD']);

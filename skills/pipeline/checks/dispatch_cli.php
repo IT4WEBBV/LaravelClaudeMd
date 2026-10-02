@@ -66,9 +66,27 @@ function dispatch_cli_emit(string $manifestPath, array $manifest, string $action
     ];
 }
 
+/**
+ * Marks the run's proof page (`artifacts.proof`) when the manifest names one (`../references/engine.md` §The proof
+ * store, *who writes each status*). Never part of the answer and never a halt: a page that cannot be amended is one
+ * line on stderr. The engine still never reads the store to decide anything.
+ */
+function dispatch_cli_proof_status(array $manifest, ProofRunStatus $status, string $reason = ''): void
+{
+    $page = $manifest['artifacts']['proof'] ?? null;
+    if (! is_string($page) || $page === '') {
+        return;
+    }
+    $problem = proof_store_status($page, $status, $reason);
+    if ($problem !== null) {
+        fwrite(STDERR, "proof: status not written: {$problem}\n");
+    }
+}
+
 function dispatch_cli_halt(string $manifestPath, array $manifest, string $leg, string $reason): array
 {
     manifest_write($manifestPath, [...$manifest, 'cursor' => ['leg' => $leg, 'status' => 'halted', 'reason' => $reason]]);
+    dispatch_cli_proof_status($manifest, ProofRunStatus::Halted, $reason);
 
     return pipeline_halt($reason);
 }
@@ -91,6 +109,7 @@ function dispatch_cli_next(string $manifestPath): array
     if ($invalid !== null) {
         return pipeline_halt($invalid);
     }
+    dispatch_cli_proof_status($manifest, ProofRunStatus::Running);
 
     return dispatch_cli_emit($manifestPath, [...$manifest, 'cursor' => ['leg' => $manifest['cursor']['leg'], 'status' => 'pending']]);
 }
@@ -154,12 +173,16 @@ function dispatch_cli_returned(string $manifestPath, string $diffPath): array
     };
 }
 
-/** A finished run says so in its cursor, so a later `next` does not re-dispatch review-pr. */
+/**
+ * A finished run says so in its cursor, so a later `next` does not re-dispatch review-pr. The answer names the
+ * proof page, so the session that runs `gh pr ready` marks it ready (`proof_cli.php status <page> ready`) without
+ * reading the manifest.
+ */
 function dispatch_cli_done(string $manifestPath, array $manifest): array
 {
     manifest_write($manifestPath, [...$manifest, 'cursor' => ['leg' => $manifest['cursor']['leg'], 'status' => 'done']]);
 
-    return ['action' => 'done'];
+    return ['action' => 'done', 'proof' => $manifest['artifacts']['proof'] ?? null];
 }
 
 /** Read from the committed spec, never stored; a spec that cannot be read is Architectural. */
@@ -219,6 +242,7 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
         unlink($snapshot);
     }
     $size = dispatch_cli_design_size($manifest);
+    dispatch_cli_proof_status($manifest, ProofRunStatus::Running);
 
     return [
         'action' => 'start',

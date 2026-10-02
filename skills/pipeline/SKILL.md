@@ -37,11 +37,13 @@ this summary:
   `~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/index.html`: `handoff` files it, `verify-ui` adds the
   screenshots when `pipeline_triggers(...)['ui']` fires (and the PR gets a text-only record comment), and
   the finish step writes the Dutch client summary and the plain-language explainer
-  (`references/engine.md` §The proof store). The finished page **opens in the browser once**, as the
+  (`references/engine.md` §The proof store). The page and the store index (`~/GitProjects/_proofs/index.html`)
+  show each run's status (Running, Halted with its reason, Ready for review, Merged, Closed), mark a run filed
+  again since it was last opened, and show an `autoflow` run's time and cost per step. The finished page **opens in the browser once**, as the
   run's last action; `PIPELINE_NO_OPEN=1` suppresses that for headless and unattended runs.
 - **Cost per run** — after every `autoflow` run the invoking session reports two outputs with the
-  result: `checks/run_cost_cli.php` (cost weighted per model and wall time per step, the run's span, the largest
-  step peak) and `checks/run_audit.php` (whether `ui` and each gate's ledger agree with what the steps
+  result: `checks/run_cost_cli.php <dir> <artifacts.proof>` (cost weighted per model and wall time per step, the
+  run's span, the largest step peak; given the page it files them into it) and `checks/run_audit.php` (whether `ui` and each gate's ledger agree with what the steps
   reported, and whether the ledger's loop-backs stay within the bound). A `MISMATCH` is a signal, never
   a halt (`references/engine.md` §`autoflow`).
 - **Run status line** — the status line shows each unfinished `autoflow` run of the session's repo,
@@ -133,7 +135,8 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
 5. **`finish` printed `done`: the CI gate** on the PR's head commit, which must be the worktree's `HEAD`
    (`references/engine.md` §The CI gate), polled in one background Bash; wait for its completion notice:
    `poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll); echo "$answer" | grep -q '"action":"wait"'; do sleep 30; poll=$((poll + 1)); done; echo "$answer"`.
-   **`ready`:** `gh pr ready <pr>`. The manifest already says done; when `gh pr ready` is denied the
+   **`ready`:** `gh pr ready <pr>`, then `php "$CHECKS/proof_cli.php" status <proof> ready` with the `proof`
+   `finish` printed. The manifest already says done; when `gh pr ready` is denied the
    PR stays draft and no halt is written: put the denial in the report, and the owner runs
    `gh pr ready` by hand. **`fix`** (a red CI, or a merge the last review did not see): the diff as in step 2, then
    `launch <manifest> "<manifest stem>.diff" --from review-pr --decision "<its decision>"`, and steps
@@ -141,8 +144,9 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    head and the worktree's `HEAD` differ: once they match (push the branch, or reconcile it when GitHub
    is ahead), the loop runs again by hand. **A halt after `handoff`:** the reason into the PR body and
    the proof page opened once (`references/engine.md` §Failure policy).
-6. **Report** the result with the two cost-per-run outputs above, and arm the merge watch
-   (`references/engine.md` §After the merge).
+6. **Report** the result with the two cost-per-run outputs above (`run_cost_cli.php` given
+   `artifacts.proof` files its figures into the page), and arm the merge watch (`references/engine.md` §After the
+   merge, which marks the page `merged` or `closed` when it fires).
 
 **Remove when** upstream fixes the relay (anthropics/claude-code#95369, #96640): the detour, the relay
 check, `agents/pipeline-relay-check.md` and the hook's agents link go together (`references/engine.md`

@@ -244,3 +244,72 @@ it('shortens a title over 70 characters at a word boundary, and leaves one at or
     expect($short)->toBe('PR #141: Every run gets a proof page, opening with a Dutch client…');
     expect(mb_strlen(proof_short_title(str_repeat('é', 90))))->toBe(PROOF_TITLE_MAX);
 });
+
+it('reads a run\'s status from the store, else from its PR state', function (array $run, ProofRunStatus $status) {
+    expect(ProofRunStatus::of($run))->toBe($status);
+})->with([
+    'stored' => [['status' => ['state' => 'halted', 'reason' => 'x'], 'prState' => 'MERGED'], ProofRunStatus::Halted],
+    'an older merged run' => [['prState' => 'MERGED'], ProofRunStatus::Merged],
+    'an older closed run' => [['prState' => 'CLOSED'], ProofRunStatus::Closed],
+    'an older open run' => [['prState' => 'OPEN'], ProofRunStatus::Running],
+    'a run without a PR' => [[], ProofRunStatus::Running],
+    'an unknown stored state' => [['status' => ['state' => 'paused'], 'prState' => 'MERGED'], ProofRunStatus::Merged],
+    'a status that is no object' => [['status' => 'halted'], ProofRunStatus::Running],
+]);
+
+it('corrects a stored status by what gh says the PR is', function (ProofRunStatus $stored, string $state, bool $draft, ProofRunStatus $corrected) {
+    expect($stored->corrected($state, $draft))->toBe($corrected);
+})->with([
+    'merged' => [ProofRunStatus::Running, 'MERGED', false, ProofRunStatus::Merged],
+    'closed' => [ProofRunStatus::Ready, 'CLOSED', false, ProofRunStatus::Closed],
+    'open and ready' => [ProofRunStatus::Running, 'OPEN', false, ProofRunStatus::Ready],
+    'a halted run whose PR went ready' => [ProofRunStatus::Halted, 'OPEN', false, ProofRunStatus::Ready],
+    'an open draft keeps Running' => [ProofRunStatus::Running, 'OPEN', true, ProofRunStatus::Running],
+    'an open draft keeps Halted' => [ProofRunStatus::Halted, 'OPEN', true, ProofRunStatus::Halted],
+    'a Ready PR put back in draft' => [ProofRunStatus::Ready, 'OPEN', true, ProofRunStatus::Running],
+    'an unknown state keeps the stored one' => [ProofRunStatus::Halted, 'WEIRD', false, ProofRunStatus::Halted],
+]);
+
+it('orders the statuses for attention, labels them, and stores the reason only with Halted', function () {
+    expect(array_map(fn (ProofRunStatus $status) => $status->group(), ProofRunStatus::cases()))->toBe([2, 0, 1, 2, 2]);
+    expect(array_map(fn (ProofRunStatus $status) => $status->label(), ProofRunStatus::cases()))
+        ->toBe(['Running', 'Halted', 'Ready for review', 'Merged', 'Closed']);
+    expect(ProofRunStatus::named())->toBe('running, halted, ready, merged or closed');
+    expect(ProofRunStatus::Halted->stored('CI red'))->toBe(['state' => 'halted', 'reason' => 'CI red']);
+    expect(ProofRunStatus::Ready->stored('CI red'))->toBe(['state' => 'ready']);
+    expect(proof_status_reason(['status' => ['state' => 'halted', 'reason' => 'CI red']]))->toBe('CI red');
+    expect(proof_status_reason(['status' => ['state' => 'ready', 'reason' => 'stale']]))->toBe('');
+});
+
+it('keeps the store\'s revision, status and cost over a payload\'s', function () {
+    $stored = ['title' => 'x', 'revision' => 3, 'status' => ['state' => 'halted', 'reason' => 'r'], 'cost' => [['workflow' => 'wf_a']]];
+
+    expect(proof_merge_run($stored, ['revision' => 99, 'status' => ['state' => 'merged'], 'cost' => [], 'title' => 'y']))
+        ->toBe(['title' => 'y', 'revision' => 3, 'status' => ['state' => 'halted', 'reason' => 'r'], 'cost' => [['workflow' => 'wf_a']]]);
+});
+
+it('counts every filing in revision and gives a run without a status the one its PR state implies', function () {
+    $dir = sys_get_temp_dir() . '/proof-' . uniqid() . '/Deploy/pr-5-logs';
+
+    expect(proof_write_run($dir, ['pr' => 5, 'prState' => 'OPEN'], '2026-10-01T10:00:00+02:00'))
+        ->toMatchArray(['revision' => 1, 'status' => ['state' => 'running']]);
+    expect(proof_write_run($dir, ['pr' => 5, 'status' => ['state' => 'halted', 'reason' => 'r']], '2026-10-01T11:00:00+02:00'))
+        ->toMatchArray(['revision' => 2, 'status' => ['state' => 'halted', 'reason' => 'r']]);
+
+    // An old run filed again keeps reading as what its PR state says (Assumption 16), not Running.
+    $old = sys_get_temp_dir() . '/proof-' . uniqid() . '/Deploy/pr-4-old';
+    expect(proof_write_run($old, ['pr' => 4, 'prState' => 'MERGED'], '2026-10-01T10:00:00+02:00')['status'])->toBe(['state' => 'merged']);
+});
+
+it('files a workflow\'s cost once, replacing its own entry and appending another workflow\'s', function () {
+    $first = ['workflow' => 'wf_a', 'span' => 60.0, 'steps' => [['label' => 'implement:run', 'cost' => 1000000.0]]];
+    $again = [...$first, 'span' => 90.0];
+    $resume = ['workflow' => 'wf_b', 'span' => 30.0, 'steps' => [['label' => 'review-pr:review', 'cost' => 500000.0]]];
+
+    $run = proof_add_cost(['title' => 'x'], $first);
+    expect($run['cost'])->toBe([$first]);
+    expect(proof_add_cost($run, $again)['cost'])->toBe([$again]);
+    expect(proof_add_cost(proof_add_cost($run, $resume), $again)['cost'])->toBe([$again, $resume]);
+    expect(proof_cost_totals([$again, $resume]))->toBe(['seconds' => 120.0, 'cost' => 1500000.0]);
+    expect(proof_cost_totals([]))->toBe(['seconds' => 0.0, 'cost' => 0.0]);
+});

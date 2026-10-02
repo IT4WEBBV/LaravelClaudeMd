@@ -88,7 +88,8 @@ PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <m
 # → {"action":"start","startLeg":…,"startStep":…,"loops":{…},"ui":…,"size":…,"manifest":…,"worktree":…,"noOpen":…,"checks":…,"tables":{…},"profile":…,"tier":…,"escalated":…,"agents":{…}}
 #   | {"action":"done"} | {"action":"halt","reason":…}
 # start: through the detour (SKILL.md §autoflow step 3): this reply ends on a background wait; the reply its notice opens calls the workflow pipeline-autoflow with that JSON as args, first; wait for its completion notice
-php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'   # → … | {"action":"halt","reason":"relay: …","relaunch":true}, once
+php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
+# → {"action":"done","proof":<artifacts.proof, or null>} | {"action":"halt","reason":…} | {"action":"halt","reason":"relay: …","relaunch":true}, once
 php "$CHECKS/dispatch_cli.php" ci <manifest> --poll <n>                  # after done: the CI gate, polled (§The CI gate)
 ```
 
@@ -167,7 +168,8 @@ launched the run, with its reason.
   step that failed) or when the return names none of the pipeline's legs. When the workflow itself
   errored, pass `{"action":"halt","reason":"<the error>"}`: the cursor keeps the step that was
   running. When `finish` prints `done` the invoking session runs the CI gate and, on its `ready`,
-  **`gh pr ready <pr>`** (§The CI gate, §Who takes the PR out of draft); on a halt after `handoff`,
+  **`gh pr ready <pr>`**, then `proof_cli.php status <proof> ready` with the `proof` `done` names
+  (§The CI gate, §Who takes the PR out of draft, §The proof store); on a halt after `handoff`,
   §Failure policy's duties.
   A `relay:` halt also answers `relaunch: true` unless the cursor it overwrites already holds a `relay:`
   halt: the invoking session then runs `launch` again with no `--from` and no `--decision` and starts
@@ -200,7 +202,7 @@ spec and plan, `review-pr` the code). After every run the invoking session repor
 result:
 
 ```bash
-php "$CHECKS/run_cost_cli.php" <the run's transcript dir>
+php "$CHECKS/run_cost_cli.php" <the run's transcript dir> [<artifacts.proof>]
 git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"
 php "$CHECKS/run_audit.php" <manifest> "<manifest stem>.diff" <the run's transcript dir>
 ```
@@ -210,7 +212,8 @@ the Workflow result. `run_cost_cli.php` prints per step the weighted cost — ea
 weighed per model (`PIPELINE_MODEL_FACTORS`, relative to Opus), the models named after the step's
 label — the peak context, the wall
 time and the part of it spent waiting on tools, and on its `run:` line the total, the run's span in
-minutes and the largest step peak. `run_audit.php` prints whether `ui` over the final diff agrees with
+minutes and the largest step peak. Given the run's page (`artifacts.proof`, when the manifest sets it) it also
+files those figures into it, so the page and the store index show them (§The proof store). `run_audit.php` prints whether `ui` over the final diff agrees with
 a `verify-ui` entry, whether each gate's newest ledger entries agree with what the steps reported, and
 (`bound:`) whether each gate the run looped back at holds no more `looped-back` ledger entries than
 `PIPELINE_LOOP_BOUND`, the loop-back the run halted on not counted: `tables.bound` and `loops` reach the
@@ -518,11 +521,13 @@ A run started by `orchestrate` is covered by its own step 6 — this section is 
    Bash per PR, exactly `orchestrate`'s §Watch "awaiting merge" loop
    (`../../orchestrate/references/commands.md`). It polls `gh` every 5 minutes in a shell, so it
    costs no tokens while it waits; the session wakes once, on the change.
-2. **On `MERGED`**, run `orchestrate`'s §Teardown checks and removal as written there (clean, `HEAD`
+2. **On `MERGED`**, first mark the page, `php "$CHECKS/proof_cli.php" status <artifacts.proof> merged` (none
+   set: skip), then run `orchestrate`'s §Teardown checks and removal as written there (clean, `HEAD`
    equals the merged `headRefOid`, no owner, then the repo's declared `worktree.remove`). All hold:
    **remove without asking**, ahead of `slots`' confirm step. A check fails: ask, quoting the output.
    A session sitting inside the worktree leaves it first (`ExitWorktree` with `keep`).
-3. **Closed without merge**: never torn down. Say so in one line; the owner decides.
+3. **Closed without merge**: `proof_cli.php status <artifacts.proof> closed`, and never torn down. Say so in one
+   line; the owner decides.
 
 **The watch dies with the session.** A merge the session never saw — or the owner saying "merged" —
 is handled the same way the next time `/pipeline` runs in that repo: a manifest whose PR is `MERGED`
@@ -913,6 +918,38 @@ The page opens with the **client summary** (Dutch, for the hour registration, wi
 headline and the technical Problem and Solution, **Tests this PR adds**, the shots, the checks, the open
 questions and the ledger. A store-wide `index.html` is the join from a PR back to its page.
 
+**Each run has a status**, on its page under the heading and in the index's first column: `running`, `halted`
+(with the reason), `ready` (*Ready for review*), `merged`, `closed`. A command writes what it already knows; a
+session writes what only it knows, with `proof_cli.php status <page> <status> [--reason <text>]`, right after the
+command that made it so:
+
+| Status | Written by | When |
+|---|---|---|
+| `running` | the store | a filing of a run that has none (`handoff`'s first page): the status its `prState` implies |
+| `running` | `dispatch_cli.php launch` (on `start`) and `next` (on a dispatch) | a run starts or resumes, so a resumed halt reads Running again |
+| `halted`, with the reason | `dispatch_cli_halt()`: `finish`, `returned`, `brief`'s boundary check, `launch`'s invariant check | the manifest records a halt |
+| `ready` | the session that ran `gh pr ready`: the invoking session in `autoflow` (§The CI gate), the finish step in `interactive` | right after `gh pr ready` succeeded: `proof_cli.php status <page> ready` |
+| `merged`, `closed` | the session holding the merge watch (§After the merge, `orchestrate` step 6) | the watch prints `MERGED` or `CLOSED`, before any teardown |
+| any | the prune pass, on `prune` | `gh pr view --json state,isDraft`: merged, closed and an open ready PR are GitHub's to say; an open draft keeps `running` or `halted`, and turns a stale `ready` back into `running` |
+
+A command writes to `artifacts.proof` only when the manifest sets it, and never changes its answer or halts over it:
+a page that cannot be amended is one line on stderr. `finish`'s and `returned`'s `done` carries `proof`
+(`artifacts.proof`, or null), the page the session marks ready. A status or a cost written into a filed run is no
+filing: `revision` and `updatedAt` stay as they were. A run filed before statuses existed reads as its `prState`
+says: `MERGED` Merged, `CLOSED` Closed, else Running.
+
+**The index** lists the runs by attention: `halted` first, then `ready`, then the rest, each newest first. It
+filters by repo (remembered per browser), shows per run its status, PR, page, shots, time and cost, and copies its
+client summary. **What changed since the last look** is per browser: opening a page stores its `revision` under
+`seen:<repo>/<run>` in `localStorage` (`file://` is one origin in Chrome), and the index marks a run never opened
+*New*, one filed again since it was opened *Updated*, and drops a seen `ready` run among the rest. A run filed before
+`revision` existed gets no marker. Without `localStorage` nothing is marked and the order is the status order.
+
+**Time and cost.** After an `autoflow` run, `run_cost_cli.php <transcript dir> <page>` files its figures into
+`cost`, one entry per workflow keyed by the transcript dir's name: filing it again changes nothing, and a resume or a
+CI fix round adds its own. The page shows them per step under *Time and cost*, the index the summed spans and cost.
+An `interactive` run has none.
+
 **The payload** that `proof_cli.php write` files. This table is the schema. **An existing `run.json`
 is not an example**: runs that copied the previous run's payload grew its title from 84 to 596
 characters in five runs.
@@ -931,7 +968,8 @@ characters in five runs.
 | `ledger` | list of `{gate, outcome, note}` |
 | `shots` | list of `{title, caption, route, badges, state}`. `title` is at most 70 characters and names the state shown ("Unreachable swarm"); `caption` says what the shot proves and has no limit. `state` is **required**: `before`, `after` or `defect`, the ribbon on the shot; a `before` directly followed by an `after` renders as one pair. A badge's `note` also shows on hover |
 | `shotSources` | absolute paths of the screenshots, in `shots` order, `null` for a shot carried forward with its `file`; ingested into the run's `shots/` as `<NN>-<route>-<hash>.png`, so a new shot never overwrites a carried one |
-| `addedTests` | **the store's, never a payload's**: per test file, the cases the branch adds (`added`, tagged *new*) or changes (`changed`), extracted at every write by git in `worktree`; kept as filed when git cannot answer. A payload's `addedTests`, `schema`, `createdAt` and `updatedAt` are ignored |
+| `addedTests` | **the store's, never a payload's**: per test file, the cases the branch adds (`added`, tagged *new*) or changes (`changed`), extracted at every write by git in `worktree`; kept as filed when git cannot answer. A payload's `addedTests`, `schema`, `createdAt`, `updatedAt`, `revision`, `status` and `cost` are ignored |
+| `revision`, `status`, `cost` | **the store's, never a payload's**: `revision` counts the run's filings (`handoff`'s and every `write`); `status` is `{state, reason}`, the reason only with `halted` (above); `cost` is the figures `run_cost_cli.php` files, per workflow `{workflow, span, steps}` |
 
 **Before, after and defect shots.** `verify-ui` takes before shots only when the spec names a before
 state to show: it checks out the base detached in the run's worktree (`git checkout --detach
@@ -999,7 +1037,7 @@ does not run `gh pr ready`, and neither does `verify-ui`.
 **In `autoflow` the finish step leaves it draft too.** The auto-mode classifier denies a workflow agent
 `gh pr ready`, and it is the most consequential outward write a run makes, so it stays with the
 session that answers to the owner: after the workflow returns `done` and `finish` records it, the
-invoking session runs the CI gate and then `gh pr ready <pr>` (§The CI gate). The guarantee is unchanged: nothing marks the PR ready
+invoking session runs the CI gate and then `gh pr ready <pr>` (§The CI gate), and marks the proof page ready (`proof_cli.php status <proof> ready`, §The proof store). The guarantee is unchanged: nothing marks the PR ready
 before `review-pr`'s finish step has run.
 
 **The leg is not the `review-pr` skill.** `DevOps-Claude-Config` ships a skill named `review-pr`, linked
@@ -1071,7 +1109,7 @@ draft). The session polls the gate in one background Bash and waits for its comp
 poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll); echo "$answer" | grep -q '"action":"wait"'; do sleep 30; poll=$((poll + 1)); done; echo "$answer"
 ```
 
-- **`ready`** → `gh pr ready <pr>`.
+- **`ready`** → `gh pr ready <pr>`, then `php "$CHECKS/proof_cli.php" status <proof> ready`, `<proof>` the `proof` that `finish`'s `done` named (null: nothing to mark).
 - **`fix`** → one automatic fix round (owner, #85). The answer's `decision`, `CI red on the PR's head
   commit <sha>: <check> failed (<link>)`, goes into `decisions` verbatim with the re-arm:
   `git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"`, then
@@ -1102,7 +1140,7 @@ poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll
   `## Base merges` line is its record. The round fires on a clean merge of a shared file as on a
   conflict: git 2.33 cannot tell the two apart afterwards, and a textual merge of a file both sides
   changed is what a review is for.
-- **In `interactive`** the finish step runs the same loop, `gh pr ready` on `ready`, and shows any other
+- **In `interactive`** the finish step runs the same loop, `gh pr ready` on `ready` and then `proof_cli.php status <page> ready`, and shows any other
   answer to the human; there is no automatic round, and no merge round: the human resolves the review
   and sees the merge as it is made.
 - **The merge watch stays on `state`** (§After the merge): once the PR is ready, CI on its head has
@@ -1490,7 +1528,10 @@ Under `autoflow` these are the only stops. **No finding stops a run.**
   or a review step returns nothing after a single retry (in `interactive`
   `returned` answers `retry` once, then `halt`). → **halt.** `finish` (`returned` in `interactive`)
   writes the failure to the manifest
-  (`cursor.status: halted`, `cursor.reason`); a human resumes. **No silent retry** beyond that one — a retry hides
+  (`cursor.status: halted`, `cursor.reason`), which also marks the proof page Halted with that reason when
+  `artifacts.proof` is set (§The proof store); a halt nobody records (a workflow that dies before `finish` runs)
+  leaves the page Running until the next `launch`, `write` or recorded halt, so Running on the page is no guarantee
+  the run is alive; a human resumes. **No silent retry** beyond that one — a retry hides
   the failure and the machinery may be in an unknown state.
   The one exception is a `relay:` halt (§`autoflow`, the relay check): the run started framed and no
   step ran, so the manifest is as `launch` left it; `finish` answers `relaunch: true` once, and the

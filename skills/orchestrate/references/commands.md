@@ -124,7 +124,8 @@ On a run's completion notice (pipeline `engine.md` §`autoflow` — a program th
 php ~/.claude/skills/pipeline/checks/dispatch_cli.php finish <manifest> '<the workflow return, as JSON>'
 poll=1; while answer=$(php ~/.claude/skills/pipeline/checks/dispatch_cli.php ci <manifest> --poll $poll); echo "$answer" | grep -q '"action":"wait"'; do sleep 30; poll=$((poll + 1)); done; echo "$answer"   # only when finish printed done; run_in_background
 gh pr ready <P> -R <repo>                                                      # only when the gate answered ready
-php ~/.claude/skills/pipeline/checks/run_cost_cli.php <the run's transcript dir>
+php ~/.claude/skills/pipeline/checks/proof_cli.php status <proof> ready              # right after gh pr ready; <proof>: the proof finish printed with done
+php ~/.claude/skills/pipeline/checks/run_cost_cli.php <the run's transcript dir> <proof>   # <proof>: finish's, else the manifest's artifacts.proof; none: leave it out
 git -C <worktree> diff origin/<base>...HEAD > <manifest stem>.diff
 php ~/.claude/skills/pipeline/checks/run_audit.php <manifest> <manifest stem>.diff <the run's transcript dir>
 ```
@@ -214,6 +215,13 @@ gh pr view <P> -R <repo> --json state,headRefOid --jq '"\(.state) \(.headRefOid)
 claude agents --json --all | python3 ~/.claude/skills/orchestrate/owners.py <worktree>   # nothing, exit 0, and no pending notice of yours
 ```
 A non-zero exit from `owners.py` fails the check: do not tear down; ask, quoting its error.
+
+Mark the page before anything is removed (`<proof>`: the `proof` `finish` printed, else
+`jq -r '.artifacts.proof // empty' <manifest>`; none: skip):
+```bash
+php ~/.claude/skills/pipeline/checks/proof_cli.php status <proof> merged
+```
+A PR closed without merge gets `status <proof> closed` instead, and no teardown.
 
 Then, from the primary checkout:
 ```bash
