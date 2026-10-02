@@ -5,20 +5,28 @@
 # Wired into ~/.claude/settings.json. Prints Claude Code hook JSON on stdout.
 #
 #   session    SessionStart — bring the config repos up to date (see
-#              sync_config_repos), then check the directory the session was
-#              launched in. The only thing knowable before anything has been
-#              touched.
+#              sync_config_repos, which also marks each config repo as
+#              touched: every skill read lands there), then check the
+#              directory the session was launched in and mark its repo too.
 #
-#   edit       PostToolUse on Edit|Write — check the repo that owns the file
-#              being written, once per repo per session. This is the one that
-#              matters: it anchors on the repo actually being worked in, which
-#              is not necessarily where the session was launched, and it fires
-#              at the moment staleness starts costing something — right before
-#              new work lands on an old base.
+#   touch      PreToolUse on Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep|Bash
+#              — check each repo the tool call acts on, the first time this
+#              session touches it (touch_targets says how a call names its
+#              paths; for Bash, the cd and git -C words, else the cwd). It runs
+#              before the tool, so a first Read already sees the fast-forwarded
+#              main and the warning arrives before any work lands on an old
+#              base. Later touches in the repo cost the payload parsing and
+#              a rev-parse per named path.
+#
+#   edit       PostToolUse on Edit|Write — the legacy wiring: the same check on
+#              the written file's repo, sharing touch's markers, so with both
+#              wired it is a no-op. Remove it once touch is wired.
 #
 #   checkout   PostToolUse on `git checkout` — a branch switch changes the
 #              answer, so drop this session's cached verdicts and stay silent.
-#              The next edit re-checks.
+#              The next touch re-checks.
+#
+# Any other mode does nothing.
 #
 # Why this exists: `git status` only compares HEAD against its *tracking* branch,
 # so a feature branch perfectly in sync with its own remote reads as "up to date"

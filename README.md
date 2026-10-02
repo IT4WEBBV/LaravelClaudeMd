@@ -51,8 +51,10 @@ the other machine on its own:
   "SessionStart": [
     { "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh session", "timeout": 20, "statusMessage": "Checking git freshness…" } ] }
   ],
+  "PreToolUse": [
+    { "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep|Bash", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh touch", "timeout": 20 } ] }
+  ],
   "PostToolUse": [
-    { "matcher": "Edit|Write", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh edit", "timeout": 20, "statusMessage": "Checking git freshness…" } ] },
     { "matcher": "Bash", "hooks": [ { "type": "command", "command": "$HOME/GitProjects/LaravelClaudeMd/LaravelClaudeMd/hooks/git-freshness.sh checkout", "if": "Bash(git checkout:*)", "timeout": 10 } ] }
   ]
 }
@@ -62,14 +64,26 @@ the other machine on its own:
 "statusLine": { "type": "command", "command": "$HOME/.claude/statusline-command.sh", "refreshInterval": 5 }
 ```
 
-`git-freshness.sh` has three modes:
+`git-freshness.sh` has these modes:
 - `session` — at startup: syncs both config repos (fast-forward only, never over local work) and
   links any skill that has no symlink yet (and any skill's `workflow/*.js` into
   `~/.claude/workflows/`, any skill's `agents/*.md` into `~/.claude/agents/`, and the status line
   script when `~/.claude/statusline-command.sh` does not exist), compiles any skill's
   `apps/*.applescript` into `~/Applications/` when no app of that name exists, then checks the
   launch directory.
-- `edit` — the repo owning the file being written, once per repo per session.
+- `touch` — before a tool call, the first time a session touches a repo: the repo of the file a
+  Read/Edit/Write/MultiEdit/NotebookEdit acts on, the path (else the working directory) of a
+  Glob/Grep, and for Bash every directory named by `cd <dir>` or `git -C <dir>` (else the working
+  directory). It fast-forwards local `main`/`master` when safe, reports a working branch behind its
+  base with "raise it and wait" (not for a `/pipeline` run's own branch), and says "freshness
+  unknown" when the fetch does not finish. Later touches in the same repo are silent, and so are
+  touches in the config repos, which `session` has just synced. It has no status message: on this
+  matcher it would flash on every tool call.
+- `edit` — the earlier wiring (PostToolUse on `Edit|Write`). It shares `touch`'s per-repo markers,
+  so with both wired it does nothing; a machine that still has it wired should replace it with the
+  `touch` entry above. Before removing `edit` on the first machine, check once that a `touch` report
+  reaches the model: in a new session, read a file in a repo whose branch is behind and ask what
+  the hook reported. If it does not, keep `edit` wired and leave `touch` out.
 - `checkout` — drops cached verdicts after a branch switch.
 
 ### Permissions for unattended runs
@@ -197,9 +211,12 @@ Run after changing the hook:
 
 ```bash
 bash hooks/tests/git-freshness-sync.test.sh
+bash hooks/tests/git-freshness-touch.test.sh
 ```
 
-It builds throwaway repos under `$TMPDIR` and covers every branch of the base-branch sync,
-including the sibling-worktree case that is easy to get silently wrong, plus the config-repo sync,
-skill linking and app building (the cases that compile print `skip` on a machine without
-`osacompile`).
+They build throwaway repos under `$TMPDIR`. The sync suite covers every branch of the base-branch
+sync, including the sibling-worktree case that is easy to get silently wrong, plus the config-repo
+sync, skill linking and app building (the cases that compile print `skip` on a machine without
+`osacompile`). The touch suite covers the first-touch check: first versus repeat touch, `main`
+fast-forwarded on a first Read, a behind branch reported once, a dirty `main` left alone, slot
+worktrees, Bash commands, a pipeline run's branch and a fetch that does not finish.
