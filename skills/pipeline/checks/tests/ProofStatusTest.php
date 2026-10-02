@@ -21,17 +21,40 @@ function proof_status_cli(array $arguments, array $env = []): array
     return ['code' => proc_close($process), 'stdout' => $stdout, 'stderr' => $stderr];
 }
 
-/** A fake `gh` first on PATH that answers `pr view` with `$view`, or fails when it is null. */
+/**
+ * A fake `gh` first on PATH that answers `pr view` with `$view`, or fails when it is null. Each call appends its
+ * arguments, one per line, to the file `PROOF_GH_LOG` names, so a case reads the exact argv and a missing log proves
+ * no call.
+ */
 function proof_fake_gh(?array $view): array
 {
     $bin = sys_get_temp_dir() . '/proof-gh-' . uniqid();
     mkdir($bin);
-    file_put_contents("{$bin}/gh", $view === null
-        ? "#!/bin/sh\necho 'HTTP 502: Bad Gateway' >&2\nexit 1\n"
-        : "#!/bin/sh\necho '" . json_encode($view) . "'\n");
+    file_put_contents("{$bin}/gh", "#!/bin/sh\n" . 'printf \'%s\n\' "$@" >> "$PROOF_GH_LOG"' . "\n" . ($view === null
+        ? "echo 'HTTP 502: Bad Gateway' >&2\nexit 1\n"
+        : "echo '" . json_encode($view) . "'\n"));
     chmod("{$bin}/gh", 0755);
 
-    return ['PATH' => "{$bin}:" . getenv('PATH')];
+    return ['PATH' => "{$bin}:" . getenv('PATH'), 'PROOF_GH_LOG' => "{$bin}/argv"];
+}
+
+/**
+ * A run filed under the earlier naming scheme, as it sits in the store: `repo` holds `owner/name`, no `nameWithOwner`,
+ * no stored `status` (#161). Written directly, not through `proof_write_run()`, which would fill in a status.
+ */
+function proof_old_scheme_run(string $root, string $updatedAt, array $overrides = []): string
+{
+    $run = [
+        'repo' => 'IT4WEBBV/Deploy', 'branch' => 'feature/reverb-service-type', 'pr' => 404, 'prState' => 'OPEN',
+        'title' => 'PR #404: reverb service type', 'schema' => 2, 'revision' => 1,
+        'createdAt' => $updatedAt, 'updatedAt' => $updatedAt,
+        ...$overrides,
+    ];
+    $dir = "{$root}/" . proof_slug($run['repo']) . '/pr-404-reverb-service-type';
+    mkdir($dir, 0777, true);
+    file_put_contents("{$dir}/run.json", proof_run_json($run));
+
+    return $dir;
 }
 
 it('marks a page halted with its reason, leaves revision and updatedAt, and re-renders the page and its store\'s index', function () {
@@ -148,6 +171,62 @@ it('prunes a run gh now reports merged once its last filing is more than a week 
 
     expect($result['stdout'])->toBe("proof: pruned 1 run(s)\n");
     expect(is_dir("{$root}/Deploy/pr-5-logs"))->toBeFalse();
+});
+
+it('asks gh about an old-scheme run by its repo, and stores the merge it reports', function () {
+    $root = sys_get_temp_dir() . '/proof-store-' . uniqid();
+    $dir = proof_old_scheme_run($root, date('c', strtotime('-1 day')));
+    $gh = proof_fake_gh(['state' => 'MERGED', 'isDraft' => false]);
+
+    $result = proof_status_cli(['prune'], [...$gh, 'PIPELINE_PROOF_ROOT' => $root]);
+
+    expect(is_file($gh['PROOF_GH_LOG']))->toBeTrue();
+    expect(file($gh['PROOF_GH_LOG'], FILE_IGNORE_NEW_LINES))->toBe(['pr', 'view', '404', '--repo', 'IT4WEBBV/Deploy', '--json', 'state,isDraft']);
+    expect($result)->toBe(['code' => 0, 'stdout' => "proof: pruned 0 run(s)\n", 'stderr' => '']);
+    expect(proof_read_run($dir))->toMatchArray(['prState' => 'MERGED', 'status' => ['state' => 'merged']]);
+    expect(file_get_contents("{$dir}/index.html"))->toContain('pill-merged');
+    expect(proof_test_status_runs(file_get_contents("{$root}/status.js"))[0])
+        ->toMatchArray(['key' => 'IT4WEBBV-Deploy/pr-404-reverb-service-type', 'status' => 'merged']);
+});
+
+it('prunes an old-scheme run gh reports merged once its last filing is more than a week old', function () {
+    $root = sys_get_temp_dir() . '/proof-store-' . uniqid();
+    $dir = proof_old_scheme_run($root, date('c', strtotime('-8 days')));
+
+    $result = proof_status_cli(['prune'], [...proof_fake_gh(['state' => 'MERGED', 'isDraft' => false]), 'PIPELINE_PROOF_ROOT' => $root]);
+
+    expect($result)->toBe(['code' => 0, 'stdout' => "proof: pruned 1 run(s)\n", 'stderr' => '']);
+    expect(is_dir($dir))->toBeFalse();
+    expect(file_get_contents("{$root}/index.html"))->not->toContain('IT4WEBBV-Deploy/pr-404-reverb-service-type/index.html');
+    expect(proof_test_status_runs(file_get_contents("{$root}/status.js")))->toBe([]);
+});
+
+it('keeps an old-scheme run as it is when gh cannot answer', function () {
+    $root = sys_get_temp_dir() . '/proof-store-' . uniqid();
+    $dir = proof_old_scheme_run($root, date('c', strtotime('-8 days')));
+    $before = file_get_contents("{$dir}/run.json");
+    $gh = proof_fake_gh(null);
+
+    $result = proof_status_cli(['prune'], [...$gh, 'PIPELINE_PROOF_ROOT' => $root]);
+
+    expect(is_file($gh['PROOF_GH_LOG']))->toBeTrue();
+    expect(file($gh['PROOF_GH_LOG'], FILE_IGNORE_NEW_LINES))->toBe(['pr', 'view', '404', '--repo', 'IT4WEBBV/Deploy', '--json', 'state,isDraft']);
+    expect($result['stdout'])->toBe("proof: pruned 0 run(s)\n");
+    expect(file_get_contents("{$dir}/run.json"))->toBe($before);
+});
+
+it('leaves a run with a bare repo and no nameWithOwner alone, without asking gh', function () {
+    $root = sys_get_temp_dir() . '/proof-store-' . uniqid();
+    $dir = proof_old_scheme_run($root, date('c', strtotime('-8 days')), ['repo' => 'Deploy']);
+    $before = file_get_contents("{$dir}/run.json");
+    $gh = proof_fake_gh(['state' => 'MERGED', 'isDraft' => false]);
+
+    $result = proof_status_cli(['prune'], [...$gh, 'PIPELINE_PROOF_ROOT' => $root]);
+
+    expect(file_exists($gh['PROOF_GH_LOG']))->toBeFalse();
+    expect($result['stdout'])->toBe("proof: pruned 0 run(s)\n");
+    expect(is_dir($dir))->toBeTrue();
+    expect(file_get_contents("{$dir}/run.json"))->toBe($before);
 });
 
 it('rewrites status.js in the store the page is in when a status is written', function () {
