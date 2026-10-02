@@ -301,11 +301,12 @@ it('orders the statuses for attention, labels them, and stores the reason only w
     expect(proof_status_reason(['status' => ['state' => 'ready', 'reason' => 'stale']]))->toBe('');
 });
 
-it('keeps the store\'s revision, status and cost over a payload\'s', function () {
-    $stored = ['title' => 'x', 'revision' => 3, 'status' => ['state' => 'halted', 'reason' => 'r'], 'cost' => [['workflow' => 'wf_a']]];
+it('keeps the store\'s revision, attention, status and cost over a payload\'s', function () {
+    $stored = ['title' => 'x', 'revision' => 3, 'attention' => 2, 'status' => ['state' => 'halted', 'reason' => 'r'], 'cost' => [['workflow' => 'wf_a']]];
 
-    expect(proof_merge_run($stored, ['revision' => 99, 'status' => ['state' => 'merged'], 'cost' => [], 'title' => 'y']))
-        ->toBe(['title' => 'y', 'revision' => 3, 'status' => ['state' => 'halted', 'reason' => 'r'], 'cost' => [['workflow' => 'wf_a']]]);
+    expect(proof_merge_run($stored, ['revision' => 99, 'attention' => 40, 'status' => ['state' => 'merged'], 'cost' => [], 'title' => 'y']))
+        ->toBe(['title' => 'y', 'revision' => 3, 'attention' => 2, 'status' => ['state' => 'halted', 'reason' => 'r'], 'cost' => [['workflow' => 'wf_a']]]);
+    expect(proof_merge_run(['title' => 'x'], ['attention' => 40]))->toBe(['title' => 'x']);
 });
 
 it('counts every filing in revision and gives a run without a status the one its PR state implies', function () {
@@ -336,4 +337,54 @@ it('files a workflow\'s cost once, replacing its own entry and appending another
 
 it('orders all five statuses for a sort on the Status column: halted, ready, running, merged, closed', function () {
     expect(array_map(fn (ProofRunStatus $status) => $status->order(), ProofRunStatus::cases()))->toBe([2, 0, 1, 3, 4]);
+});
+
+it('calls the owner for a halted or ready run, never for a running, merged or closed one: the statuses group() puts first', function () {
+    expect(array_map(fn (ProofRunStatus $status) => $status->callsOwner(), ProofRunStatus::cases()))->toBe([false, true, true, false, false])
+        ->toBe(array_map(fn (ProofRunStatus $status) => $status->group() < 2, ProofRunStatus::cases()));
+});
+
+it('raises attention by one when a change turns the status halted or ready, and only then', function (array $before, array $after, array $counted) {
+    expect(proof_count_attention($before, $after))->toBe($counted);
+})->with([
+    'running to halted' => [
+        ['status' => ['state' => 'running']],
+        ['status' => ['state' => 'halted', 'reason' => 'CI red']],
+        ['status' => ['state' => 'halted', 'reason' => 'CI red'], 'attention' => 1],
+    ],
+    'running to ready, counted once before' => [
+        ['status' => ['state' => 'running'], 'attention' => 1],
+        ['status' => ['state' => 'ready'], 'attention' => 1],
+        ['status' => ['state' => 'ready'], 'attention' => 2],
+    ],
+    'halted to ready' => [
+        ['status' => ['state' => 'halted', 'reason' => 'r'], 'attention' => 1],
+        ['status' => ['state' => 'ready'], 'attention' => 1],
+        ['status' => ['state' => 'ready'], 'attention' => 2],
+    ],
+    'an older open run turning ready' => [
+        ['prState' => 'OPEN'],
+        ['prState' => 'OPEN', 'status' => ['state' => 'ready']],
+        ['prState' => 'OPEN', 'status' => ['state' => 'ready'], 'attention' => 1],
+    ],
+    'halted again with a new reason' => [
+        ['status' => ['state' => 'halted', 'reason' => 'CI red']],
+        ['status' => ['state' => 'halted', 'reason' => 'CI still red']],
+        ['status' => ['state' => 'halted', 'reason' => 'CI still red']],
+    ],
+    'ready again' => [['status' => ['state' => 'ready']], ['status' => ['state' => 'ready']], ['status' => ['state' => 'ready']]],
+    'halted to running' => [['status' => ['state' => 'halted', 'reason' => 'r']], ['status' => ['state' => 'running']], ['status' => ['state' => 'running']]],
+    'ready to merged' => [['status' => ['state' => 'ready']], ['status' => ['state' => 'merged']], ['status' => ['state' => 'merged']]],
+    'running to closed' => [['status' => ['state' => 'running']], ['status' => ['state' => 'closed']], ['status' => ['state' => 'closed']]],
+    'a cost on a halted run' => [
+        ['status' => ['state' => 'halted', 'reason' => 'r']],
+        ['status' => ['state' => 'halted', 'reason' => 'r'], 'cost' => [['workflow' => 'wf_a']]],
+        ['status' => ['state' => 'halted', 'reason' => 'r'], 'cost' => [['workflow' => 'wf_a']]],
+    ],
+]);
+
+it('gives a run the number its page stores when opened: its revision plus its attention', function () {
+    expect(proof_run_seen(['revision' => 3, 'attention' => 2]))->toBe(5);
+    expect(proof_run_seen(['revision' => 3]))->toBe(3);
+    expect(proof_run_seen(['attention' => 2]))->toBeNull();
 });

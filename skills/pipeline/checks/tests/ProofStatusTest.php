@@ -43,7 +43,8 @@ it('marks a page halted with its reason, leaves revision and updatedAt, and re-r
     $run = proof_read_run(dirname($page));
     expect($result)->toMatchArray(['code' => 0, 'stdout' => '', 'stderr' => '']);
     expect($run['status'])->toBe(['state' => 'halted', 'reason' => 'CI red on the head commit']);
-    expect($run)->toMatchArray(['revision' => $before['revision'], 'updatedAt' => $before['updatedAt']]);
+    expect($run)->toMatchArray(['revision' => $before['revision'], 'updatedAt' => $before['updatedAt'], 'attention' => 1]);
+    expect(file_get_contents($page))->toContain("<body data-seen=\"2\">\n");
     expect(file_get_contents($page))->toContain('<span class="pill pill-halted">Halted</span> <span class="reason">CI red on the head commit</span>');
     expect(file_get_contents(dirname($page, 3) . '/index.html'))->toContain('pill-halted')->toContain('href="Deploy/pr-5-logs/index.html"');
 });
@@ -90,23 +91,26 @@ it('says it cannot write a run whose file is read-only, and exits 0', function (
     expect(proof_read_run(dirname($page))['status'])->toBe(['state' => 'running']);
 });
 
-it('corrects a stale status from gh in the prune pass, keeping updatedAt and the revision', function (array $stored, array $view, array $status) {
+it('corrects a stale status from gh in the prune pass, keeping updatedAt and the revision', function (array $stored, array $view, array $status, ?int $attention) {
     $page = proof_test_page(['nameWithOwner' => 'IT4WEBBV/Deploy', ...$stored]);
     $before = proof_read_run(dirname($page));
 
     expect(proof_status_cli(['prune'], [...proof_fake_gh($view), 'PIPELINE_PROOF_ROOT' => dirname($page, 3)])['code'])->toBe(0);
 
-    expect(proof_read_run(dirname($page)))->toMatchArray([
+    $run = proof_read_run(dirname($page));
+    expect($run)->toMatchArray([
         'prState' => $view['state'], 'status' => $status, 'updatedAt' => $before['updatedAt'], 'revision' => $before['revision'],
     ]);
+    // An open PR taken out of draft outside the pipeline is ready for review all the same (spec Assumption 2).
+    expect($run['attention'] ?? null)->toBe($attention);
     expect(file_get_contents($page))->toContain('pill-' . $status['state']);
     expect(proof_test_status_runs(file_get_contents(dirname($page, 3) . '/status.js'))[0]['status'])->toBe($status['state']);
 })->with([
-    'a draft that went ready' => [['status' => ['state' => 'running']], ['state' => 'OPEN', 'isDraft' => false], ['state' => 'ready']],
-    'a stale Ready put back in draft' => [['status' => ['state' => 'ready']], ['state' => 'OPEN', 'isDraft' => true], ['state' => 'running']],
-    'a halted draft keeps its reason' => [['status' => ['state' => 'halted', 'reason' => 'CI red']], ['state' => 'OPEN', 'isDraft' => true], ['state' => 'halted', 'reason' => 'CI red']],
-    'a merge no session wrote' => [['status' => ['state' => 'ready']], ['state' => 'MERGED', 'isDraft' => false], ['state' => 'merged']],
-    'an old run without a status' => [['status' => null], ['state' => 'CLOSED', 'isDraft' => false], ['state' => 'closed']],
+    'a draft that went ready' => [['status' => ['state' => 'running']], ['state' => 'OPEN', 'isDraft' => false], ['state' => 'ready'], 1],
+    'a stale Ready put back in draft' => [['status' => ['state' => 'ready']], ['state' => 'OPEN', 'isDraft' => true], ['state' => 'running'], null],
+    'a halted draft keeps its reason' => [['status' => ['state' => 'halted', 'reason' => 'CI red']], ['state' => 'OPEN', 'isDraft' => true], ['state' => 'halted', 'reason' => 'CI red'], null],
+    'a merge no session wrote' => [['status' => ['state' => 'ready']], ['state' => 'MERGED', 'isDraft' => false], ['state' => 'merged'], null],
+    'an old run without a status' => [['status' => null], ['state' => 'CLOSED', 'isDraft' => false], ['state' => 'closed'], null],
 ]);
 
 it('keeps the stored status and PR state when gh cannot answer', function () {
@@ -154,7 +158,7 @@ it('rewrites status.js in the store the page is in when a status is written', fu
 
     $runs = proof_test_status_runs(file_get_contents("{$root}/status.js"));
     expect($runs)->toHaveCount(1);
-    expect($runs[0])->toMatchArray(['key' => 'Deploy/pr-5-logs', 'status' => 'halted', 'revision' => 1]);
+    expect($runs[0])->toMatchArray(['key' => 'Deploy/pr-5-logs', 'status' => 'halted', 'revision' => 1, 'seen' => 2]);
     expect(glob("{$root}/*.tmp"))->toBe([]);
 });
 
@@ -164,3 +168,33 @@ it('prints its count and names on stderr the index it cannot write', function ()
     expect(proof_status_cli(['prune'], [...proof_fake_gh(null), 'PIPELINE_PROOF_ROOT' => $root]))
         ->toBe(['code' => 0, 'stdout' => "proof: pruned 0 run(s)\n", 'stderr' => "proof: cannot write {$root}/index.html\n"]);
 });
+
+it('raises attention when a status turns halted or ready, and not for merged, closed, running or the same status again', function (array $writes, ?int $attention) {
+    $page = proof_test_page();
+
+    foreach ($writes as $write) {
+        proof_status_cli(['status', $page, ...$write]);
+    }
+
+    $run = proof_read_run(dirname($page));
+    expect($run['attention'] ?? null)->toBe($attention);
+    expect($run['revision'])->toBe(1);
+})->with([
+    'halted' => [[['halted', '--reason', 'CI red']], 1],
+    'ready' => [[['ready']], 1],
+    'merged' => [[['merged']], null],
+    'closed' => [[['closed']], null],
+    'running' => [[['running']], null],
+    'halted twice in a row' => [[['halted', '--reason', 'CI red'], ['halted', '--reason', 'CI still red']], 1],
+    'halted, resumed, halted again' => [[['halted', '--reason', 'CI red'], ['running'], ['halted', '--reason', 'CI red']], 2],
+    'halted, then ready' => [[['halted', '--reason', 'CI red'], ['ready']], 2],
+]);
+
+it('leaves the seen number at the revision when a status turns merged, closed or running', function (string $status) {
+    $page = proof_test_page();
+
+    proof_status_cli(['status', $page, $status]);
+
+    expect(proof_test_status_runs(file_get_contents(dirname($page, 3) . '/status.js'))[0])->toMatchArray(['revision' => 1, 'seen' => 1]);
+    expect(file_get_contents($page))->toContain("<body data-seen=\"1\">\n");
+})->with(['merged', 'closed', 'running']);

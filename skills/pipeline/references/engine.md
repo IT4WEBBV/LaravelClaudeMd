@@ -938,8 +938,10 @@ command that made it so:
 A command writes to `artifacts.proof` only when the manifest sets it, and never changes its answer or halts over it:
 a page that cannot be amended is one line on stderr. `finish`'s and `returned`'s `done` carries `proof`
 (`artifacts.proof`, or null), the page the session marks ready. A status or a cost written into a filed run is no
-filing: `revision` and `updatedAt` stay as they were. A run filed before statuses existed reads as its `prState`
-says: `MERGED` Merged, `CLOSED` Closed, else Running.
+filing: `revision` and `updatedAt` stay as they were. A change of status to `halted` or `ready`, by any writer above,
+raises the run's `attention` instead, which the index compares (*What changed since the last look*); `halted` again,
+any other status and a cost raise nothing. A run filed before statuses existed reads as its `prState` says: `MERGED`
+Merged, `CLOSED` Closed, else Running.
 
 **The index** shows the open runs by attention: `halted` first, then `ready`, then the rest, each newest first;
 merged and closed runs are hidden until *Show merged and closed (n)* is ticked. It filters by repo and by status (a
@@ -948,21 +950,29 @@ summary, and sorts by a click on a column header (a second click reverses; a rel
 The repo filter, the status filter and the toggle are remembered per browser (`proof:repo`, `proof:status`,
 `proof:finished` in `localStorage`); the search and the sort are not. Per run it shows the status, PR, page, shots,
 time and cost, and its last filing as `d-m H:i` in the browser's time with the full timestamp on hover, and copies
-its client summary. **What changed since the last look** is per browser: opening a page stores its `revision` under
-`seen:<repo>/<run>` in `localStorage` (`file://` is one origin in Chrome), and the index marks a run never opened
-*New*, one filed again since it was opened *Updated*, and drops a seen `ready` run among the rest. A run filed before
-`revision` existed gets no marker. Without `localStorage` nothing is marked and the order is the status order. Open it with `~/Applications/Proofs.app` (Alfred, Spotlight or the Dock; README §Proofs app).
+its client summary.
+**What changed since the last look** is per browser: opening a page stores the run's `revision + attention` under
+`seen:<repo>/<run>` in `localStorage` (`file://` is one origin in Chrome). The index reads a run as unread when this
+browser never opened it (*New*), or when since it was opened it was filed again (*Updated*) or its status turned
+`halted` (*Halted*) or `ready` (*Ready*); `merged`, `closed` and `running` never make a run unread. The word names
+what the row needs now: *Halted* or *Ready* by the run's current status before *Updated*. Unread rows are bold with a
+filled dot before the title, read rows muted with an outline dot. The dot marks a run read (it stores the run's
+number, as opening the page does) or unread by hand (it stores `0`, shown as *Unread* on a run that is neither
+halted nor ready), and a seen `ready` run drops among the rest. The heading counts the unread runs that are not
+merged or closed (`3 unread`), whatever the filters show. A run filed before `revision` existed gets no dot and no
+marker. Without `localStorage` nothing is marked, no dot shows, and the order is the status order. Open it with `~/Applications/Proofs.app` (Alfred, Spotlight or the Dock; README §Proofs app).
 
 **The open index tab.** Every store write (a filing, `handoff`'s included, a status, the prune pass, a cost) writes
 `status.js` beside `index.html` from the same scan (`proof_store_index()`): per run its key (`<repo>/<run>`), status,
-revision, a hash of the run as stored, and its row as the index renders it. The index, opened by hand and left open
-in a tab, loads it every 30 seconds, and at once when the tab becomes visible or the window gains focus, through a
-`<script src="status.js?t=<now>">` (`fetch()` is refused over `file://`). It replaces the rows whose hash changed,
-inserts new runs and removes pruned ones in place, without a reload or a lost scroll position, then marks, orders and
-filters every row again. Its title counts the unread runs (*New* or *Updated*) that are not merged or closed, whatever
-the filters show (`(2) Proofs`, else `Proofs`), and its favicon is a dot: red when one of them is halted, else green
-when one is ready, else blue, else a grey ring. A run leaves both once its page is opened and the index is looked at
-again. An empty store's index reloads itself once a run appears. Two limits: the signal exists only while the index
+revision, seen number (`revision + attention`), a hash of the run as stored, and its row as the index renders it. The
+index, opened by hand and left open in a tab, loads it every 30 seconds, and at once when the tab becomes visible or
+the window gains focus, through a `<script src="status.js?t=<now>">` (`fetch()` is refused over `file://`). It
+replaces the rows whose hash changed, inserts new runs and removes pruned ones in place, without a reload or a lost
+scroll position, then marks, orders and filters every row again. Its title counts the unread runs (the rule above)
+that are not merged or closed, the number the heading shows, whatever the filters show (`(2) Proofs`, else
+`Proofs`), and its favicon is a dot: red when one of them is halted, else green when one is ready, else blue, else a
+grey ring. A run leaves both once its page is opened and the index is looked at again, or once it is marked read on
+the index. An empty store's index reloads itself once a run appears. Two limits: the signal exists only while the index
 tab is open, and Chrome throttles timers in background tabs, so a change can take a minute or so to show.
 
 **Retention.** The prune pass runs after every `proof_cli.php write` and on `proof_cli.php prune`. It corrects each
@@ -994,8 +1004,8 @@ characters in five runs.
 | `ledger` | list of `{gate, outcome, note}` |
 | `shots` | list of `{title, caption, route, badges, state}`. `title` is at most 70 characters and names the state shown ("Unreachable swarm"); `caption` says what the shot proves and has no limit. `state` is **required**: `before`, `after` or `defect`, the ribbon on the shot; a `before` directly followed by an `after` renders as one pair. A badge's `note` also shows on hover |
 | `shotSources` | absolute paths of the screenshots, in `shots` order, `null` for a shot carried forward with its `file`; ingested into the run's `shots/` as `<NN>-<route>-<hash>.png`, so a new shot never overwrites a carried one |
-| `addedTests` | **the store's, never a payload's**: per test file, the cases the branch adds (`added`, tagged *new*) or changes (`changed`), extracted at every write by git in `worktree`; kept as filed when git cannot answer. A payload's `addedTests`, `schema`, `createdAt`, `updatedAt`, `revision`, `status` and `cost` are ignored |
-| `revision`, `status`, `cost` | **the store's, never a payload's**: `revision` counts the run's filings (`handoff`'s and every `write`); `status` is `{state, reason}`, the reason only with `halted` (above); `cost` is the figures `run_cost_cli.php` files, per workflow `{workflow, span, steps}` |
+| `addedTests` | **the store's, never a payload's**: per test file, the cases the branch adds (`added`, tagged *new*) or changes (`changed`), extracted at every write by git in `worktree`; kept as filed when git cannot answer. A payload's `addedTests`, `schema`, `createdAt`, `updatedAt`, `revision`, `attention`, `status` and `cost` are ignored |
+| `revision`, `attention`, `status`, `cost` | **the store's, never a payload's**: `revision` counts the run's filings (`handoff`'s and every `write`); `attention` counts the times its status turned `halted` or `ready` (absent until the first); `status` is `{state, reason}`, the reason only with `halted` (above); `cost` is the figures `run_cost_cli.php` files, per workflow `{workflow, span, steps}` |
 
 **Before, after and defect shots.** `verify-ui` takes before shots only when the spec names a before
 state to show: it checks out the base detached in the run's worktree (`git checkout --detach
