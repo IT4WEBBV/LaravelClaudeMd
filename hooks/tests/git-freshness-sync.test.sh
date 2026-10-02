@@ -52,6 +52,7 @@ export GIT_FRESHNESS_CONFIG_REPOS=""
 export GIT_FRESHNESS_SKILLS_DIR="$root/no-skills-dir"
 export GIT_FRESHNESS_WORKFLOWS_DIR="$root/no-workflows-dir"
 export GIT_FRESHNESS_AGENTS_DIR="$root/no-agents-dir"
+export GIT_FRESHNESS_APPS_DIR="$root/no-apps-dir"
 export GIT_FRESHNESS_STATUSLINE="$root/no-statusline/statusline-command.sh"
 # Same for the retired-vault reminder: no case may read the real home.
 export GIT_FRESHNESS_VAULT_HOME="$root/no-home"
@@ -447,6 +448,76 @@ ln -s "$root/config8/realagents" "$root/config8/agents-link"
 printf '%s' "{\"session_id\":\"test-config8b\",\"cwd\":\"$root/config8\"}" \
     | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config8/none" GIT_FRESHNESS_AGENTS_DIR="$root/config8/agents-link" bash "$hook" session >/dev/null 2>&1
 if [ -e "$root/config8/realagents/flow-check.md" ]; then fail "nothing written through a symlinked agents dir"; else ok "nothing written through a symlinked agents dir"; fi
+echo
+
+echo "case 21: session start builds a skill's app when it is missing, and leaves an existing one alone"
+if command -v osacompile >/dev/null 2>&1; then
+    cfg=$(fixture config9 1 skills/flow/SKILL.md)
+    push_upstream config9 skills/flow/apps/Hello.applescript 'display dialog "hello"'
+    push_upstream config9 skills/flow/apps/Taken.applescript 'display dialog "taken"'
+    apps="$root/config9/apps"
+    mkdir -p "$apps/Taken.app"
+    printf 'mine\n' > "$apps/Taken.app/marker"
+    out=$(printf '%s' "{\"session_id\":\"test-config9a\",\"cwd\":\"$root/config9\"}" \
+        | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config9/none" GIT_FRESHNESS_APPS_DIR="$apps" bash "$hook" session 2>/dev/null)
+    is "$(printf '%s' "$out" | grep -c '')" "1" "emits exactly one line"
+    if json_is_valid "$out"; then ok "output parses as JSON"; else fail "output parses as JSON" "$out"; fi
+    if [ -f "$apps/Hello.app/Contents/Resources/Scripts/main.scpt" ]; then ok "the app is compiled under its source's base name"; else fail "the app is compiled under its source's base name"; fi
+    is "$(ls "$apps/Taken.app")" "marker" "an existing app with the same name is left alone"
+    is "$(cat "$apps/Taken.app/marker")" "mine" "its content is untouched"
+    contains "$out" "built new app Hello" "the build is reported"
+    lacks "$out" "built new app Taken" "the existing app is not reported as built"
+    contains "$out" '"systemMessage"' "a new app earns a visible line"
+    printf 'built once\n' > "$apps/Hello.app/marker"
+    out=$(printf '%s' "{\"session_id\":\"test-config9b\",\"cwd\":\"$root/config9\"}" \
+        | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config9/none" GIT_FRESHNESS_APPS_DIR="$apps" bash "$hook" session 2>/dev/null)
+    is "$(cat "$apps/Hello.app/marker" 2>/dev/null)" "built once" "the next session does not rebuild an app it built"
+    lacks "$out" "built new app" "the next session reports no build"
+else
+    echo "  skip  osacompile not found"
+fi
+echo
+
+echo "case 22: a source that does not compile leaves nothing; a missing apps dir is created; a symlinked one gets nothing"
+if command -v osacompile >/dev/null 2>&1; then
+    cfg=$(fixture config10 1 skills/flow/SKILL.md)
+    push_upstream config10 skills/flow/apps/Broken.applescript 'this is not ( applescript'
+    push_upstream config10 skills/flow/apps/Hello.applescript 'display dialog "hello"'
+    missing="$root/config10/new/apps"
+    out=$(printf '%s' "{\"session_id\":\"test-config10a\",\"cwd\":\"$root/config10\"}" \
+        | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config10/none" GIT_FRESHNESS_APPS_DIR="$missing" bash "$hook" session 2>/dev/null)
+    if [ -f "$missing/Hello.app/Contents/Resources/Scripts/main.scpt" ]; then ok "the missing dir is created and the app built"; else fail "the missing dir is created and the app built"; fi
+    if [ -e "$missing/Broken.app" ]; then fail "a source that does not compile leaves nothing behind"; else ok "a source that does not compile leaves nothing behind"; fi
+    lacks "$out" "built new app Broken" "a failed build is not reported"
+    push_upstream config10 skills/flow/apps/Broken.applescript 'display dialog "fixed"'
+    out=$(printf '%s' "{\"session_id\":\"test-config10b\",\"cwd\":\"$root/config10\"}" \
+        | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config10/none" GIT_FRESHNESS_APPS_DIR="$missing" bash "$hook" session 2>/dev/null)
+    if [ -f "$missing/Broken.app/Contents/Resources/Scripts/main.scpt" ]; then ok "once fixed, the next session builds it"; else fail "once fixed, the next session builds it"; fi
+    contains "$out" "built new app Broken" "the late build is reported"
+    mkdir -p "$root/config10/realapps"
+    ln -s "$root/config10/realapps" "$root/config10/apps-link"
+    printf '%s' "{\"session_id\":\"test-config10c\",\"cwd\":\"$root/config10\"}" \
+        | GIT_FRESHNESS_CONFIG_REPOS="$cfg" GIT_FRESHNESS_SKILLS_DIR="$root/config10/none" GIT_FRESHNESS_APPS_DIR="$root/config10/apps-link" bash "$hook" session >/dev/null 2>&1
+    is "$(ls -A "$root/config10/realapps")" "" "nothing written through a symlinked apps dir"
+else
+    echo "  skip  osacompile not found"
+fi
+echo
+
+echo "case 23: the repo's own app sources compile"
+if command -v osacompile >/dev/null 2>&1; then
+    sources=0
+    mkdir -p "$root/own-apps"
+    for script in "$here"/../../skills/*/apps/*.applescript; do
+        [ -f "$script" ] || continue
+        sources=$((sources + 1))
+        name=$(basename "$script" .applescript)
+        if osacompile -o "$root/own-apps/$name.app" "$script" >/dev/null 2>&1; then ok "$name.applescript compiles"; else fail "$name.applescript compiles"; fi
+    done
+    is "$([ "$sources" -gt 0 ] && echo yes || echo no)" "yes" "the repo ships at least one app source"
+else
+    echo "  skip  osacompile not found"
+fi
 echo
 
 echo "----------------------------------------"
