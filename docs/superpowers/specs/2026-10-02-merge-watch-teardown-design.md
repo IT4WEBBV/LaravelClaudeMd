@@ -71,7 +71,7 @@ It runs in this order and prints one line per stage, so the caller relays its ou
    its stderr, then `teardown: nothing removed: gh could not read PR <pr>`, exit 1.
 2. **Mark the page** when there is one: `MERGED` → `php <skills>/pipeline/checks/proof_cli.php status <page> merged`,
    `CLOSED` → `… closed`, where `<skills>` is two levels up from the script's real path (the repo's `skills/`, also
-   behind the `~/.claude/skills/` symlinks). A failed mark prints `teardown: page not marked: <stderr>` and goes on:
+   behind the `~/.claude/skills/` symlinks). A failed mark prints `page: not marked: <stderr>` and goes on:
    the prune pass corrects a page's status from GitHub (engine.md §The proof store), and the manifest that names the
    page is about to go with the worktree. It is marked before anything is checked or removed, as today.
 3. **Not merged:** `OPEN` → `teardown: nothing removed: PR #<P> is still open`, exit 1. `CLOSED` →
@@ -80,8 +80,9 @@ It runs in this order and prints one line per stage, so the caller relays its ou
    - `clean`: `git status --porcelain` prints nothing;
    - `head`: `git rev-parse HEAD` equals `headRefOid`;
    - `branch`: `git branch --show-current` equals `headRefName` (the branch about to be deleted is the PR's);
-   - `outside`: the script's own cwd is not inside a linked worktree it is about to remove (a session sitting in it
-     must `ExitWorktree` with `keep` first; for the primary checkout this check is always `ok`);
+   - `outside`: the script's own cwd is not inside a linked worktree it is about to remove (the script runs from the
+     primary checkout, and a session that entered the worktree must `ExitWorktree` with `keep` first; the `FAIL`
+     names both; for the primary checkout this check is always `ok`);
    - `owners`: `claude agents --json --all | owners.py <checkout> [--projects-dir …]` exits 0 and prints nothing;
      otherwise its stdout and stderr are shown.
    Any `FAIL`: `teardown: nothing removed: <the failed checks' names>`, exit 1. Nothing was touched but the page.
@@ -135,9 +136,9 @@ the issue's "a watch armed for more than 2 hours still exits on the merge" hold.
 > **Watch the PR you open.** Right after `gh pr create`, arm one background Bash (`run_in_background: true`,
 > `timeout: 7200000`):
 > `until s=$(gh pr view <P> -R <repo> --json state --jq .state 2>/dev/null) && [ "$s" != OPEN ]; do sleep 60; done; echo "PR #<P> $s"`.
-> It ends without that line at its time limit: arm it again. When it prints the state, leave the worktree if you are
-> in it (`ExitWorktree`, `keep`), run `python3 ~/.claude/skills/orchestrate/teardown.py <checkout> <P> --repo <repo>` and
-> report its last line, without asking first: on a merge it removes the worktree, slot or feature branch only when
+> It ends without that line at its time limit: arm it again. When it prints the state, run the teardown from the
+> primary checkout, leaving the worktree first if you entered it (`ExitWorktree`, `keep`):
+> `cd <primary checkout> && python3 ~/.claude/skills/orchestrate/teardown.py <checkout> <P> --repo <repo>`; report its last line, without asking first: on a merge it removes the worktree, slot or feature branch only when
 > every check holds, and otherwise removes nothing and says why. Its output is a report, not a question. One watch
 > per PR: a `/pipeline` or `/orchestrate` session arms its own, and a pipeline step or any subagent arms none.
 
@@ -198,7 +199,7 @@ Cases (each asserts the exit code, the last line, and what is or is not left on 
 10. still open: exit 1, nothing marked, nothing removed.
 11. the page: with a manifest at `.claude/pipeline/feature-x.json` holding `artifacts.proof`, the php log shows
     `status <page> merged` and it is logged before `worktree.sh` (slot case log order); `--proof` overrides it; a
-    failing `php` prints `page not marked` and the removal still happens.
+    failing `php` prints `page: not marked` and the removal still happens.
 12. a removal that fails (the `worktree.sh` stub exits 1): exit 3, last line `stopped at …`, `git branch -D` not run.
 13. every check that fails is printed in one run (dirty and HEAD off together): both `FAIL` lines appear.
 14. usage: a path that is not a working tree's top level → exit 2, usage on stderr.

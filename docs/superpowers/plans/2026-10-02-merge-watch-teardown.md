@@ -173,7 +173,7 @@ Two red-green cycles in one task: first everything that removes nothing (Steps 1
 # marked before anything is checked. gh, claude and php are stubs on PATH; git is real, against a bare
 # origin per case.
 set -euo pipefail
-HERE="$(cd "$(dirname "$0")" && pwd)"
+HERE="$(cd "$(dirname "$0")" && pwd -P)"   # physical: $REPO is this repo, not ~/.claude via the symlink
 TEARDOWN="$HERE/../teardown.py"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"   # physical: git prints real paths (/private/var on macOS)
 trap 'rm -rf "$TMP"' EXIT
@@ -508,7 +508,7 @@ def mark(page, pr):
     if not page or not status:
         return
     result = run(["php", PROOF_CLI, "status", page, status], os.getcwd())
-    say(f"page: marked {status}, {page}" if result.returncode == 0 else f"teardown: page not marked: {result.stderr.strip()}")
+    say(f"page: marked {status}, {page}" if result.returncode == 0 else f"page: not marked: {result.stderr.strip()}")
 
 
 def owners(path, projects_dir):
@@ -532,7 +532,8 @@ def checks(checkout, pr, projects_dir):
         ("head", head == pr.head_sha, f"HEAD is {head}, the merged head is {pr.head_sha}"),
         ("branch", branch == pr.head, f"on {branch or 'a detached HEAD'}, the PR's branch is {pr.head}"),
         ("outside", checkout.outside(os.path.realpath(os.getcwd())),
-         f"this command runs inside {checkout.path}: leave it first (ExitWorktree, keep)"),
+         f"this command runs inside {checkout.path}: run it from the primary checkout {checkout.primary}"
+         " (a session that entered the worktree leaves it first: ExitWorktree, keep)"),
         ("owners", not owned, owned),
     ]
 
@@ -678,7 +679,7 @@ case_start mark-fails; linked mark-fails
 export TEARDOWN_PHP_EXIT=1
 teardown "$TMP" "$WT" 12 --proof "$TMP/page.html"
 ends 0 "teardown: removed worktree $WT and branch b"
-says "teardown: page not marked: proof: status not written: no such page"
+says "page: not marked: proof: status not written: no such page"
 gone "$WT" b
 
 # A removal command that fails: exit 3, the command named, nothing after it run.
@@ -1020,6 +1021,7 @@ has CLAUDE.md '**Watch the PR you open.**'
 has CLAUDE.md '`timeout: 7200000`'
 has CLAUDE.md '[ "$s" != OPEN ]; do sleep 60; done; echo "PR #<P> $s"'
 has CLAUDE.md 'python3 ~/.claude/skills/orchestrate/teardown.py <checkout> <P> --repo <repo>'
+has CLAUDE.md '`cd <primary checkout> && python3 '
 has CLAUDE.md 'a pipeline step or a subagent arms none'
 has CLAUDE.md "the teardown's \`git pull --ff-only\`"
 ```
@@ -1035,9 +1037,10 @@ Expected: exit 1, `FAIL teardown.py (docs): CLAUDE.md does not say: **Watch the 
 - **Watch the PR you open.** Right after `gh pr create`, arm one background Bash (`run_in_background: true`,
   `timeout: 7200000`):
   `until s=$(gh pr view <P> -R <repo> --json state --jq .state 2>/dev/null) && [ "$s" != OPEN ]; do sleep 60; done; echo "PR #<P> $s"`.
-  It ends without that line at its time limit: arm it again. When it prints the state, leave the worktree if you
-  are in it (`ExitWorktree`, `keep`), run `python3 ~/.claude/skills/orchestrate/teardown.py <checkout> <P> --repo <repo>`
-  and report its last line, without asking first: after a merge it removes the worktree, slot or feature branch
+  It ends without that line at its time limit: arm it again. When it prints the state, run the teardown from the
+  primary checkout, leaving the worktree first if you entered it (`ExitWorktree`, `keep`):
+  `cd <primary checkout> && python3 ~/.claude/skills/orchestrate/teardown.py <checkout> <P> --repo <repo>`;
+  report its last line, without asking first: after a merge it removes the worktree, slot or feature branch
   only when every check holds, and otherwise removes nothing and says why. Its output is a report, not a question.
   One watch per PR: a `/pipeline` or `/orchestrate` session arms its own, and a pipeline step or a subagent arms none.
 ```
