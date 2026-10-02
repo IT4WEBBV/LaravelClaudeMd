@@ -131,9 +131,6 @@ function stepPrompt(leg, step) {
   if (leg === 'implement') {
     lines.push(`4. Before returning (after the last commit, when there is one), run \`git -C ${args.worktree} diff origin/<base>...HEAD > ${diff}\` with <base> the PR's base branch (\`gh pr view <pr> --json baseRefName --jq .baseRefName\`, <pr> being \`artifacts.pr\` in ${args.manifest}), then \`php ${args.checks}/dispatch_cli.php ui ${diff}\`, and return what it prints as \`ui\`: copy it, do not judge it. Every return carries \`ui\`; on a halt its value is ignored.`)
   }
-  if (leg === 'review-pr' && step === 'resolve') {
-    lines.push(`4. Run the proof page's \`open\` as \`PIPELINE_NO_OPEN=${args.noOpen ? 1 : 0} php ${args.checks}/proof_cli.php open …\`.`)
-  }
   return lines.join('\n')
 }
 

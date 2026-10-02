@@ -246,3 +246,25 @@ it('prints as before and exits 0 given a page with no run beside it, and files n
     expect(checks_cli('run_cost_cli.php', ['/nonexistent', $page]))->toBe(['code' => 0, 'stdout' => 'run: not measured (no step transcripts)']);
     expect(proof_read_run(dirname($page)))->not->toHaveKey('cost');
 });
+
+it('changes the run\'s hash in status.js when it files a cost', function () {
+    $dir = cost_run([
+        'a1' => ['implement:run', implode("\n", [
+            cost_call('m1', 0, 0, 300000, 2000, null, '10:07:00.000'),
+            cost_tool_use('t1', '10:08:00.000'),
+            cost_tool_result('t1', '10:20:00.000'),
+        ]), ['status' => 'continued']],
+    ]);
+    $page = proof_test_page();
+    $root = dirname($page, 3);
+    expect(proof_store_index($root))->toBeNull();
+    $before = proof_test_status_runs(file_get_contents("{$root}/status.js"))[0];
+
+    checks_cli('run_cost_cli.php', [$dir, $page]);
+
+    $after = proof_test_status_runs(file_get_contents("{$root}/status.js"))[0];
+    expect($after['hash'])->not->toBe($before['hash']);
+    expect($after['revision'])->toBe($before['revision']);
+    // The Time column now shows the filed span (780 s, as the case above files it).
+    expect($after['row'])->toContain('>' . proof_minutes(780.0) . '</td>');
+});

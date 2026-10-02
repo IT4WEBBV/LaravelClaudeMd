@@ -25,7 +25,7 @@ function dispatch_cli(array $arguments, array $env = []): array
         [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
         $pipes,
         null,
-        [...getenv(), 'PIPELINE_NO_OPEN' => '0', 'PIPELINE_PROOF_ROOT' => sys_get_temp_dir() . '/pipeline-proofs-' . uniqid(), ...$env],
+        [...getenv(), 'PIPELINE_PROOF_ROOT' => sys_get_temp_dir() . '/pipeline-proofs-' . uniqid(), ...$env],
     );
     $stdout = stream_get_contents($pipes[1]);
     fclose($pipes[1]);
@@ -177,7 +177,6 @@ it('launches from the cursor with the ledger\'s loop-backs, the design size and 
         'size' => 'Bounded',
         'manifest' => $fixture['manifest'],
         'worktree' => $fixture['dir'],
-        'noOpen' => false,
         'checks' => realpath(__DIR__ . '/..'),
         'tables' => pipeline_routing_tables(),
         'profile' => 'medium',
@@ -300,10 +299,10 @@ it('launches a design at the step the manifest calls for', function (?string $sp
     'a spec whose plan is not written' => ['spec.md', 'plan'],
 ]);
 
-it('marks noOpen when the launch runs unattended', function () {
+it('gives the workflow no noOpen flag, whatever PIPELINE_NO_OPEN says', function () {
     $fixture = dispatch_fixture(['mode' => 'autoflow']);
 
-    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']], ['PIPELINE_NO_OPEN' => '1'])['json']['noOpen'])->toBeTrue();
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']], ['PIPELINE_NO_OPEN' => '1'])['json'])->not->toHaveKey('noOpen');
 });
 
 it('answers done for a finished run, and re-arms it with --from through the navigation guardrail', function () {

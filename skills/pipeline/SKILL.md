@@ -39,8 +39,9 @@ this summary:
   the finish step writes the Dutch client summary and the plain-language explainer
   (`references/engine.md` §The proof store). The page and the store index (`~/GitProjects/_proofs/index.html`)
   show each run's status (Running, Halted with its reason, Ready for review, Merged, Closed), mark a run filed
-  again since it was last opened, and show an `autoflow` run's time and cost per step. The finished page **opens in the browser once**, as the
-  run's last action; `PIPELINE_NO_OPEN=1` suppresses that for headless and unattended runs.
+  again since it was last opened, and show an `autoflow` run's time and cost per step. No page opens by itself: the report names it, and the
+  store index, left open in a tab, shows what changed with a dot and a count in that tab (`references/engine.md`
+  §The proof store).
 - **Cost per run** — after every `autoflow` run the invoking session reports two outputs with the
   result: `checks/run_cost_cli.php <dir> <artifacts.proof>` (cost weighted per model and wall time per step, the
   run's span, the largest step peak; given the page it files them into it) and `checks/run_audit.php` (whether `ui` and each gate's ledger agree with what the steps
@@ -103,7 +104,7 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    retried in another form. A resume skips this step.
 2. **Launch.** `git -C <worktree> diff origin/<base>...HEAD > "<manifest stem>.diff"` (`<base>`: the
    manifest's `base`, else the default branch), then
-   `PIPELINE_NO_OPEN=<1 unattended, else 0> php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff"`.
+   `php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff"`.
    `done` or a halt: report it and stop. A resume starts here: `launch` starts from the cursor.
 3. **Start the saved workflow `pipeline-autoflow` through the detour** (#134). Claude Code relays the
    owner's last chat message to every step of a workflow started in a reply a human message opened,
@@ -142,9 +143,9 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    `launch <manifest> "<manifest stem>.diff" --from review-pr --decision "<its decision>"`, and steps
    3–5 again. **`halt`:** `finish <manifest> '<the answer>'`, then as any halt; on a `mismatch` GitHub's
    head and the worktree's `HEAD` differ: once they match (push the branch, or reconcile it when GitHub
-   is ahead), the loop runs again by hand. **A halt after `handoff`:** the reason into the PR body and
-   the proof page opened once (`references/engine.md` §Failure policy).
-6. **Report** the result with the two cost-per-run outputs above (`run_cost_cli.php` given
+   is ahead), the loop runs again by hand. **A halt after `handoff`:** the reason into the PR body,
+   and the report names the proof page (`references/engine.md` §Failure policy).
+6. **Report** the result, naming the proof page (the `proof` `finish` printed), with the two cost-per-run outputs above (`run_cost_cli.php` given
    `artifacts.proof` files its figures into the page), and arm the merge watch (`references/engine.md` §After the
    merge, which marks the page `merged` or `closed` when it fires).
 

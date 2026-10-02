@@ -22,11 +22,11 @@ it('names the manifest where the dispatcher found it, not where the branch name 
         ->not->toContain('feature-x.json');
 });
 
-it('has the finish step write its actions before its last action', function () {
+it('has the finish step write its actions, and open no page', function () {
     $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
     $brief = pipeline_brief(brief_manifest('review-pr', ['gate_ledger' => [$open]]), 'review-pr', '/tmp/m.json');
 
-    expect(strpos($brief, 'm.actions.json'))->toBeLessThan(strpos($brief, 'After `record`, the last action is `proof_cli.php open`'));
+    expect($brief)->toContain('m.actions.json')->not->toContain('proof_cli.php open');
 });
 
 it('has overrides for every leg and step, in autoflow and interactive', function () {
@@ -223,7 +223,7 @@ it('makes the review-pr resolve step the finish step', function () {
     $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
     $brief = pipeline_brief(brief_manifest('review-pr', ['mode' => 'interactive', 'gate_ledger' => [$open]]), 'review-pr', '/tmp/wt/.claude/pipeline/feature-x.json');
 
-    expect($brief)->toContain('the finish step')->toContain('gh pr ready')->toContain('proof_cli.php open');
+    expect($brief)->toContain('the finish step')->toContain('gh pr ready')->toContain('Your reply names the page path `write` printed')->not->toContain('proof_cli.php open');
 });
 
 it('tells both review-pr steps the leg is not the review-pr skill, in either mode', function (string $mode, string $step, string $next) {
@@ -297,14 +297,14 @@ it('leaves the PR draft at the autoflow finish step for the session that launche
         ->toContain('On a loop-back, stop there: no suite.')
         ->not->toContain('gh pr ready')
         ->not->toContain('proof_cli.php status');
-    expect(strpos($brief, 'm.actions.json'))->toBeLessThan(strpos($brief, 'After `record`, the last action is `proof_cli.php open`'));
+    expect($brief)->toContain('m.actions.json')->not->toContain('proof_cli.php open')->not->toContain('Your reply names the page path');
 });
 
 it('has the interactive finish step run the CI gate before gh pr ready', function () {
     $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-22T10:00:00Z', 'review' => 'r'];
 
     expect(pipeline_brief(brief_manifest('review-pr', ['gate_ledger' => [$open]]), 'review-pr', '/tmp/m.json'))
-        ->toContain('Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`, then `proof_cli.php status <the path write printed> ready`; show any other answer to the human. After `record`, the last action is `proof_cli.php open`');
+        ->toContain('Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`, then `proof_cli.php status <the path write printed> ready`; show any other answer to the human. Your reply names the page path `write` printed: no page opens by itself (engine.md §The proof store).');
 });
 
 it('makes a recorded red CI a finding of review-pr\'s review and resolve steps, and only then', function () {
@@ -553,7 +553,7 @@ it('prints the return of a handoff step as its command, then record for the stat
 
     expect(pipeline_brief_return('handoff', 'run', 'autoflow', '/tmp/m.json'))->toBe(
         "## Return\n\n"
-        . "Your last act is the `handoff` command, or one `record` command for a status it does not write; only a read-only command your instructions name (`size`, `ui`, the proof page's `open`) comes after it. They are the only way you write the manifest: do not edit the file, and never find it by a glob (`m.before.json` beside it is the dispatcher's snapshot).\n\n"
+        . "Your last act is the `handoff` command, or one `record` command for a status it does not write; only a read-only command your instructions name (`size`, `ui`) comes after it. They are the only way you write the manifest: do not edit the file, and never find it by a glob (`m.before.json` beside it is the dispatcher's snapshot).\n\n"
         . "- `{$cli} handoff /tmp/m.json` (records `continued`, or `halted` with its reason)\n"
         . "- `{$cli} record /tmp/m.json handoff run --status plan-insufficient --reason \"<what the plan lacks>\"`\n"
         . "- `… --status halted --reason \"<why>\"`\n\n"
@@ -613,7 +613,7 @@ it('says what each step passes to record, and describes no JSON', function () {
         ->toContain('- Return `continued`, or `looped-back` when the check fails.');
     expect($brief('autoflow', 'review-pr', 'resolve'))
         ->toContain('- Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` as the finished work stands, the suite line under `checks`, the final open questions and ledger; `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, and a run without `artifacts.proof` gets its page from this write, with `repo` (the GitHub name), `branch` and `pr` from the PR.')
-        ->toContain('After `record`, the last action is `proof_cli.php open` on the path `write` printed (engine.md §The proof store).')
+        ->not->toContain('proof_cli.php open')
         ->not->toContain('When `artifacts.proof` is set');
 });
 
@@ -637,3 +637,13 @@ it('names work-on in no brief', function (string $mode) {
     expect(str_replace(realpath(__DIR__ . '/..'), '<checks>', implode("\n", $lines)))->not->toContain('work-on')
         ->and(str_replace(realpath(__DIR__ . '/..'), '<checks>', $brief))->not->toContain('work-on');
 })->with(['autoflow', 'interactive']);
+
+it('names no open in any step\'s return, in either mode', function () {
+    foreach (['autoflow', 'interactive'] as $mode) {
+        foreach (pipeline_legs() as $leg) {
+            foreach (pipeline_steps($leg, $mode) as $step) {
+                expect(pipeline_brief_return($leg, $step, $mode, '/tmp/m.json'))->not->toContain('`open`');
+            }
+        }
+    }
+});

@@ -91,8 +91,7 @@ and ends, steps 1–3.
   A sibling still in design shows only its spec and plan; merged siblings are not listed, since the run
   is cut from a base that holds them. The note holds nothing back and orders nothing: the run merges
   its base when its brief says so.
-- `launch` runs with `PIPELINE_NO_OPEN=1`: the run is unattended. `done` or a halt: report it and
-  start no workflow.
+- `launch` answers `done` or a halt: report it and start no workflow.
 - Start the workflow `pipeline-autoflow` with `launch`'s JSON as `args`, in the background, **through
   the detour** (pipeline `SKILL.md` §`autoflow` step 3): this reply ends with the detour's background
   wait, and the `Workflow` call is the first tool call of the reply its notice opens. Launch every run
@@ -111,7 +110,7 @@ Commits wanted on a ready PR, after `gh pr ready --undo <P>`:
 
 ```bash
 git -C <worktree> diff origin/<base>...HEAD > <manifest stem>.diff
-PIPELINE_NO_OPEN=1 php ~/.claude/skills/pipeline/checks/dispatch_cli.php launch <manifest> <manifest stem>.diff --from review-pr --decision "<the owner's request, verbatim>"
+php ~/.claude/skills/pipeline/checks/dispatch_cli.php launch <manifest> <manifest stem>.diff --from review-pr --decision "<the owner's request, verbatim>"
 ```
 
 then a new `pipeline-autoflow` workflow with that JSON, through the detour as above.
@@ -137,8 +136,7 @@ and prints a halt instead. A denied `gh pr ready` writes no halt: the manifest a
 the PR stays draft, so the denial goes in the report and the owner runs `gh pr ready` by hand. A
 workflow that errored: `finish <manifest> '{"action":"halt","reason":"<the error>"}'`. A halt
 after `handoff`: the reason into the PR body, as pipeline `engine.md` §Failure policy — what still
-stops (*Bound exhaustion*) says. No proof page opens on a halt in an unattended batch, unlike pipeline
-`SKILL.md`'s attended "opened once": it opens only on a ready PR (§Proof page).
+stops (*Bound exhaustion*) says, and the report names the proof page.
 
 The CI gate (pipeline `engine.md` §The CI gate) runs in one background Bash and wakes you with its
 answer; a run in its gate still counts as working. `fix`: the fix round, as §Launch's *commits wanted*
@@ -200,9 +198,12 @@ A batched `AskUserQuestion` still comes last (Step 5); the line is the last line
 
 ## Proof page
 
-Once, when announcing a ready PR, and only if the run made one. Pass the file, not the directory:
+No page opens by itself (pipeline `engine.md` §The proof store): the owner keeps the store index open, and its tab
+shows what changed. When announcing a ready PR, and only if the run made a page, name its path, the file and not the
+directory: the `proof` `finish` printed, `~/GitProjects/_proofs/<repo>/pr-<P>-<topic>/index.html`. To open one by
+hand:
 ```bash
-php ~/.claude/skills/pipeline/checks/proof_cli.php open ~/GitProjects/_proofs/<repo>/pr-<P>-<topic>/index.html
+php ~/.claude/skills/pipeline/checks/proof_cli.php open <that path>
 ```
 
 ## Teardown

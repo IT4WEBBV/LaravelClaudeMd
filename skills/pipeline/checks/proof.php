@@ -485,7 +485,8 @@ function proof_scan_runs(string $root): array
 }
 
 /**
- * The argv for opening a finished run's page in the desktop browser.
+ * The argv for opening a run's page in the desktop browser, by hand (`proof_cli.php open`): no step opens one
+ * (`../references/engine.md` §The proof store, *No page opens by itself*).
  *
  * An **array**, never a shell string. The page path is derived from repo/branch/PR values that
  * reach this store from a JSON payload, so it is untrusted input: `proof_cli.php` hands this
@@ -495,8 +496,6 @@ function proof_scan_runs(string $root): array
  *
  * Returns null whenever there is nothing to do, which is never an error — opening is cosmetic:
  *  - **no page** — a run that halted before `handoff` has none;
- *  - **suppressed** — `PIPELINE_NO_OPEN` is set to anything but `0`, for headless, CI and
- *    unattended batch runs;
  *  - **no opener** — a platform this does not know how to open on.
  *
  * `PIPELINE_OPEN_CMD` overrides the platform default with an executable that receives the page
@@ -507,11 +506,6 @@ function proof_scan_runs(string $root): array
 function proof_open_argv(?string $path, string $platform = PHP_OS_FAMILY): ?array
 {
     if ($path === null || $path === '' || ! is_file($path)) {
-        return null;
-    }
-
-    $suppress = (string) getenv('PIPELINE_NO_OPEN');
-    if ($suppress !== '' && $suppress !== '0') {
         return null;
     }
 

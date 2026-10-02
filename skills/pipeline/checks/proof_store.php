@@ -14,8 +14,8 @@ require_once __DIR__ . '/suite.php';
 
 /**
  * Files `$payload` merged over the stored run when the merged run passes `$rules`: nothing is written otherwise.
- * Then the shots are ingested, `addedTests` extracted, `run.json` written and the page and the store index
- * rendered. It never prunes.
+ * Then the shots are ingested, `addedTests` extracted, `run.json` written, the page rendered and the store index and
+ * `status.js` written (`proof_store_index()`). It never prunes.
  *
  * @param callable(array): list<string> $rules
  * @param array $defaults keys filled only where the stored run lacks them (`proof_merge_run()`)
@@ -46,9 +46,39 @@ function proof_store_file(array $payload, string $now, callable $rules, array $d
     }
     $run = proof_write_run($dir, $run, $now);
     file_put_contents("{$dir}/index.html", proof_render_run($run));
-    file_put_contents("{$root}/index.html", proof_render_index(proof_scan_runs($root)));
+    $problem = proof_store_index($root);
+    if ($problem !== null) {
+        fwrite(STDERR, "proof: {$problem}\n");
+    }
 
     return ['page' => "{$dir}/index.html", 'problems' => []];
+}
+
+/**
+ * The store index and the `status.js` beside it, rendered from one scan: every write path ends here, so the open
+ * index never polls a `status.js` behind the index (`../references/engine.md` §The proof store, *The open index
+ * tab*). Each file goes through `<file>.<pid>.tmp` and a rename, so neither a poll nor an empty store's reload loads
+ * half a file, and two store writes at once never share a temp file. Creates no directory.
+ *
+ * @return ?string null, or `cannot write <file>`
+ */
+function proof_store_index(string $root): ?string
+{
+    $runs = proof_scan_runs($root);
+    $files = [
+        "{$root}/index.html" => proof_render_index($runs),
+        "{$root}/status.js" => proof_render_status_js($runs),
+    ];
+    foreach ($files as $file => $contents) {
+        $temporary = "{$file}." . getmypid() . '.tmp';
+        if (@file_put_contents($temporary, $contents) === false || ! @rename($temporary, $file)) {
+            @unlink($temporary);
+
+            return "cannot write {$file}";
+        }
+    }
+
+    return null;
 }
 
 /**
@@ -158,8 +188,8 @@ function proof_store_added_tests(array $run): array|string
 }
 
 /**
- * Applies `$change` to the run filed beside `$page`, then re-renders the page and the index of the store the page is
- * in (`dirname($page, 3)`, never `proof_root()`, so a test store and the real one never mix). Not a filing:
+ * Applies `$change` to the run filed beside `$page`, then re-renders the page, and the index and `status.js` of the
+ * store the page is in (`dirname($page, 3)`, never `proof_root()`, so a test store and the real one never mix). Not a filing:
  * `updatedAt` and `revision` stay as they are, since the index's Updated counts filings and the prune pass's grace
  * period measures the last one. Never a warning on stdout: a command that amends still prints one answer.
  *
@@ -181,7 +211,6 @@ function proof_store_amend(string $page, callable $change): ?string
     $files = [
         "{$dir}/run.json" => fn (): string => proof_run_json($run),
         "{$dir}/index.html" => fn (): string => proof_render_run($run),
-        "{$root}/index.html" => fn (): string => proof_render_index(proof_scan_runs($root)),
     ];
     foreach ($files as $file => $contents) {
         if (@file_put_contents($file, $contents()) === false) {
@@ -189,7 +218,7 @@ function proof_store_amend(string $page, callable $change): ?string
         }
     }
 
-    return null;
+    return proof_store_index($root);
 }
 
 /** Marks the run filed beside `$page` with `$status`; the reason is kept only with Halted. Null, or why not. */

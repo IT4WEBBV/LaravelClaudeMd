@@ -363,7 +363,6 @@ it('carries the zoom dialog and the copy script inline', function () {
     expect($html)->toContain("document.execCommand('copy')");
     expect($html)->toContain('showModal()');
     expect($html)->not->toContain('<script src');
-    expect(proof_render_index([]))->not->toContain('<script');
 });
 
 it('escapes the summary, the explainer, the test names and their files', function () {
@@ -489,22 +488,22 @@ it('orders the index by attention: halted, then ready, then the rest, each newes
 });
 
 it('gives each row what the index script needs, its status, its figures, and a copy button only with a summary', function () {
-    $html = proof_render_index([
-        proof_index_entry('pr-5-logs', [
-            'revision' => 3, 'status' => ['state' => 'ready'], 'updatedAt' => '2026-10-01T10:00:00+02:00',
-            'clientSummary' => 'De logboeken lopen mee.',
-            'cost' => [['workflow' => 'wf_a', 'span' => 1200.0, 'steps' => [proof_cost_step('implement:run', 2310000.0)]]],
-        ]),
-        ['dir' => '/store/Asimo/feature-old', 'run' => proof_fixture_run(['repo' => 'Asimo', 'updatedAt' => '2026-09-01T10:00:00+02:00', 'status' => ['state' => 'halted', 'reason' => 'CI red']])],
+    $ready = proof_index_entry('pr-5-logs', [
+        'revision' => 3, 'status' => ['state' => 'ready'], 'updatedAt' => '2026-10-01T10:00:00+02:00',
+        'clientSummary' => 'De logboeken lopen mee.',
+        'cost' => [['workflow' => 'wf_a', 'span' => 1200.0, 'steps' => [proof_cost_step('implement:run', 2310000.0)]]],
     ]);
+    $halted = ['dir' => '/store/Asimo/feature-old', 'run' => proof_fixture_run(['repo' => 'Asimo', 'updatedAt' => '2026-09-01T10:00:00+02:00', 'status' => ['state' => 'halted', 'reason' => 'CI red']])];
+    $html = proof_render_index([$ready, $halted]);
+    $copy = 'summary-' . substr(sha1('Deploy/pr-5-logs'), 0, 8);
 
-    expect($html)->toContain('<tr data-run="Deploy/pr-5-logs" data-repo="Deploy" data-group="1" data-status="ready" data-finished="0" data-updated="2026-10-01T10:00:00+02:00" data-revision="3" data-search="pr #412: product summary grid #412 feature/orders-export de logboeken lopen mee.">');
-    expect($html)->toContain('<tr data-run="Asimo/feature-old" data-repo="Asimo" data-group="0" data-status="halted" data-finished="0" data-updated="2026-09-01T10:00:00+02:00" data-search="pr #412: product summary grid #412 feature/orders-export">');
+    expect($html)->toContain('<tr data-run="Deploy/pr-5-logs" data-repo="Deploy" data-group="1" data-status="ready" data-finished="0" data-updated="2026-10-01T10:00:00+02:00" data-revision="3" data-search="pr #412: product summary grid #412 feature/orders-export de logboeken lopen mee." data-hash="' . proof_index_row_hash($ready) . '">');
+    expect($html)->toContain('<tr data-run="Asimo/feature-old" data-repo="Asimo" data-group="0" data-status="halted" data-finished="0" data-updated="2026-09-01T10:00:00+02:00" data-search="pr #412: product summary grid #412 feature/orders-export" data-hash="' . proof_index_row_hash($halted) . '">');
     expect($html)->toContain('<td data-sort="0"><span class="pill pill-halted">Halted</span> <span class="reason">CI red</span></td>');
     expect($html)->toContain('index.html">PR #412: product summary grid</a><span class="marker"></span></td>');
     expect($html)->toContain('<td class="num" data-sort="1200">20.0 min</td><td class="num" data-sort="2310000">2.31M</td>');
     expect($html)->toContain('<td class="num" data-sort=""></td><td class="num" data-sort=""></td>');
-    expect($html)->toContain('<button type="button" class="copy" data-copy="summary-1">Copy</button><span id="summary-1" lang="nl" hidden>De logboeken lopen mee.</span>');
+    expect($html)->toContain("<button type=\"button\" class=\"copy\" data-copy=\"{$copy}\">Copy</button><span id=\"{$copy}\" lang=\"nl\" hidden>De logboeken lopen mee.</span>");
     expect(substr_count($html, 'class="copy"'))->toBe(1);
     expect($html)->toContain('<select id="repo-filter"><option value="">All repos</option><option value="Asimo">Asimo</option><option value="Deploy">Deploy</option></select>');
 });
@@ -527,7 +526,7 @@ it('carries the index script: seen markers, the remembered filters and toggle, s
     expect($html)->toContain("window.addEventListener('pageshow'");
     expect($html)->toContain('navigator.clipboard.writeText');
     expect($html)->not->toContain('showModal()');
-    expect(proof_render_index([]))->not->toContain('<script')->not->toContain('repo-filter')->toContain('No runs recorded');
+    expect(proof_render_index([]))->not->toContain('id="repo-filter"')->toContain('No runs recorded');
 });
 
 it('renders an index script that parses as JavaScript', function () {
@@ -553,6 +552,61 @@ it('escapes the repo, the title, the reason and the summary in the index', funct
     expect($html)->not->toContain('<b>R</b>');
 });
 
+it('names a row\'s copy target by its run, the same on every render', function () {
+    $entry = proof_index_entry('pr-5-logs', ['clientSummary' => 'De logboeken lopen mee.']);
+    $id = 'summary-' . substr(sha1('Deploy/pr-5-logs'), 0, 8);
+
+    expect(proof_render_index_row($entry))->toBe(proof_render_index_row($entry))
+        ->toContain("data-copy=\"{$id}\"")->toContain("<span id=\"{$id}\" lang=\"nl\" hidden>");
+    expect(proof_render_index_row(proof_index_entry('pr-6-other', ['clientSummary' => 'x'])))->not->toContain($id);
+});
+
+it('renders status.js with each run\'s key, status, revision, hash and row, in the attention order', function () {
+    $ready = proof_index_entry('pr-5-logs', ['revision' => 3, 'status' => ['state' => 'ready'], 'updatedAt' => '2026-10-01T10:00:00+02:00']);
+    $halted = proof_index_entry('pr-6-old', ['status' => ['state' => 'halted', 'reason' => 'CI red'], 'updatedAt' => '2026-09-01T10:00:00+02:00']);
+
+    $runs = proof_test_status_runs(proof_render_status_js([$ready, $halted]));
+
+    expect(array_column($runs, 'key'))->toBe(['Deploy/pr-6-old', 'Deploy/pr-5-logs']);
+    expect($runs[1])->toBe([
+        'key' => 'Deploy/pr-5-logs',
+        'status' => 'ready',
+        'revision' => 3,
+        'hash' => proof_index_row_hash($ready),
+        'row' => proof_render_index_row($ready),
+    ]);
+    // A run filed before revisions existed has none, and gets no marker.
+    expect($runs[0])->toMatchArray(['status' => 'halted', 'revision' => null]);
+    expect(proof_index_row_hash($ready))->toMatch('/^[0-9a-f]{12}$/');
+    expect($runs[1]['row'])->toContain(' data-hash="' . proof_index_row_hash($ready) . '">');
+    expect(proof_test_status_runs(proof_render_status_js([])))->toBe([]);
+});
+
+it('changes a run\'s hash when its status, revision or cost changes, and only then', function () {
+    $entry = proof_index_entry('pr-5-logs', ['revision' => 1, 'status' => ['state' => 'running']]);
+    $hash = proof_index_row_hash($entry);
+    $with = fn (array $changes): string => proof_index_row_hash(['dir' => $entry['dir'], 'run' => [...$entry['run'], ...$changes]]);
+
+    expect(proof_index_row_hash($entry))->toBe($hash);
+    expect($with(['status' => ['state' => 'halted', 'reason' => 'CI red']]))->not->toBe($hash);
+    expect($with(['revision' => 2]))->not->toBe($hash);
+    expect($with(['cost' => [['workflow' => 'wf_a', 'span' => 60.0, 'steps' => []]]]))->not->toBe($hash);
+    expect(proof_index_row_hash(['dir' => '/store/Asimo/pr-5-logs', 'run' => $entry['run']]))->not->toBe($hash);
+});
+
+it('keeps status.js one valid script whatever a title or summary holds', function () {
+    $nasty = "</script><script>alert(1)</script> \"quoted\" it's \u{2028}line\u{2029}para";
+    $js = proof_render_status_js([proof_index_entry('pr-5-logs', ['title' => $nasty, 'clientSummary' => $nasty])]);
+    $file = sys_get_temp_dir() . '/proof-status-' . uniqid() . '.js';
+    file_put_contents($file, $js);
+    exec('node --check ' . escapeshellarg($file) . ' 2>&1', $output, $code);
+    unlink($file);
+
+    expect($code)->toBe(0, implode("\n", $output));
+    expect($js)->not->toContain('</script>')->not->toContain("\u{2028}")->not->toContain("\u{2029}");
+    expect(proof_test_status_runs($js)[0]['row'])->toContain('&lt;/script&gt;')->not->toContain('<script>');
+});
+
 it('puts the repo and status filters, the search and the toggle with its count above the table', function () {
     $html = proof_render_index([
         proof_index_entry('pr-1-merged', ['status' => ['state' => 'merged']]),
@@ -564,26 +618,25 @@ it('puts the repo and status filters, the search and the toggle with its count a
         . "<label>Repo <select id=\"repo-filter\"><option value=\"\">All repos</option><option value=\"Asimo\">Asimo</option><option value=\"Deploy\">Deploy</option></select></label>\n"
         . "<label>Status <select id=\"status-filter\"><option value=\"\">All statuses</option><option value=\"running\">Running</option><option value=\"halted\">Halted</option><option value=\"ready\">Ready for review</option><option value=\"merged\">Merged</option><option value=\"closed\">Closed</option></select></label>\n"
         . "<input type=\"search\" id=\"search\" placeholder=\"Title, PR, branch or summary\" aria-label=\"Search runs\">\n"
-        . "<label><input type=\"checkbox\" id=\"show-finished\"> Show merged and closed (2)</label>\n"
+        . "<label><input type=\"checkbox\" id=\"show-finished\"> Show merged and closed (<span id=\"finished-count\">2</span>)</label>\n"
         . "</div>\n");
     expect(strpos($html, 'class="controls"'))->toBeLessThan(strpos($html, '<table id="runs">'));
 });
 
 it('gives each row its status, whether it is finished, and the lower-cased text the search matches', function () {
-    $html = proof_render_index([
-        proof_index_entry('pr-5-logs', [
-            'title' => 'PR #5: Logs That Follow', 'pr' => 5, 'branch' => 'feature/Logs', 'status' => ['state' => 'merged'],
-            'clientSummary' => 'De Logboeken lopen mee.', 'updatedAt' => '2026-10-01T10:00:00+02:00',
-        ]),
-        proof_index_entry('feature-halted', [
-            'title' => null, 'pr' => null, 'prState' => null, 'branch' => 'feature/halted',
-            'status' => ['state' => 'halted', 'reason' => 'r'], 'updatedAt' => '2026-09-01T10:00:00+02:00',
-        ]),
+    $merged = proof_index_entry('pr-5-logs', [
+        'title' => 'PR #5: Logs That Follow', 'pr' => 5, 'branch' => 'feature/Logs', 'status' => ['state' => 'merged'],
+        'clientSummary' => 'De Logboeken lopen mee.', 'updatedAt' => '2026-10-01T10:00:00+02:00',
     ]);
+    $halted = proof_index_entry('feature-halted', [
+        'title' => null, 'pr' => null, 'prState' => null, 'branch' => 'feature/halted',
+        'status' => ['state' => 'halted', 'reason' => 'r'], 'updatedAt' => '2026-09-01T10:00:00+02:00',
+    ]);
+    $html = proof_render_index([$merged, $halted]);
 
-    expect($html)->toContain('<tr data-run="Deploy/pr-5-logs" data-repo="Deploy" data-group="2" data-status="merged" data-finished="1" data-updated="2026-10-01T10:00:00+02:00" data-search="pr #5: logs that follow #5 feature/logs de logboeken lopen mee.">');
+    expect($html)->toContain('<tr data-run="Deploy/pr-5-logs" data-repo="Deploy" data-group="2" data-status="merged" data-finished="1" data-updated="2026-10-01T10:00:00+02:00" data-search="pr #5: logs that follow #5 feature/logs de logboeken lopen mee." data-hash="' . proof_index_row_hash($merged) . '">');
     // Without a title the run is named by its branch, which the search text then holds once.
-    expect($html)->toContain('<tr data-run="Deploy/feature-halted" data-repo="Deploy" data-group="0" data-status="halted" data-finished="0" data-updated="2026-09-01T10:00:00+02:00" data-search="feature/halted">');
+    expect($html)->toContain('<tr data-run="Deploy/feature-halted" data-repo="Deploy" data-group="0" data-status="halted" data-finished="0" data-updated="2026-09-01T10:00:00+02:00" data-search="feature/halted" data-hash="' . proof_index_row_hash($halted) . '">');
 });
 
 it('makes every column but Summary sortable, each with its type and the direction of a first click', function () {
@@ -636,7 +689,7 @@ it('wraps the table so it scrolls on its own, and renders the no-match line hidd
     expect($html)->toContain("<div class=\"table-wrap\">\n<table id=\"runs\">\n<thead>");
     expect($html)->toContain("</table>\n</div>\n<p id=\"no-match\" class=\"meta\" hidden>No runs match.</p>\n<script>");
     expect($html)->toContain('.table-wrap { overflow-x:auto; }')->toContain('.controls {')->not->toContain('.filter {');
-    expect(proof_render_index([]))->not->toContain('class="controls"')->not->toContain('no-match')->not->toContain('<script');
+    expect(proof_render_index([]))->not->toContain('class="controls"')->not->toContain('id="no-match"');
 });
 
 it('opens the run page with one link back to the store index, relative, above the title', function () {
@@ -673,4 +726,50 @@ it('resolves the link back to the index of the store the page is filed in', func
     expect(is_file(dirname($page) . '/../../index.html'))->toBeTrue();
     expect(realpath(dirname($page) . '/../../index.html'))->toBe(realpath(dirname($page, 3) . '/index.html'));
     expect(dirname(proof_run_dir('/store', 'Deploy', 'feature/logs', 5), 2))->toBe('/store');
+});
+
+it('names the index tab Proofs and gives it a favicon link with the four icons to pick from', function () {
+    $html = proof_render_index([proof_index_entry('pr-5-logs', [])]);
+    $icons = proof_index_icons();
+
+    expect(array_keys($icons))->toBe(['none', 'halted', 'ready', 'unread']);
+    foreach ($icons as $icon) {
+        expect($icon)->toStartWith('data:image/svg+xml,')->not->toContain('"');
+    }
+    expect(rawurldecode($icons['halted']))->toContain("fill='#dc2626'");
+    expect(rawurldecode($icons['ready']))->toContain("fill='#16a34a'");
+    expect(rawurldecode($icons['unread']))->toContain("fill='#2563eb'");
+    expect(rawurldecode($icons['none']))->toContain("fill='none'")->toContain("stroke='#71717a'");
+    expect($html)->toContain("<title>Proofs</title>\n")->toContain('<h1>Pipeline proof store</h1>');
+    expect($html)->toContain('<link rel="icon" id="favicon" href="' . proof_e($icons['none']) . '" data-none="' . proof_e($icons['none'])
+        . '" data-halted="' . proof_e($icons['halted']) . '" data-ready="' . proof_e($icons['ready']) . '" data-unread="' . proof_e($icons['unread']) . "\">\n");
+    expect(strpos($html, 'id="favicon"'))->toBeLessThan(strpos($html, '</head>'));
+});
+
+it('renders an empty store with the favicon and a script that only polls', function () {
+    $html = proof_render_index([]);
+
+    expect($html)->toContain('No runs recorded')->toContain('id="favicon"')->toContain("<title>Proofs</title>")
+        ->toContain("<script>\n")->toContain("'status.js?t=' + Date.now()");
+    expect($html)->not->toContain('class="controls"')->not->toContain('id="no-match"')->not->toContain('<table');
+});
+
+it('carries the poll and the tab signal in the index script', function () {
+    $script = proof_render_index_script();
+
+    expect($script)->toContain("'status.js?t=' + Date.now()")
+        ->toContain('setInterval(check, 30000)')
+        ->toContain("document.addEventListener('visibilitychange'")
+        ->toContain("window.addEventListener('focus', check)")
+        ->toContain('refresh(); check();')
+        ->toContain("document.title = unseen.length ? '(' + unseen.length + ') Proofs' : 'Proofs'")
+        ->toContain("getElementById('favicon')")
+        ->toContain("has('halted') ? 'halted' : has('ready') ? 'ready' : unseen.length ? 'unread' : 'none'")
+        ->toContain('current.dataset.hash === entry.hash')
+        ->toContain("createElement('template')")
+        ->toContain('function unread(row)')
+        ->toContain("if (!storage || !revision) { return ''; }")
+        ->toContain("row.dataset.finished === '0' && unread(row) !== ''")
+        ->toContain("getElementById('finished-count')")
+        ->toContain('location.reload()');
 });
