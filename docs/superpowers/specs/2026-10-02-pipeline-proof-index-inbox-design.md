@@ -290,6 +290,20 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
     prune pass only removes finished or PR-less runs, so this needs a new run on the same branch and PR; not
     addressed here.
 
+Added by the plan step:
+
+13. **Does any doc outside engine.md name the old markers?** `README.md` §Proofs app says Chrome is needed *because
+    the index's New/Updated markers read what a run page stored in `localStorage`*. It changes to *the index's unread
+    marks*; the reason for Chrome stays. Nothing else outside the earlier specs and plans names them, and those stay
+    as records.
+14. **Does `proof_cli_refresh()`'s return value carry the raised `attention`?** No. It returns the refreshed run for
+    the prune decision only (`proof_should_prune()` reads `pr`, the status and `updatedAt`), and the amend it makes
+    raises the stored count through `proof_store_amend()`. Applying `proof_count_attention()` there as well would be
+    a second call site with no reader.
+15. **When does `engine.md` gain the `attention` row?** With the store change, in the same task: `LockStepTest`
+    requires every key in `PROOF_STORE_KEYS` to appear in §The proof store, so adding the key without the row turns
+    the suite red. The index and tab paragraphs follow in the docs task.
+
 ## Relation to other work
 
 - **#142, #151, #154** (merged): the seen marks, the markers, the attention order, the filters, the polled
