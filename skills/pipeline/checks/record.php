@@ -204,7 +204,7 @@ function pipeline_record_resolve(array $manifest, string $leg, string $status, a
     return [...$manifest, 'gate_ledger' => $ledger];
 }
 
-/** @return list<array{claim: string, disposition: string, note: string}>|string the actions, or why the file does not hold them */
+/** @return list<array{claim: string, disposition: string, note: string, kind?: string}>|string the actions, or why the file does not hold them */
 function pipeline_record_actions(string $json): array|string
 {
     $actions = json_decode($json, true);
@@ -221,14 +221,15 @@ function pipeline_record_actions(string $json): array|string
     return $actions;
 }
 
-/** What is wrong with one action, as the words after `actions[n]`, or null. */
+/** What is wrong with one action, as the words after `actions[n]`, or null. An `open-question` carries a `kind` (`../references/engine.md` §Open questions); no other action does. */
 function pipeline_record_action_problem(mixed $action): ?string
 {
-    $keys = ['claim', 'disposition', 'note'];
     $ticked = fn (array $names) => implode(', ', array_map(fn (int|string $name) => "`{$name}`", $names));
     if (! is_array($action)) {
         return ' is not an object';
     }
+    $open = ($action['disposition'] ?? null) === ActionDisposition::OpenQuestion->value;
+    $keys = ['claim', 'disposition', 'note', ...($open ? ['kind'] : [])];
     $unknown = array_values(array_diff(array_keys($action), $keys));
     $missing = array_values(array_diff($keys, array_keys($action)));
 
@@ -239,6 +240,7 @@ function pipeline_record_action_problem(mixed $action): ?string
         ! is_string($action['disposition']) || ActionDisposition::tryFrom($action['disposition']) === null
             => ': `disposition` is not one of ' . implode(', ', array_column(ActionDisposition::cases(), 'value')),
         ! is_string($action['note']) => ': `note` is not a string',
+        $open && (! is_string($action['kind']) || QuestionKind::tryFrom($action['kind']) === null) => ': `kind` is not one of ' . QuestionKind::listed(),
         default => null,
     };
 }

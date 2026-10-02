@@ -83,7 +83,8 @@ the PR.
 | `review` | the reviewer's text, verbatim — the one named exception to *Pointers, never content* above |
 | `annotations` | the content triggers that fired (`package`, `migration`, `auth`) — facts, not findings |
 | `actions[].claim` | the point from the review the resolve step or human acted on |
-| `actions[].disposition` | `integrated` (edited and committed) \| `recorded` (logged, no edit) \| `open-question` (carried verbatim into the PR body) |
+| `actions[].disposition` | `integrated` (edited and committed) \| `recorded` (logged, no edit) \| `open-question` (carried verbatim into the PR body with its kind) |
+| `actions[].kind` | **only on an `open-question`, which must carry it:** `blocking` (a fork: the answer changes this PR's code) \| `follow-up` (work outside this PR) \| `remark` (a note on a choice already made); `blocking` when unsure. `record` refuses an open question without one and a `kind` on any other action; an open question written before kinds reads as `blocking` (`engine.md` §Open questions) |
 | `actions[].note` | what was done, or why it was not |
 | `issue_links` | **`pr-review` entries only** — the closing-link reconciliation, one entry per related issue: `{"issue": 1926, "outcome": "closes" \| "stays-open" \| "dropped-but-closes"}` (`engine.md` §Closing links). Absent on a run with no linked issue |
 | `reviewed_sha` | **`pr-review` entries only** — the commit the review step reviewed, `git rev-parse HEAD`, 40 hex characters. Required on the entry a `review-pr` review step adds; never changed after (a resolve step that touches it halts). A later review of the PR is scoped to what changed since the newest `continued` one (`engine.md` §Scoped re-review) |
