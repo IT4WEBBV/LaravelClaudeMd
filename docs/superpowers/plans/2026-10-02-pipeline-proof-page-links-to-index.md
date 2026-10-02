@@ -53,8 +53,8 @@ the plan argues from it, and its `## Assumptions` 8–9 are the answers this pla
 
 - Modify `skills/pipeline/checks/proof_render.php`: `proof_render_styles()` (the `.back` rules after `.meta code`),
   `proof_render_run()` (the `$body` assignment that starts with `'<h1>'`, currently line 512).
-- Modify `skills/pipeline/checks/tests/ProofRenderTest.php`: three new cases appended at the end of the file (where
-  `proof_current_run()`, defined at line 271, is already in scope).
+- Modify `skills/pipeline/checks/tests/ProofRenderTest.php`: four new cases appended at the end of the file (where
+  `proof_current_run()`, defined at line 271, is already in scope, and `proof_test_page()` comes from `Pest.php`).
 - Modify `skills/pipeline/references/engine.md` §The proof store: the paragraph starting
   `The page opens with the **client summary**` (currently line 916).
 
@@ -110,14 +110,27 @@ it('gives the store index no link back, since it is the root', function () {
     expect($html)->not->toContain('class="back"');
     expect($html)->not->toContain('All proofs');
 });
+
+it('resolves the link back to the index of the store the page is filed in', function () {
+    $page = proof_test_page();
+
+    expect(proof_store_amend($page, fn (array $run): array => $run))->toBeNull();
+    expect(is_file(dirname($page) . '/../../index.html'))->toBeTrue();
+    expect(realpath(dirname($page) . '/../../index.html'))->toBe(realpath(dirname($page, 3) . '/index.html'));
+    expect(dirname(proof_run_dir('/store', 'Deploy', 'feature/logs', 5), 2))->toBe('/store');
+});
 ```
+
+The fourth case pins the literal `../../` to the depth the store writes at: `proof_store_amend()` renders the store
+index at `dirname($page, 3)`, and `proof_run_dir()` builds `<root>/<repo>/<run>`. A change to either depth fails it,
+where the three markup cases would still pass.
 
 - [ ] **Step 2: Run the tests to verify the first two fail**
 
 Run: `./vendor/bin/pest -c skills/pipeline/checks/phpunit.xml --test-directory=skills/pipeline/checks/tests --filter "link back"`
 Expected: 2 FAIL (`opens the run page with one link back…` and `gives a run filed before schema 2…`, each on the
-missing `<nav class="back"…>` string); `gives the store index no link back` PASSES already (it guards the index
-against the change).
+missing `<nav class="back"…>` string); `gives the store index no link back` and `resolves the link back to the index…`
+PASS already (they guard the index and the store's depth against the change).
 
 - [ ] **Step 3: Add the style**
 
@@ -228,6 +241,7 @@ dialog opened.
 
 - [ ] **Step 5: Clean up**
 
-Stop the `php -S` server and `rm -rf` the temp dir. Confirm the live store was not written:
+Stop the `php -S` server and remove the `mktemp` dir itself, not only `_proofs` inside it:
+`rm -rf "$(dirname "$COPY")"`. Confirm the live store was not written:
 `grep -l 'class="back"' ~/GitProjects/_proofs/*/*/index.html` prints nothing (no filing has rendered with the new
 code before the merge).
