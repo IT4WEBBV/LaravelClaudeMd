@@ -363,7 +363,6 @@ it('carries the zoom dialog and the copy script inline', function () {
     expect($html)->toContain("document.execCommand('copy')");
     expect($html)->toContain('showModal()');
     expect($html)->not->toContain('<script src');
-    expect(proof_render_index([]))->not->toContain('<script');
 });
 
 it('escapes the summary, the explainer, the test names and their files', function () {
@@ -527,7 +526,7 @@ it('carries the index script: seen markers, the remembered filters and toggle, s
     expect($html)->toContain("window.addEventListener('pageshow'");
     expect($html)->toContain('navigator.clipboard.writeText');
     expect($html)->not->toContain('showModal()');
-    expect(proof_render_index([]))->not->toContain('<script')->not->toContain('repo-filter')->toContain('No runs recorded');
+    expect(proof_render_index([]))->not->toContain('id="repo-filter"')->toContain('No runs recorded');
 });
 
 it('renders an index script that parses as JavaScript', function () {
@@ -619,7 +618,7 @@ it('puts the repo and status filters, the search and the toggle with its count a
         . "<label>Repo <select id=\"repo-filter\"><option value=\"\">All repos</option><option value=\"Asimo\">Asimo</option><option value=\"Deploy\">Deploy</option></select></label>\n"
         . "<label>Status <select id=\"status-filter\"><option value=\"\">All statuses</option><option value=\"running\">Running</option><option value=\"halted\">Halted</option><option value=\"ready\">Ready for review</option><option value=\"merged\">Merged</option><option value=\"closed\">Closed</option></select></label>\n"
         . "<input type=\"search\" id=\"search\" placeholder=\"Title, PR, branch or summary\" aria-label=\"Search runs\">\n"
-        . "<label><input type=\"checkbox\" id=\"show-finished\"> Show merged and closed (2)</label>\n"
+        . "<label><input type=\"checkbox\" id=\"show-finished\"> Show merged and closed (<span id=\"finished-count\">2</span>)</label>\n"
         . "</div>\n");
     expect(strpos($html, 'class="controls"'))->toBeLessThan(strpos($html, '<table id="runs">'));
 });
@@ -690,7 +689,7 @@ it('wraps the table so it scrolls on its own, and renders the no-match line hidd
     expect($html)->toContain("<div class=\"table-wrap\">\n<table id=\"runs\">\n<thead>");
     expect($html)->toContain("</table>\n</div>\n<p id=\"no-match\" class=\"meta\" hidden>No runs match.</p>\n<script>");
     expect($html)->toContain('.table-wrap { overflow-x:auto; }')->toContain('.controls {')->not->toContain('.filter {');
-    expect(proof_render_index([]))->not->toContain('class="controls"')->not->toContain('no-match')->not->toContain('<script');
+    expect(proof_render_index([]))->not->toContain('class="controls"')->not->toContain('id="no-match"');
 });
 
 it('opens the run page with one link back to the store index, relative, above the title', function () {
@@ -727,4 +726,50 @@ it('resolves the link back to the index of the store the page is filed in', func
     expect(is_file(dirname($page) . '/../../index.html'))->toBeTrue();
     expect(realpath(dirname($page) . '/../../index.html'))->toBe(realpath(dirname($page, 3) . '/index.html'));
     expect(dirname(proof_run_dir('/store', 'Deploy', 'feature/logs', 5), 2))->toBe('/store');
+});
+
+it('names the index tab Proofs and gives it a favicon link with the four icons to pick from', function () {
+    $html = proof_render_index([proof_index_entry('pr-5-logs', [])]);
+    $icons = proof_index_icons();
+
+    expect(array_keys($icons))->toBe(['none', 'halted', 'ready', 'unread']);
+    foreach ($icons as $icon) {
+        expect($icon)->toStartWith('data:image/svg+xml,')->not->toContain('"');
+    }
+    expect(rawurldecode($icons['halted']))->toContain("fill='#dc2626'");
+    expect(rawurldecode($icons['ready']))->toContain("fill='#16a34a'");
+    expect(rawurldecode($icons['unread']))->toContain("fill='#2563eb'");
+    expect(rawurldecode($icons['none']))->toContain("fill='none'")->toContain("stroke='#71717a'");
+    expect($html)->toContain("<title>Proofs</title>\n")->toContain('<h1>Pipeline proof store</h1>');
+    expect($html)->toContain('<link rel="icon" id="favicon" href="' . proof_e($icons['none']) . '" data-none="' . proof_e($icons['none'])
+        . '" data-halted="' . proof_e($icons['halted']) . '" data-ready="' . proof_e($icons['ready']) . '" data-unread="' . proof_e($icons['unread']) . "\">\n");
+    expect(strpos($html, 'id="favicon"'))->toBeLessThan(strpos($html, '</head>'));
+});
+
+it('renders an empty store with the favicon and a script that only polls', function () {
+    $html = proof_render_index([]);
+
+    expect($html)->toContain('No runs recorded')->toContain('id="favicon"')->toContain("<title>Proofs</title>")
+        ->toContain("<script>\n")->toContain("'status.js?t=' + Date.now()");
+    expect($html)->not->toContain('class="controls"')->not->toContain('id="no-match"')->not->toContain('<table');
+});
+
+it('carries the poll and the tab signal in the index script', function () {
+    $script = proof_render_index_script();
+
+    expect($script)->toContain("'status.js?t=' + Date.now()")
+        ->toContain('setInterval(check, 30000)')
+        ->toContain("document.addEventListener('visibilitychange'")
+        ->toContain("window.addEventListener('focus', check)")
+        ->toContain('refresh(); check();')
+        ->toContain("document.title = unseen.length ? '(' + unseen.length + ') Proofs' : 'Proofs'")
+        ->toContain("getElementById('favicon')")
+        ->toContain("has('halted') ? 'halted' : has('ready') ? 'ready' : unseen.length ? 'unread' : 'none'")
+        ->toContain('current.dataset.hash === entry.hash')
+        ->toContain("createElement('template')")
+        ->toContain('function unread(row)')
+        ->toContain("if (!storage || !revision) { return ''; }")
+        ->toContain("row.dataset.finished === '0' && unread(row) !== ''")
+        ->toContain("getElementById('finished-count')")
+        ->toContain('location.reload()');
 });

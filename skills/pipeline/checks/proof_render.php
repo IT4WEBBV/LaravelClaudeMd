@@ -563,7 +563,8 @@ function proof_render_run(array $run): string
  * The index is the join from a PR back to its page — the PR body deliberately carries no
  * local path, so this is how a run is found again.
  *
- * Links are relative to the store root, so the index works when opened over `file://`.
+ * Links are relative to the store root, so the index works when opened over `file://`. Left open, it shows in its
+ * tab what changed, from the `status.js` beside it (`proof_render_index_script()`); an empty store's page polls too.
  *
  * @param list<array{dir: string, run: array}> $runs in any order: it is ordered here
  */
@@ -575,17 +576,47 @@ function proof_render_index(array $runs): string
         : proof_render_index_controls($runs)
             . "<div class=\"table-wrap\">\n<table id=\"runs\">\n" . proof_render_index_head() . "<tbody>\n"
             . implode('', array_map(proof_render_index_row(...), $runs))
-            . "</tbody>\n</table>\n</div>\n<p id=\"no-match\" class=\"meta\" hidden>No runs match.</p>\n"
-            . "<script>\n" . proof_render_copy_script() . "\n" . proof_render_index_script() . "\n</script>\n";
+            . "</tbody>\n</table>\n</div>\n<p id=\"no-match\" class=\"meta\" hidden>No runs match.</p>\n";
+    $script = "<script>\n" . proof_render_copy_script() . "\n" . proof_render_index_script() . "\n</script>\n";
 
     $styles = proof_render_styles();
 
     return "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
         . "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-        . "<title>Pipeline proof store</title>\n<style>\n{$styles}\n</style>\n</head>\n<body class=\"index\">\n"
+        . "<title>Proofs</title>\n" . proof_render_favicon() . "<style>\n{$styles}\n</style>\n</head>\n<body class=\"index\">\n"
         . "<h1>Pipeline proof store</h1>\n"
         . $body
+        . $script
         . "</body>\n</html>\n";
+}
+
+/**
+ * The tab's icons, one circle each in a 16×16 SVG data URI: red when an unread run is halted, green when one is ready
+ * to merge, blue when one is new or updated, and a grey ring when nothing is unread, so a pinned tab always has an
+ * icon and never keeps a stale dot. Defined here, only picked by the script.
+ *
+ * @return array{none: string, halted: string, ready: string, unread: string}
+ */
+function proof_index_icons(): array
+{
+    $svg = fn (string $circle): string => 'data:image/svg+xml,' . rawurlencode("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>{$circle}</svg>");
+    $dot = fn (string $fill): string => $svg("<circle cx='8' cy='8' r='7' fill='{$fill}'/>");
+
+    return [
+        'none' => $svg("<circle cx='8' cy='8' r='5.5' fill='none' stroke='#71717a' stroke-width='2'/>"),
+        'halted' => $dot('#dc2626'),
+        'ready' => $dot('#16a34a'),
+        'unread' => $dot('#2563eb'),
+    ];
+}
+
+/** The favicon link: the ring first, every icon in a `data-` attribute for the script to pick. */
+function proof_render_favicon(): string
+{
+    $icons = proof_index_icons();
+    $data = implode('', array_map(fn (string $name, string $uri): string => " data-{$name}=\"" . proof_e($uri) . '"', array_keys($icons), $icons));
+
+    return '<link rel="icon" id="favicon" href="' . proof_e($icons['none']) . "\"{$data}>\n";
 }
 
 /**
@@ -627,7 +658,7 @@ function proof_render_index_controls(array $runs): string
         . '<label>Repo <select id="repo-filter"><option value="">All repos</option>' . proof_render_options(array_combine($repos, $repos)) . "</select></label>\n"
         . '<label>Status <select id="status-filter"><option value="">All statuses</option>' . proof_render_options($statuses) . "</select></label>\n"
         . "<input type=\"search\" id=\"search\" placeholder=\"Title, PR, branch or summary\" aria-label=\"Search runs\">\n"
-        . "<label><input type=\"checkbox\" id=\"show-finished\"> Show merged and closed ({$finished})</label>\n"
+        . "<label><input type=\"checkbox\" id=\"show-finished\"> Show merged and closed (<span id=\"finished-count\">{$finished}</span>)</label>\n"
         . "</div>\n";
 }
 
@@ -803,33 +834,32 @@ function proof_index_search(array $run): string
 }
 
 /**
- * The index's script, on `DOMContentLoaded` and again on a `pageshow` from the back/forward cache (Back from a page is
- * how the index is reached again):
+ * The index's script. With a table, on `DOMContentLoaded` and again on a `pageshow` from the back/forward cache (Back
+ * from a page is how the index is reached again):
  *  - each Updated `<time>` in the browser's time, `dd-mm HH:MM`, the full `YYYY-MM-DD HH:MM:SS` on hover;
- *  - per row with a revision `New` when this browser never opened it, `Updated` when it was filed again since; a seen
- *    Ready row drops among the rest (its rank);
+ *  - per row with a revision `New` when this browser never opened it, `Updated` when it was filed again since
+ *    (`unread()`, the one rule #160 replaces); a seen Ready row drops among the rest (its rank);
  *  - the rows in the attention order (rank, then newest first), or by the column whose header was clicked: its first
  *    direction, reversed by a second click, empty keys last either way, ties in the attention order;
  *  - a row shows when the repo filter, the status filter (or, under All statuses, the toggle) and every search term
- *    let it; `#no-match` when none does.
+ *    let it; `#no-match` when none does;
+ *  - the tab (`tab()`): the title counts the unread runs that are not merged or closed, whatever the filters show
+ *    (`(2) Proofs`, else `Proofs`), and the favicon is the link's halted, ready, unread or none icon, in that order.
+ * It polls `status.js` every 30 seconds, when the tab becomes visible, when the window gains focus and after a
+ * `pageshow` from the cache, through a script tag, since `fetch()` is refused over `file://` (`poll()`): a row whose
+ * hash changed is replaced, a new run's row inserted and a pruned run's removed, then every row is marked, ordered and
+ * filtered again and the tab updated (`apply()`); the page is never reloaded. A failed load changes nothing. Without a
+ * table (an empty store) it only polls, and reloads once `status.js` names a run.
  * The repo filter, the status filter and the toggle are remembered (`proof:repo`, `proof:status`, `proof:finished`);
- * the search and the sort are not. Without `localStorage` (a private window, blocked site data) no row is marked and
- * every control works unremembered.
+ * the search and the sort are not. Without `localStorage` (a private window, blocked site data) no row is marked,
+ * nothing is unread, and every control works unremembered.
  */
 function proof_render_index_script(): string
 {
     return <<<'JS'
 (function () {
+  var favicon = document.getElementById('favicon');
   var table = document.getElementById('runs');
-  var body = table.tBodies[0];
-  var headers = Array.prototype.slice.call(table.tHead.rows[0].cells);
-  var rows = Array.prototype.slice.call(body.rows);
-  var repo = document.getElementById('repo-filter');
-  var status = document.getElementById('status-filter');
-  var search = document.getElementById('search');
-  var finished = document.getElementById('show-finished');
-  var empty = document.getElementById('no-match');
-  var sorted = null;
   var storage = null;
   try {
     storage = window.localStorage;
@@ -837,6 +867,40 @@ function proof_render_index_script(): string
   } catch (error) {
     storage = null;
   }
+  function poll(apply) {
+    window.proofStatus = undefined;
+    var script = document.createElement('script');
+    script.onload = function () {
+      script.remove();
+      var answer = window.proofStatus;
+      if (answer && Array.isArray(answer.runs)) { apply(answer); }
+    };
+    script.onerror = function () { script.remove(); };
+    script.src = 'status.js?t=' + Date.now();
+    document.head.appendChild(script);
+  }
+  function watch(apply) {
+    function check() { poll(apply); }
+    setInterval(check, 30000);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { check(); } });
+    window.addEventListener('focus', check);
+    return check;
+  }
+  if (!table) {
+    watch(function (answer) { if (answer.runs.length) { location.reload(); } });
+    return;
+  }
+  var body = table.tBodies[0];
+  var headers = Array.prototype.slice.call(table.tHead.rows[0].cells);
+  var rows = Array.prototype.slice.call(body.rows);
+  var repo = document.getElementById('repo-filter');
+  var status = document.getElementById('status-filter');
+  var search = document.getElementById('search');
+  var finished = document.getElementById('show-finished');
+  var finishedCount = document.getElementById('finished-count');
+  var empty = document.getElementById('no-match');
+  var template = document.createElement('template');
+  var sorted = null;
   function remember(key, value) {
     try { if (storage) { storage.setItem(key, value); } } catch (error) {}
   }
@@ -852,12 +916,16 @@ function proof_render_index_script(): string
     time.textContent = pad(date.getDate()) + '-' + pad(date.getMonth() + 1) + ' ' + clock;
     time.title = date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + clock + ':' + pad(date.getSeconds());
   }
-  function mark(row) {
+  function unread(row) {
     var revision = Number(row.dataset.revision || 0);
-    var seen = revision ? storage.getItem('seen:' + row.dataset.run) : null;
-    var state = !revision ? '' : seen === null ? 'New' : Number(seen) < revision ? 'Updated' : 'seen';
-    row.querySelector('.marker').textContent = state === 'seen' ? '' : state;
-    row.dataset.rank = state === 'seen' && row.dataset.group === '1' ? '2' : row.dataset.group;
+    if (!storage || !revision) { return ''; }
+    var seen = storage.getItem('seen:' + row.dataset.run);
+    return seen === null ? 'New' : Number(seen) < revision ? 'Updated' : '';
+  }
+  function mark(row) {
+    var state = unread(row);
+    row.querySelector('.marker').textContent = state;
+    row.dataset.rank = state === '' && row.dataset.revision && row.dataset.group === '1' ? '2' : row.dataset.group;
   }
   function attention(a, b) {
     return (Number(a.dataset.rank || a.dataset.group) - Number(b.dataset.rank || b.dataset.group))
@@ -896,6 +964,49 @@ function proof_render_index_script(): string
     });
     empty.hidden = shown > 0;
   }
+  function tab() {
+    var unseen = rows.filter(function (row) { return row.dataset.finished === '0' && unread(row) !== ''; });
+    function has(state) { return unseen.some(function (row) { return row.dataset.status === state; }); }
+    var icon = favicon.dataset[has('halted') ? 'halted' : has('ready') ? 'ready' : unseen.length ? 'unread' : 'none'];
+    document.title = unseen.length ? '(' + unseen.length + ') Proofs' : 'Proofs';
+    if (favicon.getAttribute('href') === icon) { return; }
+    var next = favicon.cloneNode();
+    next.setAttribute('href', icon);
+    favicon.replaceWith(next);
+    favicon = next;
+  }
+  function adopt(html) {
+    template.innerHTML = html;
+    var row = template.content.firstElementChild;
+    row.querySelectorAll('time[datetime]').forEach(local);
+    return row;
+  }
+  function apply(answer) {
+    var present = {};
+    answer.runs.forEach(function (entry) {
+      present[entry.key] = true;
+      var current = rows.filter(function (row) { return row.dataset.run === entry.key; })[0];
+      if (current && current.dataset.hash === entry.hash) { return; }
+      var row = adopt(entry.row);
+      if (current) {
+        current.replaceWith(row);
+        rows[rows.indexOf(current)] = row;
+      } else {
+        body.appendChild(row);
+        rows.push(row);
+      }
+    });
+    rows = rows.filter(function (row) {
+      if (present[row.dataset.run]) { return true; }
+      row.remove();
+      return false;
+    });
+    if (storage) { rows.forEach(mark); }
+    finishedCount.textContent = rows.filter(function (row) { return row.dataset.finished === '1'; }).length;
+    order();
+    show();
+    tab();
+  }
   function refresh() {
     table.querySelectorAll('time[datetime]').forEach(local);
     if (storage) {
@@ -906,7 +1017,9 @@ function proof_render_index_script(): string
     }
     order();
     show();
+    tab();
   }
+  var check = watch(apply);
   headers.forEach(function (header, index) {
     var button = header.querySelector('button.sort');
     if (!button) { return; }
@@ -922,7 +1035,7 @@ function proof_render_index_script(): string
   finished.addEventListener('change', function () { remember('proof:finished', finished.checked ? '1' : '0'); show(); });
   search.addEventListener('input', show);
   document.addEventListener('DOMContentLoaded', refresh);
-  window.addEventListener('pageshow', function (event) { if (event.persisted) { refresh(); } });
+  window.addEventListener('pageshow', function (event) { if (event.persisted) { refresh(); check(); } });
 })();
 JS;
 }
