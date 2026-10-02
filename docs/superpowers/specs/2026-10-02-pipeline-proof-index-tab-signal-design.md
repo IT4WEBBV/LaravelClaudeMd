@@ -305,6 +305,30 @@ Each question the brainstorm would have asked the owner, and the answer assumed.
 10. **How often, exactly?** Every 30 seconds while the page is open, as the issue says; Chrome's throttling of
     background tabs stretches that to about a minute, which the docs state as a limit.
 
+Added by the plan step (`docs/superpowers/plans/2026-10-02-pipeline-proof-index-tab-signal.md`), where the plan needed
+an answer this design did not give:
+
+11. **What does a store write do when it cannot write `index.html` or `status.js`?** `proof_store_index()` returns
+    `cannot write <file>`; `proof_store_file()` and the prune pass put it on stderr as `proof: <problem>` and their
+    filing, pruning and stdout stand, and `proof_store_amend()` returns it as its problem. A store root that does not
+    exist (a `prune` before any run was filed) is such a case: today PHP prints a warning there, after this one
+    stderr line. The helper creates no directory.
+12. **How does the script change the favicon?** It replaces the `<link>` with a clone carrying the new `href`, and
+    only when the icon changes. A browser may keep the icon it has when only an existing link's `href` changes; a new
+    element is the form every browser repaints.
+13. **What does `status.js` do with a byte that is not UTF-8?** It is substituted (`JSON_INVALID_UTF8_SUBSTITUTE`
+    beside `json_encode()`'s default escaping), so a store write never fails over one byte in a title. `run.json`
+    is written by `json_encode()` too, so this is a guard, not a case the store produces.
+14. **What does the open index show when every run it showed is pruned?** The table stays, empty, with *No runs
+    match.*; the next reload renders *No runs recorded.* The prune pass never removes a run with an open PR, so this
+    is rare, and a reload is the owner's.
+15. **How is the Chrome check run over `file://` when the Playwright MCP refuses `file:` URLs?** The `file://`
+    mechanism (a stale index picking up a newer `status.js`, an empty store's index reloading itself) is proved with
+    headless Chrome over `file://` (`--virtual-time-budget`, `--dump-dom`), as the design's probes were. The
+    interactions (the dot, the count, rows in place, clearing on open, a background tab) run in the Playwright MCP
+    over `file://` when it allows that, else over a local `php -S` server, where the poll is the same script tag and
+    the seen marks live in that origin.
+
 ## Relation to other work
 
 - **#142, #151** (merged): the seen marks, the markers, the attention order, the filters and the search this builds
