@@ -224,6 +224,23 @@ it('flags runs that opened no PR, because pruning can never reach them', functio
     expect($html)->toContain('no PR — prune manually');
 });
 
+it('links the PR column of the index to the PR on GitHub', function () {
+    $html = proof_render_index([
+        ['dir' => '/store/ViewieMedia/pr-412-orders-export', 'run' => proof_fixture_run(['pr' => 412, 'prState' => 'OPEN'])],
+    ]);
+
+    expect($html)->toContain('<td><a href="https://github.com/IT4WEBBV/ViewieMedia/pull/412">#412 OPEN</a></td>');
+});
+
+it('keeps the PR column as plain text for a run that names no repo to link into', function () {
+    $html = proof_render_index([
+        ['dir' => '/store/Deploy/pr-404-legacy', 'run' => proof_fixture_run(['repo' => 'Deploy', 'nameWithOwner' => null, 'pr' => 404, 'prState' => 'MERGED'])],
+    ]);
+
+    expect($html)->toContain('<td>#404 MERGED</td>');
+    expect($html)->not->toContain('/pull/404');
+});
+
 it('renders an empty store without failing', function () {
     $html = proof_render_index([]);
 

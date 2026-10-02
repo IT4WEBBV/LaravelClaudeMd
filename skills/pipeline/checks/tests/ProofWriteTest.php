@@ -81,8 +81,7 @@ it('keeps what an earlier write filed when a later one leaves it out', function 
 });
 
 it('files nothing for a run without a client summary, and says so', function () {
-    // The root exists, as in the title test: the prune pass after `write` writes the store index into it
-    // and prints its count on stdout.
+    // The root exists, as in the title test: a `write` that files the run writes the store index into it.
     $root = sys_get_temp_dir() . '/proof-write-' . uniqid();
     mkdir($root);
 

@@ -624,7 +624,10 @@ function proof_render_index_row(int $number, array $entry): string
     // becomes visible rather than silent.
     $pr = empty($run['pr'])
         ? '<span class="flag">no PR — prune manually</span>'
-        : proof_e('#' . (string) $run['pr'] . ' ' . (string) ($run['prState'] ?? ''));
+        : proof_render_ref(
+            proof_github_url($run, 'pull/' . (int) $run['pr']),
+            '#' . (string) $run['pr'] . ' ' . (string) ($run['prState'] ?? ''),
+        );
 
     $data = [
         'run' => $key,
