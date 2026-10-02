@@ -78,7 +78,8 @@ config_fetch_seconds=5  # tighter than max_fetch_seconds: the session repo still
 
 config_notes=""
 config_tags=""
-emitted=""
+repo_context=""
+repo_summary=""
 
 payload=""
 [ -t 0 ] || payload=$(cat 2>/dev/null)
@@ -154,8 +155,9 @@ newest_fetch_mtime() {
     printf '%s' "$newest"
 }
 
-# Print this invocation's one hook JSON object. Whatever sync_config_repos found
-# rides along, because Claude Code reads a single object per hook run.
+# Print this invocation's one hook JSON object: the repo reports collected in
+# repo_context/repo_summary, plus whatever sync_config_repos found, because
+# Claude Code reads a single object per hook run.
 emit() {
     local event=$1 context=$2 summary=$3
 
@@ -167,7 +169,6 @@ emit() {
     if [ -n "$config_tags" ]; then
         summary="${summary}${summary:+ }Config repos: ${config_tags}."
     fi
-    emitted=1
 
     printf '{'
     printf '"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}' \
@@ -178,6 +179,17 @@ emit() {
         printf ',"suppressOutput":true'
     fi
     printf '}\n'
+}
+
+# Add one repo's report to this invocation's single emit(). Reports are joined
+# by a blank line, summaries by a space.
+add_report() {
+    local context=$1 summary=$2
+
+    repo_context="${repo_context}${repo_context:+
+
+}${context}"
+    [ -z "$summary" ] || repo_summary="${repo_summary}${repo_summary:+ }${summary}"
 }
 
 # Incoming changes whose arrival has a concrete local consequence. Anything that
@@ -572,10 +584,10 @@ remind_retired_vault() {
     config_tags="${config_tags}${config_tags:+, }SecondBrain leftovers found"
 }
 
-# Report on the repo containing $1. Prints hook JSON, or nothing when the path
-# is not a git repo with an origin.
+# Report on the repo containing $1 into repo_context/repo_summary, which the
+# mode emits. Adds nothing when the path is not a git repo with an origin.
 check_repo() {
-    local target=$1 event=$2
+    local target=$1
 
     cd "$target" 2>/dev/null || return 0
     git rev-parse --git-dir >/dev/null 2>&1 || return 0
@@ -654,7 +666,7 @@ ${shown}"
     # Nothing with a consequence attached: stay silent. This is the common case,
     # and keeping it silent is the entire point of the rewrite.
     if [ -z "$insights" ] && [ -z "$sync_notes" ]; then
-        emit "$event" \
+        add_report \
             "git freshness: $(basename "$target") on '$branch' — nothing incoming that affects this work (fetched $(human_age "$age"))." \
             ""
         return 0
@@ -689,7 +701,7 @@ or deliberately continue on the current base."
         fi
     fi
 
-    emit "$event" "$context" "$summary"
+    add_report "$context" "$summary"
 }
 
 # Sourcing this file with GIT_FRESHNESS_LIB=1 defines the functions above
@@ -723,20 +735,26 @@ case "$mode" in
         [ -e "$marker" ] && exit 0
         mkdir -p "$cache_dir" 2>/dev/null && : > "$marker" 2>/dev/null
 
-        check_repo "$toplevel" PostToolUse
+        check_repo "$toplevel"
+        [ -z "$repo_context" ] || emit PostToolUse "$repo_context" "$repo_summary"
         ;;
 
-    session | *)
+    session)
         # Nothing has been edited yet, so the session's own cwd is all we have.
         repo=$(payload_field cwd)
         [ -n "$repo" ] && [ -d "$repo" ] || repo="$PWD"
 
         sync_config_repos
         remind_retired_vault
-        check_repo "$repo" SessionStart
+        check_repo "$repo"
 
-        # check_repo stays silent outside a git repo; config news still gets out.
-        [ -z "$emitted" ] && [ -n "$config_notes$config_tags" ] && emit SessionStart "" ""
+        # check_repo adds nothing outside a git repo; config news still gets out.
+        [ -z "$repo_context$config_notes$config_tags" ] \
+            || emit SessionStart "$repo_context" "$repo_summary"
+        ;;
+
+    *)
+        exit 0
         ;;
 esac
 
