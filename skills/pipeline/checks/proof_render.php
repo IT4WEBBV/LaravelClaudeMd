@@ -95,8 +95,14 @@ td .reason { display:block; margin-top:.15rem; }
 tr.workflow th { color:var(--muted); font-weight:600; padding-top:.9rem; }
 tr.total th, tr.total td { font-weight:700; border-top:2px solid var(--line); }
 .marker { margin-left:.4rem; color:var(--ready); font-size:.7rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
-.filter { display:flex; align-items:center; gap:.5rem; margin:1rem 0; color:var(--muted); font-size:.875rem; }
-.filter select { font:inherit; color:var(--fg); background:var(--card); border:1px solid var(--line); border-radius:.35rem; padding:.2rem .5rem; }
+.controls { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem 1rem; margin:1rem 0; color:var(--muted); font-size:.875rem; }
+.controls label { display:flex; align-items:center; gap:.4rem; }
+.controls select, .controls input[type=search] { font:inherit; color:var(--fg); background:var(--card); border:1px solid var(--line); border-radius:.35rem; padding:.2rem .5rem; }
+.controls input[type=search] { flex:1 1 14rem; max-width:24rem; }
+.table-wrap { overflow-x:auto; }
+th button.sort { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; }
+th[aria-sort=ascending] button.sort::after { content:" ▲"; font-size:.7em; }
+th[aria-sort=descending] button.sort::after { content:" ▼"; font-size:.7em; }
 body.index { max-width:80rem; }
 CSS;
 }
@@ -566,11 +572,11 @@ function proof_render_index(array $runs): string
     $runs = proof_index_order($runs);
     $body = $runs === []
         ? "<p class=\"meta\">No runs recorded.</p>\n"
-        : proof_render_index_filter($runs)
-            . "<table id=\"runs\">\n<thead><tr><th>Status</th><th>Repo</th><th>PR</th><th>Run</th><th class=\"num\">Shots</th>"
-            . "<th class=\"num\">Time</th><th class=\"num\">Cost</th><th>Updated</th><th>Summary</th></tr></thead>\n<tbody>\n"
+        : proof_render_index_controls($runs)
+            . "<div class=\"table-wrap\">\n<table id=\"runs\">\n" . proof_render_index_head() . "<tbody>\n"
             . implode('', array_map(proof_render_index_row(...), array_keys($runs), $runs))
-            . "</tbody>\n</table>\n<script>\n" . proof_render_copy_script() . "\n" . proof_render_index_script() . "\n</script>\n";
+            . "</tbody>\n</table>\n</div>\n<p id=\"no-match\" class=\"meta\" hidden>No runs match.</p>\n"
+            . "<script>\n" . proof_render_copy_script() . "\n" . proof_render_index_script() . "\n</script>\n";
 
     $styles = proof_render_styles();
 
@@ -603,14 +609,70 @@ function proof_updated_time(array $run): int
     return strtotime((string) ($run['updatedAt'] ?? '')) ?: 0;
 }
 
-/** A `<select>` of the repos present, `All repos` first; the index script hides the other repos' rows. */
-function proof_render_index_filter(array $runs): string
+/**
+ * Above the table: the repo filter (the repos present), the status filter (all five, always), the search, and the
+ * toggle that shows the finished runs, with how many there are. The index script applies and remembers them.
+ */
+function proof_render_index_controls(array $runs): string
 {
     $repos = array_values(array_unique(array_filter(array_map(fn (array $entry): string => (string) ($entry['run']['repo'] ?? ''), $runs))));
     sort($repos, SORT_STRING | SORT_FLAG_CASE);
-    $options = implode('', array_map(fn (string $repo): string => '<option value="' . proof_e($repo) . '">' . proof_e($repo) . '</option>', $repos));
+    $statuses = array_combine(
+        array_column(ProofRunStatus::cases(), 'value'),
+        array_map(fn (ProofRunStatus $status): string => $status->label(), ProofRunStatus::cases()),
+    );
+    $finished = count(array_filter($runs, fn (array $entry): bool => ProofRunStatus::of($entry['run'])->finished()));
 
-    return "<label class=\"filter\">Repo <select id=\"repo-filter\"><option value=\"\">All repos</option>{$options}</select></label>\n";
+    return "<div class=\"controls\">\n"
+        . '<label>Repo <select id="repo-filter"><option value="">All repos</option>' . proof_render_options(array_combine($repos, $repos)) . "</select></label>\n"
+        . '<label>Status <select id="status-filter"><option value="">All statuses</option>' . proof_render_options($statuses) . "</select></label>\n"
+        . "<input type=\"search\" id=\"search\" placeholder=\"Title, PR, branch or summary\" aria-label=\"Search runs\">\n"
+        . "<label><input type=\"checkbox\" id=\"show-finished\"> Show merged and closed ({$finished})</label>\n"
+        . "</div>\n";
+}
+
+/** `<option>`s from value => text, both escaped. A numeric repo name arrives as an int key. */
+function proof_render_options(array $options): string
+{
+    return implode('', array_map(
+        fn (int|string $value, string $text): string => '<option value="' . proof_e((string) $value) . '">' . proof_e($text) . '</option>',
+        array_keys($options),
+        $options,
+    ));
+}
+
+/**
+ * The index's columns in order: the label, how the script compares the column (`text` or `number`; null, not
+ * sortable), which way a first click sorts it, and whether it is right-aligned. `proof_render_index_row()` renders
+ * its cells in this order.
+ *
+ * @return list<array{label: string, type: ?string, first: ?string, num: bool}>
+ */
+function proof_index_columns(): array
+{
+    return [
+        ['label' => 'Status', 'type' => 'number', 'first' => 'asc', 'num' => false],
+        ['label' => 'Repo', 'type' => 'text', 'first' => 'asc', 'num' => false],
+        ['label' => 'PR', 'type' => 'number', 'first' => 'desc', 'num' => false],
+        ['label' => 'Run', 'type' => 'text', 'first' => 'asc', 'num' => false],
+        ['label' => 'Shots', 'type' => 'number', 'first' => 'desc', 'num' => true],
+        ['label' => 'Time', 'type' => 'number', 'first' => 'desc', 'num' => true],
+        ['label' => 'Cost', 'type' => 'number', 'first' => 'desc', 'num' => true],
+        ['label' => 'Updated', 'type' => 'number', 'first' => 'desc', 'num' => false],
+        ['label' => 'Summary', 'type' => null, 'first' => null, 'num' => false],
+    ];
+}
+
+/** The header row: a sort button in every sortable column's header. */
+function proof_render_index_head(): string
+{
+    $cells = array_map(fn (array $column): string => $column['type'] === null
+        ? "<th>{$column['label']}</th>"
+        : "<th data-sort-type=\"{$column['type']}\" data-sort-first=\"{$column['first']}\"" . ($column['num'] ? ' class="num"' : '')
+            . "><button type=\"button\" class=\"sort\">{$column['label']}</button></th>",
+        proof_index_columns());
+
+    return '<thead><tr>' . implode('', $cells) . "</tr></thead>\n";
 }
 
 /** One run: what the index script reads, its status, where it lives, its page, its figures, and its summary to copy. */
@@ -620,14 +682,18 @@ function proof_render_index_row(int $number, array $entry): string
     // The link comes from the directory the run was found in, never from re-deriving a name out of the run: a run
     // filed under an earlier naming scheme has to stay reachable. The page keys its seen marker on the same segments.
     $key = implode('/', array_slice(explode('/', trim((string) $entry['dir'], '/')), -2));
+    $status = ProofRunStatus::of($run);
+    $repo = (string) ($run['repo'] ?? '');
+    $title = proof_run_title($run);
+    $shots = count($run['shots'] ?? []);
     $cost = $run['cost'] ?? [];
     $totals = proof_cost_totals($cost);
+    $updated = proof_updated_time($run);
     $summary = trim((string) ($run['clientSummary'] ?? ''));
 
-    // A run that opened no PR is unreachable by the prune pass by design, so the index is where its accumulation
-    // becomes visible rather than silent.
+    // The prune pass removes a run that opened no PR two weeks after its last filing, so the index only names it.
     $pr = empty($run['pr'])
-        ? '<span class="flag">no PR — prune manually</span>'
+        ? '<span class="reason">no PR</span>'
         : proof_render_ref(
             proof_github_url($run, 'pull/' . (int) $run['pr']),
             '#' . (string) $run['pr'] . ' ' . (string) ($run['prState'] ?? ''),
@@ -635,10 +701,13 @@ function proof_render_index_row(int $number, array $entry): string
 
     $data = [
         'run' => $key,
-        'repo' => (string) ($run['repo'] ?? ''),
-        'group' => (string) ProofRunStatus::of($run)->group(),
+        'repo' => $repo,
+        'group' => (string) $status->group(),
+        'status' => $status->value,
+        'finished' => $status->finished() ? '1' : '0',
         'updated' => (string) ($run['updatedAt'] ?? ''),
         ...(isset($run['revision']) ? ['revision' => (string) (int) $run['revision']] : []),
+        'search' => proof_index_search($run),
     ];
     $attributes = implode('', array_map(fn (string $name, string $value): string => " data-{$name}=\"" . proof_e($value) . '"', array_keys($data), $data));
     $copy = $summary === ''
@@ -646,37 +715,102 @@ function proof_render_index_row(int $number, array $entry): string
         : "<button type=\"button\" class=\"copy\" data-copy=\"summary-{$number}\">Copy</button><span id=\"summary-{$number}\" lang=\"nl\" hidden>" . proof_e($summary) . '</span>';
 
     return "<tr{$attributes}>"
-        . '<td>' . proof_render_status($run) . '</td>'
-        . '<td><code>' . proof_e((string) ($run['repo'] ?? '')) . '</code></td>'
-        . "<td>{$pr}</td>"
-        . '<td><a href="' . proof_e("{$key}/index.html") . '">' . proof_e(proof_run_title($run)) . '</a><span class="marker"></span></td>'
-        . '<td class="num">' . count($run['shots'] ?? []) . '</td>'
-        . '<td class="num">' . ($cost === [] ? '' : proof_minutes($totals['seconds'])) . '</td>'
-        . '<td class="num">' . ($cost === [] ? '' : proof_millions($totals['cost'])) . '</td>'
-        . '<td>' . proof_e(substr((string) ($run['updatedAt'] ?? ''), 0, 10)) . '</td>'
+        . proof_render_index_cell($status->order(), proof_render_status($run))
+        . proof_render_index_cell($repo, '<code>' . proof_e($repo) . '</code>')
+        . proof_render_index_cell(empty($run['pr']) ? '' : (int) $run['pr'], $pr)
+        . proof_render_index_cell($title, '<a href="' . proof_e("{$key}/index.html") . '">' . proof_e($title) . '</a><span class="marker"></span>')
+        . proof_render_index_cell($shots, (string) $shots, 'num')
+        . proof_render_index_cell($cost === [] ? '' : $totals['seconds'], $cost === [] ? '' : proof_minutes($totals['seconds']), 'num')
+        . proof_render_index_cell($cost === [] ? '' : $totals['cost'], $cost === [] ? '' : proof_millions($totals['cost']), 'num')
+        . proof_render_index_cell($updated === 0 ? '' : $updated, proof_render_updated($run))
         . "<td>{$copy}</td></tr>\n";
+}
+
+/** A sortable cell: its key in `data-sort`, which the index script compares instead of the text the cell shows. */
+function proof_render_index_cell(int|float|string $sort, string $content, string $class = ''): string
+{
+    $attribute = $class === '' ? '' : " class=\"{$class}\"";
+
+    return "<td{$attribute} data-sort=\"" . proof_e((string) $sort) . "\">{$content}</td>";
+}
+
+/**
+ * When the run was last filed: `d-m H:i` in the timestamp's own offset (PHP's default timezone is UTC here), the
+ * full timestamp on hover; the index script rewrites both to the browser's time. Nothing when it does not parse.
+ */
+function proof_render_updated(array $run): string
+{
+    if (proof_updated_time($run) === 0) {
+        return '';
+    }
+    $time = new DateTimeImmutable((string) $run['updatedAt']);
+    $full = proof_e($time->format(DATE_ATOM));
+
+    return "<time datetime=\"{$full}\" title=\"{$full}\">" . $time->format('d-m H:i') . '</time>';
+}
+
+/** What the search matches, lower-cased: the title as the index shows it, `#<pr>`, the branch and the client summary. */
+function proof_index_search(array $run): string
+{
+    $parts = [
+        proof_run_title($run),
+        empty($run['pr']) ? '' : '#' . (int) $run['pr'],
+        (string) ($run['branch'] ?? ''),
+        trim((string) ($run['clientSummary'] ?? '')),
+    ];
+
+    return mb_strtolower(implode(' ', array_unique(array_filter($parts, fn (string $part): bool => $part !== ''))));
 }
 
 /**
  * The index's script, on `DOMContentLoaded` and again on a `pageshow` from the back/forward cache (Back from a page is
- * how the index is reached again): per row with a revision `New` when this browser never opened it, `Updated` when it
- * was filed again since; a seen Ready row drops among the rest; the rows re-ordered by that rank and their time; the
- * repo filter applied and remembered. Without `localStorage` (a private window, blocked site data) no row is marked,
- * the order is PHP's, and the filter works without being remembered.
+ * how the index is reached again):
+ *  - each Updated `<time>` in the browser's time, `dd-mm HH:MM`, the full `YYYY-MM-DD HH:MM:SS` on hover;
+ *  - per row with a revision `New` when this browser never opened it, `Updated` when it was filed again since; a seen
+ *    Ready row drops among the rest (its rank);
+ *  - the rows in the attention order (rank, then newest first), or by the column whose header was clicked: its first
+ *    direction, reversed by a second click, empty keys last either way, ties in the attention order;
+ *  - a row shows when the repo filter, the status filter (or, under All statuses, the toggle) and every search term
+ *    let it; `#no-match` when none does.
+ * The repo filter, the status filter and the toggle are remembered (`proof:repo`, `proof:status`, `proof:finished`);
+ * the search and the sort are not. Without `localStorage` (a private window, blocked site data) no row is marked and
+ * every control works unremembered.
  */
 function proof_render_index_script(): string
 {
     return <<<'JS'
 (function () {
-  var body = document.getElementById('runs').tBodies[0];
-  var filter = document.getElementById('repo-filter');
+  var table = document.getElementById('runs');
+  var body = table.tBodies[0];
+  var headers = Array.prototype.slice.call(table.tHead.rows[0].cells);
   var rows = Array.prototype.slice.call(body.rows);
+  var repo = document.getElementById('repo-filter');
+  var status = document.getElementById('status-filter');
+  var search = document.getElementById('search');
+  var finished = document.getElementById('show-finished');
+  var empty = document.getElementById('no-match');
+  var sorted = null;
   var storage = null;
   try {
     storage = window.localStorage;
     storage.getItem('proof:repo');
   } catch (error) {
     storage = null;
+  }
+  function remember(key, value) {
+    try { if (storage) { storage.setItem(key, value); } } catch (error) {}
+  }
+  function restore(select, key) {
+    var saved = storage.getItem(key);
+    if (Array.prototype.some.call(select.options, function (option) { return option.value === saved; })) { select.value = saved; }
+  }
+  function pad(number) { return String(number).padStart(2, '0'); }
+  function local(time) {
+    var date = new Date(time.getAttribute('datetime'));
+    if (isNaN(date.getTime())) { return; }
+    var clock = pad(date.getHours()) + ':' + pad(date.getMinutes());
+    time.textContent = pad(date.getDate()) + '-' + pad(date.getMonth() + 1) + ' ' + clock;
+    time.title = date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + clock + ':' + pad(date.getSeconds());
   }
   function mark(row) {
     var revision = Number(row.dataset.revision || 0);
@@ -685,29 +819,68 @@ function proof_render_index_script(): string
     row.querySelector('.marker').textContent = state === 'seen' ? '' : state;
     row.dataset.rank = state === 'seen' && row.dataset.group === '1' ? '2' : row.dataset.group;
   }
+  function attention(a, b) {
+    return (Number(a.dataset.rank || a.dataset.group) - Number(b.dataset.rank || b.dataset.group))
+      || ((Date.parse(b.dataset.updated) || 0) - (Date.parse(a.dataset.updated) || 0));
+  }
+  function byColumn(a, b) {
+    var x = a.cells[sorted.index].dataset.sort;
+    var y = b.cells[sorted.index].dataset.sort;
+    if (x === '' || y === '') { return (x === '') - (y === ''); }
+    var difference = sorted.type === 'number' ? Number(x) - Number(y) : x.localeCompare(y, undefined, { sensitivity: 'base', numeric: true });
+    return sorted.direction === 'asc' ? difference : -difference;
+  }
   function order() {
-    rows.sort(function (a, b) {
-      return (Number(a.dataset.rank) - Number(b.dataset.rank))
-        || ((Date.parse(b.dataset.updated) || 0) - (Date.parse(a.dataset.updated) || 0));
-    });
+    rows.sort(attention);
+    if (sorted) { rows.sort(byColumn); }
     rows.forEach(function (row) { body.appendChild(row); });
+    headers.forEach(function (header, index) {
+      if (sorted && sorted.index === index) {
+        header.setAttribute('aria-sort', sorted.direction === 'asc' ? 'ascending' : 'descending');
+      } else {
+        header.removeAttribute('aria-sort');
+      }
+    });
+  }
+  function visible(row, terms) {
+    return (repo.value === '' || row.dataset.repo === repo.value)
+      && (status.value === '' ? finished.checked || row.dataset.finished === '0' : row.dataset.status === status.value)
+      && terms.every(function (term) { return row.dataset.search.indexOf(term) !== -1; });
   }
   function show() {
-    rows.forEach(function (row) { row.hidden = filter.value !== '' && row.dataset.repo !== filter.value; });
+    var terms = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    var shown = 0;
+    rows.forEach(function (row) {
+      row.hidden = !visible(row, terms);
+      shown += row.hidden ? 0 : 1;
+    });
+    empty.hidden = shown > 0;
   }
   function refresh() {
+    table.querySelectorAll('time[datetime]').forEach(local);
     if (storage) {
       rows.forEach(mark);
-      order();
-      var saved = storage.getItem('proof:repo');
-      if (Array.prototype.some.call(filter.options, function (option) { return option.value === saved; })) { filter.value = saved; }
+      restore(repo, 'proof:repo');
+      restore(status, 'proof:status');
+      finished.checked = storage.getItem('proof:finished') === '1';
     }
+    order();
     show();
   }
-  filter.addEventListener('change', function () {
-    try { if (storage) { storage.setItem('proof:repo', filter.value); } } catch (error) {}
-    show();
+  headers.forEach(function (header, index) {
+    var button = header.querySelector('button.sort');
+    if (!button) { return; }
+    button.addEventListener('click', function () {
+      var again = sorted && sorted.index === index;
+      var direction = again ? (sorted.direction === 'asc' ? 'desc' : 'asc') : header.dataset.sortFirst;
+      sorted = { index: index, type: header.dataset.sortType, direction: direction };
+      order();
+    });
   });
+  repo.addEventListener('change', function () { remember('proof:repo', repo.value); show(); });
+  status.addEventListener('change', function () { remember('proof:status', status.value); show(); });
+  finished.addEventListener('change', function () { remember('proof:finished', finished.checked ? '1' : '0'); show(); });
+  search.addEventListener('input', show);
   document.addEventListener('DOMContentLoaded', refresh);
   window.addEventListener('pageshow', function (event) { if (event.persisted) { refresh(); } });
 })();

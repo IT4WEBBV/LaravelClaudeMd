@@ -216,12 +216,13 @@ it('links a run at the directory it was found in, not at one re-derived from the
     expect($html)->toContain('href="Deploy/feature-legacy-shape/index.html"');
 });
 
-it('flags runs that opened no PR, because pruning can never reach them', function () {
+it('names a run that opened no PR plainly, since the prune pass now removes it', function () {
     $html = proof_render_index([
         ['dir' => '/store/Deploy/feature-halted', 'run' => proof_fixture_run(['repo' => 'Deploy', 'pr' => null, 'prState' => null])],
     ]);
 
-    expect($html)->toContain('no PR — prune manually');
+    expect($html)->toContain('<td data-sort=""><span class="reason">no PR</span></td>');
+    expect($html)->not->toContain('prune manually');
 });
 
 it('links the PR column of the index to the PR on GitHub', function () {
@@ -229,7 +230,7 @@ it('links the PR column of the index to the PR on GitHub', function () {
         ['dir' => '/store/ViewieMedia/pr-412-orders-export', 'run' => proof_fixture_run(['pr' => 412, 'prState' => 'OPEN'])],
     ]);
 
-    expect($html)->toContain('<td><a href="https://github.com/IT4WEBBV/ViewieMedia/pull/412">#412 OPEN</a></td>');
+    expect($html)->toContain('<td data-sort="412"><a href="https://github.com/IT4WEBBV/ViewieMedia/pull/412">#412 OPEN</a></td>');
 });
 
 it('keeps the PR column as plain text for a run that names no repo to link into', function () {
@@ -237,7 +238,7 @@ it('keeps the PR column as plain text for a run that names no repo to link into'
         ['dir' => '/store/Deploy/pr-404-legacy', 'run' => proof_fixture_run(['repo' => 'Deploy', 'nameWithOwner' => null, 'pr' => 404, 'prState' => 'MERGED'])],
     ]);
 
-    expect($html)->toContain('<td>#404 MERGED</td>');
+    expect($html)->toContain('<td data-sort="404">#404 MERGED</td>');
     expect($html)->not->toContain('/pull/404');
 });
 
@@ -497,28 +498,45 @@ it('gives each row what the index script needs, its status, its figures, and a c
         ['dir' => '/store/Asimo/feature-old', 'run' => proof_fixture_run(['repo' => 'Asimo', 'updatedAt' => '2026-09-01T10:00:00+02:00', 'status' => ['state' => 'halted', 'reason' => 'CI red']])],
     ]);
 
-    expect($html)->toContain('<tr data-run="Deploy/pr-5-logs" data-repo="Deploy" data-group="1" data-updated="2026-10-01T10:00:00+02:00" data-revision="3">');
-    expect($html)->toContain('<tr data-run="Asimo/feature-old" data-repo="Asimo" data-group="0" data-updated="2026-09-01T10:00:00+02:00">');
-    expect($html)->toContain('<td><span class="pill pill-halted">Halted</span> <span class="reason">CI red</span></td>');
+    expect($html)->toContain('<tr data-run="Deploy/pr-5-logs" data-repo="Deploy" data-group="1" data-status="ready" data-finished="0" data-updated="2026-10-01T10:00:00+02:00" data-revision="3" data-search="pr #412: product summary grid #412 feature/orders-export de logboeken lopen mee.">');
+    expect($html)->toContain('<tr data-run="Asimo/feature-old" data-repo="Asimo" data-group="0" data-status="halted" data-finished="0" data-updated="2026-09-01T10:00:00+02:00" data-search="pr #412: product summary grid #412 feature/orders-export">');
+    expect($html)->toContain('<td data-sort="0"><span class="pill pill-halted">Halted</span> <span class="reason">CI red</span></td>');
     expect($html)->toContain('index.html">PR #412: product summary grid</a><span class="marker"></span></td>');
-    expect($html)->toContain('<td class="num">20.0 min</td><td class="num">2.31M</td>');
-    expect($html)->toContain('<td class="num"></td><td class="num"></td>');
+    expect($html)->toContain('<td class="num" data-sort="1200">20.0 min</td><td class="num" data-sort="2310000">2.31M</td>');
+    expect($html)->toContain('<td class="num" data-sort=""></td><td class="num" data-sort=""></td>');
     expect($html)->toContain('<button type="button" class="copy" data-copy="summary-1">Copy</button><span id="summary-1" lang="nl" hidden>De logboeken lopen mee.</span>');
     expect(substr_count($html, 'class="copy"'))->toBe(1);
     expect($html)->toContain('<select id="repo-filter"><option value="">All repos</option><option value="Asimo">Asimo</option><option value="Deploy">Deploy</option></select>');
-    expect($html)->toContain('<th>Status</th><th>Repo</th><th>PR</th><th>Run</th><th class="num">Shots</th><th class="num">Time</th><th class="num">Cost</th><th>Updated</th><th>Summary</th>');
 });
 
-it('carries the index script: seen markers, the attention order, the remembered filter and the copy code', function () {
+it('carries the index script: seen markers, the remembered filters and toggle, search, header sorting, local times and the copy code', function () {
     $html = proof_render_index([proof_index_entry('pr-5-logs', [])]);
 
     expect($html)->toContain('<body class="index">');
     expect($html)->toContain("storage.getItem('seen:' + row.dataset.run)");
-    expect($html)->toContain("storage.setItem('proof:repo', filter.value)");
+    expect($html)->toContain("remember('proof:repo', repo.value)")
+        ->toContain("remember('proof:status', status.value)")
+        ->toContain("remember('proof:finished', finished.checked ? '1' : '0')")
+        ->toContain("restore(repo, 'proof:repo')")
+        ->toContain("restore(status, 'proof:status')");
+    // The toggle governs only All statuses: an explicit Merged or Closed shows those rows whatever it says.
+    expect($html)->toContain("status.value === '' ? finished.checked || row.dataset.finished === '0' : row.dataset.status === status.value");
+    expect($html)->toContain("search.addEventListener('input', show)");
+    expect($html)->toContain("header.setAttribute('aria-sort'");
+    expect($html)->toContain("querySelectorAll('time[datetime]')");
     expect($html)->toContain("window.addEventListener('pageshow'");
     expect($html)->toContain('navigator.clipboard.writeText');
     expect($html)->not->toContain('showModal()');
     expect(proof_render_index([]))->not->toContain('<script')->not->toContain('repo-filter')->toContain('No runs recorded');
+});
+
+it('renders an index script that parses as JavaScript', function () {
+    $file = sys_get_temp_dir() . '/proof-index-' . uniqid() . '.js';
+    file_put_contents($file, proof_render_index_script());
+    exec('node --check ' . escapeshellarg($file) . ' 2>&1', $output, $code);
+    unlink($file);
+
+    expect($code)->toBe(0, implode("\n", $output));
 });
 
 it('escapes the repo, the title, the reason and the summary in the index', function () {
@@ -529,7 +547,96 @@ it('escapes the repo, the title, the reason and the summary in the index', funct
 
     expect($html)->toContain('&lt;b&gt;R&lt;/b&gt;')->toContain('&lt;i&gt;T&lt;/i&gt;')->toContain('&lt;u&gt;why&lt;/u&gt;');
     expect($html)->toContain('Klant &lt;b&gt;&quot;blij&quot;&lt;/b&gt;')->toContain('data-updated="&quot;&gt;&lt;script&gt;"');
+    expect($html)->toContain('data-search="&lt;i&gt;t&lt;/i&gt; #412 feature/orders-export klant &lt;b&gt;&quot;blij&quot;&lt;/b&gt;"');
+    expect($html)->toContain('<td data-sort="&lt;b&gt;R&lt;/b&gt;"><code>&lt;b&gt;R&lt;/b&gt;</code></td>');
+    expect($html)->toContain('<td data-sort=""></td><td>');
     expect($html)->not->toContain('<b>R</b>');
+});
+
+it('puts the repo and status filters, the search and the toggle with its count above the table', function () {
+    $html = proof_render_index([
+        proof_index_entry('pr-1-merged', ['status' => ['state' => 'merged']]),
+        proof_index_entry('pr-2-closed', ['prState' => 'CLOSED']),
+        ['dir' => '/store/Asimo/pr-3-running', 'run' => proof_fixture_run(['repo' => 'Asimo', 'status' => ['state' => 'running']])],
+    ]);
+
+    expect($html)->toContain("<div class=\"controls\">\n"
+        . "<label>Repo <select id=\"repo-filter\"><option value=\"\">All repos</option><option value=\"Asimo\">Asimo</option><option value=\"Deploy\">Deploy</option></select></label>\n"
+        . "<label>Status <select id=\"status-filter\"><option value=\"\">All statuses</option><option value=\"running\">Running</option><option value=\"halted\">Halted</option><option value=\"ready\">Ready for review</option><option value=\"merged\">Merged</option><option value=\"closed\">Closed</option></select></label>\n"
+        . "<input type=\"search\" id=\"search\" placeholder=\"Title, PR, branch or summary\" aria-label=\"Search runs\">\n"
+        . "<label><input type=\"checkbox\" id=\"show-finished\"> Show merged and closed (2)</label>\n"
+        . "</div>\n");
+    expect(strpos($html, 'class="controls"'))->toBeLessThan(strpos($html, '<table id="runs">'));
+});
+
+it('gives each row its status, whether it is finished, and the lower-cased text the search matches', function () {
+    $html = proof_render_index([
+        proof_index_entry('pr-5-logs', [
+            'title' => 'PR #5: Logs That Follow', 'pr' => 5, 'branch' => 'feature/Logs', 'status' => ['state' => 'merged'],
+            'clientSummary' => 'De Logboeken lopen mee.', 'updatedAt' => '2026-10-01T10:00:00+02:00',
+        ]),
+        proof_index_entry('feature-halted', [
+            'title' => null, 'pr' => null, 'prState' => null, 'branch' => 'feature/halted',
+            'status' => ['state' => 'halted', 'reason' => 'r'], 'updatedAt' => '2026-09-01T10:00:00+02:00',
+        ]),
+    ]);
+
+    expect($html)->toContain('<tr data-run="Deploy/pr-5-logs" data-repo="Deploy" data-group="2" data-status="merged" data-finished="1" data-updated="2026-10-01T10:00:00+02:00" data-search="pr #5: logs that follow #5 feature/logs de logboeken lopen mee.">');
+    // Without a title the run is named by its branch, which the search text then holds once.
+    expect($html)->toContain('<tr data-run="Deploy/feature-halted" data-repo="Deploy" data-group="0" data-status="halted" data-finished="0" data-updated="2026-09-01T10:00:00+02:00" data-search="feature/halted">');
+});
+
+it('makes every column but Summary sortable, each with its type and the direction of a first click', function () {
+    $html = proof_render_index([proof_index_entry('pr-5-logs', [])]);
+
+    expect($html)->toContain('<thead><tr>'
+        . '<th data-sort-type="number" data-sort-first="asc"><button type="button" class="sort">Status</button></th>'
+        . '<th data-sort-type="text" data-sort-first="asc"><button type="button" class="sort">Repo</button></th>'
+        . '<th data-sort-type="number" data-sort-first="desc"><button type="button" class="sort">PR</button></th>'
+        . '<th data-sort-type="text" data-sort-first="asc"><button type="button" class="sort">Run</button></th>'
+        . '<th data-sort-type="number" data-sort-first="desc" class="num"><button type="button" class="sort">Shots</button></th>'
+        . '<th data-sort-type="number" data-sort-first="desc" class="num"><button type="button" class="sort">Time</button></th>'
+        . '<th data-sort-type="number" data-sort-first="desc" class="num"><button type="button" class="sort">Cost</button></th>'
+        . '<th data-sort-type="number" data-sort-first="desc"><button type="button" class="sort">Updated</button></th>'
+        . "<th>Summary</th></tr></thead>\n");
+    expect(substr_count($html, 'class="sort"'))->toBe(8);
+});
+
+it('gives each sortable cell its key, and an empty key where there is nothing to sort by', function () {
+    $html = proof_render_index([
+        proof_index_entry('pr-5-logs', [
+            'pr' => 5, 'title' => 'PR #5: logs', 'status' => ['state' => 'closed'], 'updatedAt' => '2026-10-01T20:29:13+00:00',
+            'shots' => [['title' => 'a'], ['title' => 'b']],
+            'cost' => [['workflow' => 'wf_a', 'span' => 1200.0, 'steps' => [proof_cost_step('implement:run', 2310000.0)]]],
+        ]),
+        proof_index_entry('feature-halted', ['pr' => null, 'prState' => null, 'status' => ['state' => 'halted', 'reason' => 'r'], 'updatedAt' => 'not a date']),
+    ]);
+
+    expect($html)->toContain('<td data-sort="4"><span class="pill pill-closed">Closed</span></td>'
+        . '<td data-sort="Deploy"><code>Deploy</code></td>'
+        . '<td data-sort="5"><a href="https://github.com/IT4WEBBV/ViewieMedia/pull/5">#5 OPEN</a></td>'
+        . '<td data-sort="PR #5: logs"><a href="Deploy/pr-5-logs/index.html">PR #5: logs</a><span class="marker"></span></td>'
+        . '<td class="num" data-sort="2">2</td><td class="num" data-sort="1200">20.0 min</td><td class="num" data-sort="2310000">2.31M</td>'
+        . '<td data-sort="1790886553"><time datetime="2026-10-01T20:29:13+00:00" title="2026-10-01T20:29:13+00:00">01-10 20:29</time></td>');
+    expect($html)->toContain('<td data-sort="0"><span class="pill pill-halted">Halted</span> <span class="reason">r</span></td>');
+    expect($html)->toContain('<td data-sort=""><span class="reason">no PR</span></td>');
+    expect($html)->toContain('<td class="num" data-sort="0">0</td><td class="num" data-sort=""></td><td class="num" data-sort=""></td><td data-sort=""></td><td></td></tr>');
+});
+
+it('shows Updated as day-month and time in the timestamp\'s own offset, with the full timestamp on hover', function () {
+    $html = proof_render_index([proof_index_entry('pr-5-logs', ['updatedAt' => '2026-10-01T22:29:13+02:00'])]);
+
+    expect($html)->toContain('<td data-sort="1790886553"><time datetime="2026-10-01T22:29:13+02:00" title="2026-10-01T22:29:13+02:00">01-10 22:29</time></td>');
+    expect($html)->not->toContain('>01-10 20:29<')->not->toContain('>2026-10-01<');
+});
+
+it('wraps the table so it scrolls on its own, and renders the no-match line hidden', function () {
+    $html = proof_render_index([proof_index_entry('pr-5-logs', [])]);
+
+    expect($html)->toContain("<div class=\"table-wrap\">\n<table id=\"runs\">\n<thead>");
+    expect($html)->toContain("</table>\n</div>\n<p id=\"no-match\" class=\"meta\" hidden>No runs match.</p>\n<script>");
+    expect($html)->toContain('.table-wrap { overflow-x:auto; }')->toContain('.controls {')->not->toContain('.filter {');
+    expect(proof_render_index([]))->not->toContain('class="controls"')->not->toContain('no-match')->not->toContain('<script');
 });
 
 it('opens the run page with one link back to the store index, relative, above the title', function () {

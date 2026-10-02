@@ -90,6 +90,24 @@ enum ProofRunStatus: string
         };
     }
 
+    /** Merged or closed: hidden on the index by default, and on the shorter retention clock (`proof_should_prune()`). */
+    public function finished(): bool
+    {
+        return in_array($this, [self::Merged, self::Closed], true);
+    }
+
+    /** The Status column's sort key: the attention order, then merged before closed. */
+    public function order(): int
+    {
+        return match ($this) {
+            self::Halted => 0,
+            self::Ready => 1,
+            self::Running => 2,
+            self::Merged => 3,
+            self::Closed => 4,
+        };
+    }
+
     /** The stored status, else what an older run's `prState` implies: MERGED, CLOSED, else Running. */
     public static function of(array $run): self
     {
@@ -407,35 +425,40 @@ function proof_run_json(array $run): string
     return json_encode($run, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION) . "\n";
 }
 
+/** Days a merged or closed run is kept after its last filing. */
+const PROOF_FINISHED_RETENTION_DAYS = 7;
+
+/** Days a run that opened no PR is kept after its last filing. */
+const PROOF_NO_PR_RETENTION_DAYS = 14;
+
 /**
  * Pure predicate — no filesystem, no `gh`, no clock.
  *
- * Two rules the store depends on, both stated in the spec's §Retention:
- *  - a PR merged this morning is exactly the one still worth looking at this afternoon,
- *    hence the grace period rather than deleting the moment it closes;
- *  - a run that opened no PR is never auto-pruned. `review-plan` bound-exhaustion halts
- *    *before* `handoff` and deliberately opens none, so those runs exist; the index flags
- *    them for manual pruning rather than a silent cap deleting them.
+ * Two rules the store depends on (`../references/engine.md` §The proof store, *Retention*):
+ *  - a merged or closed run is kept `PROOF_FINISHED_RETENTION_DAYS` after its last filing: a PR merged this morning
+ *    is exactly the one still worth looking at this afternoon. "Finished" is the run's status, the one the index
+ *    hides by default, which the prune pass has corrected from `gh` before it asks;
+ *  - a run that opened no PR is kept `PROOF_NO_PR_RETENTION_DAYS` after its last filing, whatever its status:
+ *    `review-plan` bound-exhaustion halts before `handoff` and opens none, and flagging those runs for manual
+ *    pruning made nobody prune them (#151). A resumed run that files again gets a fresh `updatedAt`.
  *
- * Anything unparseable answers "do not prune". Deleting proof is irreversible; keeping it
- * costs disk.
+ * A run with an open PR is never pruned. Anything unparseable answers "do not prune". Deleting proof is
+ * irreversible; keeping it costs disk.
  */
-function proof_should_prune(array $run, string $now, int $graceDays = 14): bool
+function proof_should_prune(array $run, string $now): bool
 {
-    if (empty($run['pr'])) {
-        return false;
-    }
-    if (! in_array($run['prState'] ?? '', ['MERGED', 'CLOSED'], true)) {
-        return false;
-    }
-
+    $days = match (true) {
+        empty($run['pr']) => PROOF_NO_PR_RETENTION_DAYS,
+        ProofRunStatus::of($run)->finished() => PROOF_FINISHED_RETENTION_DAYS,
+        default => null,
+    };
     $updated = strtotime((string) ($run['updatedAt'] ?? ''));
     $nowTs = strtotime($now);
-    if ($updated === false || $nowTs === false) {
+    if ($days === null || $updated === false || $nowTs === false) {
         return false;
     }
 
-    return $updated < $nowTs - $graceDays * 86400;
+    return $updated < $nowTs - $days * 86400;
 }
 
 /**

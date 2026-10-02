@@ -234,6 +234,9 @@ to its page**, which is what makes the store navigable without the PR body point
 
 Rows whose run has **no PR number** are flagged **"no PR — prune manually"** (see *Retention*).
 
+> *Superseded by #151 (2026-10-02): merged or closed runs are pruned 7 days after their last update; a run with no
+> PR 14 days after it; the index no longer flags it.*
+
 ### 8. Retention — prune on merged/closed PRs
 
 On each write, walk `_proofs/*/*/run.json`; for every run carrying a `pr`, ask
@@ -249,6 +252,9 @@ Two deliberate limits, stated rather than engineered around:
   `handoff` and explicitly opens no PR, so such runs exist. A per-repo hard cap was offered and
   declined, so rather than adding one silently the index **flags** them. The failure mode is
   visible accumulation, not invisible accumulation.
+
+> *Superseded by #151 (2026-10-02): merged or closed runs are pruned 7 days after their last update; a run with no
+> PR 14 days after it; the index no longer flags it.*
 
 **Screenshot weight.** Full-page shots at a 1920 viewport run 1–3 MB each; at the existing max of 5
 states that is up to 15 MB per run. Each PNG is downscaled on write to a maximum width of 1600 px

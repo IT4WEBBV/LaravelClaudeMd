@@ -116,3 +116,30 @@ it('keeps the stored status and PR state when gh cannot answer', function () {
 
     expect(file_get_contents(dirname($page) . '/run.json'))->toBe($before);
 });
+
+it('prunes a run that opened no PR two weeks after its last filing, and drops it from the index', function () {
+    $root = sys_get_temp_dir() . '/proof-store-' . uniqid();
+    $run = ['repo' => 'Deploy', 'title' => 'Halted before handoff', 'schema' => 2, 'status' => ['state' => 'halted', 'reason' => 'review-plan bound']];
+    proof_write_run("{$root}/Deploy/feature-stale", [...$run, 'branch' => 'feature/stale'], date('c', strtotime('-15 days')));
+    proof_write_run("{$root}/Deploy/feature-fresh", [...$run, 'branch' => 'feature/fresh'], date('c', strtotime('-1 day')));
+
+    $result = proof_status_cli(['prune'], [...proof_fake_gh(null), 'PIPELINE_PROOF_ROOT' => $root]);
+
+    expect($result)->toBe(['code' => 0, 'stdout' => "proof: pruned 1 run(s)\n", 'stderr' => '']);
+    expect(is_dir("{$root}/Deploy/feature-stale"))->toBeFalse();
+    expect(is_dir("{$root}/Deploy/feature-fresh"))->toBeTrue();
+    expect(file_get_contents("{$root}/index.html"))->not->toContain('feature-stale/index.html')->toContain('href="Deploy/feature-fresh/index.html"');
+});
+
+it('prunes a run gh now reports merged once its last filing is more than a week old', function () {
+    $root = sys_get_temp_dir() . '/proof-store-' . uniqid();
+    proof_write_run("{$root}/Deploy/pr-5-logs", [
+        'repo' => 'Deploy', 'nameWithOwner' => 'IT4WEBBV/Deploy', 'branch' => 'feature/logs', 'pr' => 5, 'prState' => 'OPEN',
+        'title' => 'PR #5: logs that follow', 'schema' => 2, 'status' => ['state' => 'ready'],
+    ], date('c', strtotime('-8 days')));
+
+    $result = proof_status_cli(['prune'], [...proof_fake_gh(['state' => 'MERGED', 'isDraft' => false]), 'PIPELINE_PROOF_ROOT' => $root]);
+
+    expect($result['stdout'])->toBe("proof: pruned 1 run(s)\n");
+    expect(is_dir("{$root}/Deploy/pr-5-logs"))->toBeFalse();
+});
