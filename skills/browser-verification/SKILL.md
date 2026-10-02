@@ -146,6 +146,27 @@ running Chrome. Delete the profile and retry:
 rm -rf ~/Library/Caches/ms-playwright/mcp-chrome-*
 ```
 
+## When a click does nothing
+
+On TALL-stack apps a `browser_click` on a TallDataTable row action (`x-on:click="$wire.call(...)"`)
+or on a Flux modal button (`wire:click`) can report success while the handler never fires: no
+console error, the element visible and on top. The cause is still open (#165). Don't conclude the
+feature is broken. First click an **untouched** action on the same row: if that fails too, it is the
+harness, not your change. Then drive the component directly:
+
+```javascript
+const root = [...document.querySelectorAll('[wire\\:id]')]
+  .find(e => (e.getAttribute('wire:snapshot') || '').includes('customer.slide-table'));
+const component = window.Livewire.find(root.getAttribute('wire:id'));
+await component.call('showModal', 'duplicate', '106');   // what the row action fires
+await component.call('duplicate', '106');                 // what the modal's button fires
+```
+
+This runs the real component method and database, only the click is skipped. Prove the result
+with a before/after database count, not by reading the rendered table, and say in the proof that
+the click was bypassed. Custom selects that ignore scripted clicks get their value through
+`$wire.set(...)` the same way.
+
 ## Red Flags — STOP
 
 - "It works in the browser" without a screenshot
