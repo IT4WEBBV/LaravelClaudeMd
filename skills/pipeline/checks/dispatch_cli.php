@@ -150,6 +150,22 @@ function dispatch_cli_tier_problem(array $manifest): ?string
     return "the manifest's tier is invalid: " . json_encode($manifest['tier']) . ' is not medium or light';
 }
 
+/**
+ * Why this machine cannot run the script's relay check: its agent type is not linked where Claude Code reads it
+ * (`../references/engine.md` §`autoflow`), or null. The dir is `PIPELINE_AGENTS_DIR`, a test seam as
+ * `PIPELINE_PROOF_ROOT` is, else `~/.claude/agents`, where `hooks/git-freshness.sh` links it. `is_file()`
+ * follows a link, so a dangling one counts as missing.
+ */
+function dispatch_cli_relay_agent_problem(): ?string
+{
+    $override = getenv('PIPELINE_AGENTS_DIR');
+    $dir = is_string($override) && $override !== '' ? rtrim($override, '/') : rtrim((string) getenv('HOME'), '/') . '/.claude/agents';
+
+    return is_file($dir . '/pipeline-relay-check.md')
+        ? null
+        : 'fresh session: ~/.claude/agents/pipeline-relay-check.md is not linked, and Claude Code reads agent types only when a session starts: run hooks/git-freshness.sh session (README.md), then resume the run from a new session';
+}
+
 function dispatch_cli_returned(string $manifestPath, string $diffPath): array
 {
     $before = manifest_read(manifest_files($manifestPath)['before']);
@@ -207,7 +223,8 @@ function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $fr
     $problem = dispatch_cli_invalid($manifest)
         ?? dispatch_cli_mode_problem('launch starts autoflow runs', $manifest)
         ?? dispatch_cli_agents_problem($manifest)
-        ?? dispatch_cli_tier_problem($manifest);
+        ?? dispatch_cli_tier_problem($manifest)
+        ?? dispatch_cli_relay_agent_problem();
     if ($problem !== null) {
         return pipeline_halt($problem);
     }

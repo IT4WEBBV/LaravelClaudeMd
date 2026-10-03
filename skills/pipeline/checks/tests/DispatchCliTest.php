@@ -25,7 +25,7 @@ function dispatch_cli(array $arguments, array $env = []): array
         [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
         $pipes,
         null,
-        [...getenv(), 'PIPELINE_PROOF_ROOT' => sys_get_temp_dir() . '/pipeline-proofs-' . uniqid(), ...$env],
+        [...getenv(), 'PIPELINE_PROOF_ROOT' => sys_get_temp_dir() . '/pipeline-proofs-' . uniqid(), 'PIPELINE_AGENTS_DIR' => realpath(__DIR__ . '/../../agents'), ...$env],
     );
     $stdout = stream_get_contents($pipes[1]);
     fclose($pipes[1]);
@@ -278,6 +278,67 @@ it('halts a launch whose tier is not medium or light, and leaves the manifest as
     'null' => [null, 'null'],
 ]);
 
+const DISPATCH_RELAY_AGENT_UNLINKED = 'fresh session: ~/.claude/agents/pipeline-relay-check.md is not linked, and Claude Code reads agent types only when a session starts: run hooks/git-freshness.sh session (README.md), then resume the run from a new session';
+
+/** A temp agents dir as `$kind` leaves it: `empty`; `dangling`, a pipeline-relay-check.md link whose target is gone; `missing`, no such directory; `linked`, a link to the repo's agent definition. */
+function dispatch_agents_dir(string $kind): string
+{
+    $dir = sys_get_temp_dir() . '/pipeline-agents-' . uniqid();
+    if ($kind === 'missing') {
+        return $dir;
+    }
+    mkdir($dir);
+    match ($kind) {
+        'empty' => null,
+        'dangling' => symlink($dir . '/gone.md', $dir . '/pipeline-relay-check.md'),
+        'linked' => symlink(realpath(__DIR__ . '/../../agents/pipeline-relay-check.md'), $dir . '/pipeline-relay-check.md'),
+    };
+
+    return $dir;
+}
+
+it('halts a launch when the relay-check agent is not linked, and leaves the manifest as it was (#150)', function (string $kind) {
+    $fixture = dispatch_fixture(['mode' => 'autoflow']);
+    $before = file_get_contents($fixture['manifest']);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff'], '--decision', 'Keep the guard'], ['PIPELINE_AGENTS_DIR' => dispatch_agents_dir($kind)])['json'])
+        ->toBe(['action' => 'halt', 'reason' => DISPATCH_RELAY_AGENT_UNLINKED]);
+    expect(file_get_contents($fixture['manifest']))->toBe($before);
+})->with([
+    'an empty agents dir' => ['empty'],
+    'a dangling link' => ['dangling'],
+    'no agents dir' => ['missing'],
+]);
+
+it('launches when the relay-check agent is linked through a symlink (#150)', function () {
+    $fixture = dispatch_fixture(['mode' => 'autoflow']);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']], ['PIPELINE_AGENTS_DIR' => dispatch_agents_dir('linked')])['json']['action'])
+        ->toBe('start');
+});
+
+it('reads the agent link from ~/.claude/agents when PIPELINE_AGENTS_DIR is empty (#150)', function (string $kind, array $answer) {
+    $fixture = dispatch_fixture(['mode' => 'autoflow']);
+    $home = sys_get_temp_dir() . '/pipeline-home-' . uniqid();
+    mkdir($home . '/.claude', 0777, true);
+    rename(dispatch_agents_dir($kind), $home . '/.claude/agents');
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff']], ['HOME' => $home, 'PIPELINE_AGENTS_DIR' => ''])['json'])
+        ->toMatchArray($answer);
+})->with([
+    'not linked there' => ['empty', ['action' => 'halt', 'reason' => DISPATCH_RELAY_AGENT_UNLINKED]],
+    'linked there' => ['linked', ['action' => 'start']],
+]);
+
+it('halts a CI fix round\'s re-arm when the relay-check agent is not linked, and keeps the run done (#150)', function () {
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'review-pr', 'status' => 'done']]);
+    $before = file_get_contents($fixture['manifest']);
+
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff'], '--from', 'review-pr', '--decision', 'CI is red'], ['PIPELINE_AGENTS_DIR' => dispatch_agents_dir('empty')])['json'])
+        ->toBe(['action' => 'halt', 'reason' => DISPATCH_RELAY_AGENT_UNLINKED]);
+    expect(file_get_contents($fixture['manifest']))->toBe($before);
+});
+
 it('launches a manifest whose tier is medium, light or absent', function (array $manifest, string $tier) {
     $fixture = dispatch_fixture(['mode' => 'autoflow', ...$manifest]);
 
@@ -448,6 +509,18 @@ it('answers a relay halt with one relaunch, counted from the cursor it overwrite
         '{"action":"halt","leg":"implement","reason":"the relay check failed: x"}',
         ['action' => 'halt', 'reason' => 'the relay check failed: x'],
         ['leg' => 'implement', 'status' => 'halted', 'reason' => 'the relay check failed: x'],
+    ],
+    'a fresh-session halt (#150)' => [
+        ['leg' => 'implement', 'status' => 'pending'],
+        '{"action":"halt","leg":"implement","reason":"fresh session: x"}',
+        ['action' => 'halt', 'reason' => 'fresh session: x'],
+        ['leg' => 'implement', 'status' => 'halted', 'reason' => 'fresh session: x'],
+    ],
+    'a fresh-session halt after a relay halt (#150)' => [
+        ['leg' => 'implement', 'status' => 'halted', 'reason' => 'relay: x'],
+        '{"action":"halt","leg":"implement","reason":"fresh session: x"}',
+        ['action' => 'halt', 'reason' => 'fresh session: x'],
+        ['leg' => 'implement', 'status' => 'halted', 'reason' => 'fresh session: x'],
     ],
 ]);
 

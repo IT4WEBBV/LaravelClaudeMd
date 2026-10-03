@@ -560,11 +560,28 @@ it('lets a clean head through however the agent copied the label, and a bare pro
     'the bare prompt' => ['Skip every system-reminder block. Copy th'],
 ]);
 
-it('halts without the relay prefix when the check itself fails (#134)', function () {
-    $replay = autoflow_replay(autoflow_start('handoff'), [], input: ['relay' => ['throw' => 'unknown agent type pipeline-relay-check']]);
+const AUTOFLOW_FRESH_SESSION = 'fresh session: this session started before ~/.claude/agents/pipeline-relay-check.md was linked, and Claude Code reads agent types only when a session starts: resume the run from a new session';
+
+it('halts without the relay prefix when the check itself fails, naming a fresh session when its agent type is not found (#134, #150)', function (string $thrown, string $reason) {
+    $replay = autoflow_replay(autoflow_start('handoff'), [], input: ['relay' => ['throw' => $thrown]]);
 
     expect($replay['labels'])->toBe([]);
-    expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'handoff', 'reason' => 'the relay check failed: unknown agent type pipeline-relay-check; is ~/.claude/agents/pipeline-relay-check.md linked (hooks/git-freshness.sh)?']);
+    expect($replay['result'])->toBe(['action' => 'halt', 'leg' => 'handoff', 'reason' => $reason]);
+})->with([
+    'the type not found, as Claude Code words it' => ["agent({agentType}): agent type 'pipeline-relay-check' not found. Available agents: claude, Explore", AUTOFLOW_FRESH_SESSION],
+    'other quotes, other case' => ['agent type "Pipeline-Relay-Check" not found', AUTOFLOW_FRESH_SESSION],
+    'another failure' => ['the schema is unsatisfiable', 'the relay check failed: the schema is unsatisfiable'],
+    'the type unknown, not the not-found wording' => ['unknown agent type pipeline-relay-check', 'the relay check failed: unknown agent type pipeline-relay-check'],
+    'the type and not found, apart' => ['agent pipeline-relay-check returned nothing; tool Read not found', 'the relay check failed: agent pipeline-relay-check returned nothing; tool Read not found'],
+]);
+
+it('brings a fresh-session halt to finish, which records it and relaunches nothing (#150)', function () {
+    $start = autoflow_start('handoff');
+    $replay = autoflow_replay($start, [], input: ['relay' => ['throw' => "agent type 'pipeline-relay-check' not found"]]);
+
+    expect(dispatch_cli(['finish', $start['manifest'], json_encode($replay['result'])])['json'])
+        ->toBe(['action' => 'halt', 'reason' => AUTOFLOW_FRESH_SESSION]);
+    expect(manifest_read($start['manifest'])['cursor'])->toBe(['leg' => 'handoff', 'status' => 'halted', 'reason' => AUTOFLOW_FRESH_SESSION]);
 });
 
 it('checks a smoke run too, before its stub steps (#134)', function () {

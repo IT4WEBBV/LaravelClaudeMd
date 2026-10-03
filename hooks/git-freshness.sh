@@ -5,35 +5,42 @@
 # Wired into ~/.claude/settings.json. Prints Claude Code hook JSON on stdout.
 #
 #   session    SessionStart — bring the config repos up to date (see
-#              sync_config_repos), then check the directory the session was
-#              launched in. The only thing knowable before anything has been
-#              touched.
+#              sync_config_repos, which also marks each config repo as
+#              touched: every skill read lands there), then check the
+#              directory the session was launched in and mark its repo too.
 #
-#   edit       PostToolUse on Edit|Write — check the repo that owns the file
-#              being written, once per repo per session. This is the one that
-#              matters: it anchors on the repo actually being worked in, which
-#              is not necessarily where the session was launched, and it fires
-#              at the moment staleness starts costing something — right before
-#              new work lands on an old base.
+#   touch      PreToolUse on Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep|Bash
+#              — check each repo the tool call acts on, the first time this
+#              session touches it (touch_targets says how a call names its
+#              paths; for Bash, the cd and git -C words, else the cwd). It runs
+#              before the tool, so a first Read already sees the fast-forwarded
+#              main and the warning arrives before any work lands on an old
+#              base. Later touches in the repo cost the payload parsing and
+#              a rev-parse per named path.
+#
+#   edit       PostToolUse on Edit|Write — the legacy wiring: the same check on
+#              the written file's repo, sharing touch's markers, so with both
+#              wired it is a no-op. Remove it once touch is wired.
 #
 #   checkout   PostToolUse on `git checkout` — a branch switch changes the
-#              answer, so drop this session's cached verdicts and stay silent.
-#              The next edit re-checks.
+#              answer, so release the claim on the repo the command ran in and
+#              stay silent. Its next touch re-checks; other repos stay claimed.
+#
+# Any other mode does nothing.
 #
 # Why this exists: `git status` only compares HEAD against its *tracking* branch,
 # so a feature branch perfectly in sync with its own remote reads as "up to date"
 # even when origin/main has moved underneath it. That is the most common
 # stale-checkout case, and it is invisible to `git status`.
 #
-# What it deliberately does NOT report: the commit count. "639 commits behind
-# origin/main" is a fact with no action attached — it is almost always true and
-# almost never means anything. Measured across a full set of checkouts, most
-# branches that were "behind" had no local commits at all, so there was nothing
-# to protect; and where there was local work, a 639-commit gap came down to five
-# touched files, three of which actually conflicted. This script reports
-# consequences instead: migrations your dev database is missing, lockfiles that
-# moved, files you will have to merge by hand. If none of those apply, it says
-# nothing at all.
+# What it reports: a working branch behind its base gets one line with the
+# count. A checked repo is a repo about to be worked in, and new work on a
+# stale base is the cost, whether or not the branch has commits of its own yet.
+# What makes that line actionable are the consequences under it: migrations
+# your dev database is missing, lockfiles that moved, files you will have to
+# merge by hand. A /pipeline run's own branch gets neither, because the run's
+# code decides when it merges its base. A repo that is current says so in one
+# quiet line of context and nothing on screen.
 #
 # The one thing it changes on its own is the local base branch: main/master is
 # fast-forwarded to match origin so that a branch cut later starts from a current
@@ -78,7 +85,8 @@ config_fetch_seconds=5  # tighter than max_fetch_seconds: the session repo still
 
 config_notes=""
 config_tags=""
-emitted=""
+repo_context=""
+repo_summary=""
 
 payload=""
 [ -t 0 ] || payload=$(cat 2>/dev/null)
@@ -89,6 +97,87 @@ payload_field() {
     printf '%s' "$payload" \
         | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" \
         | head -1
+}
+
+# Undo a JSON string's escapes: \n and \t become a newline and a tab, any other
+# escaped character becomes that character (\" \\ \/, but also \r as r and
+# \uXXXX as uXXXX: no path we resolve needs those).
+json_unescape() {
+    awk '{
+        out = ""
+        for (i = 1; i <= length($0); i++) {
+            c = substr($0, i, 1)
+            if (c == "\\" && i < length($0)) {
+                i++
+                c = substr($0, i, 1)
+                if (c == "n") c = "\n"
+                else if (c == "t") c = "\t"
+            }
+            out = out c
+        }
+        print out
+    }'
+}
+
+# A string field of the payload with its JSON escapes respected, which
+# payload_field does not do: a Bash command routinely holds quotes.
+payload_string() {
+    printf '%s' "$payload" \
+        | sed -nE 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"((\\.|[^"\\])*)".*/\1/p' \
+        | head -1 \
+        | json_unescape
+}
+
+# Each word that follows `cd` or `git -C` at a command boundary (line start,
+# ; & | ( or whitespace), up to whitespace, ; & | or ), one per line, as
+# written. awk's match() rather than grep -o, whose handling of a ^ inside an
+# alternation differs between BSD and GNU.
+bash_words() {
+    awk '{
+        line = " " $0
+        while (match(line, /[;&|( \t](cd|git[ \t]+-C)[ \t]+[^ \t;&|)]+/)) {
+            word = substr(line, RSTART + 1, RLENGTH - 1)
+            sub(/^(cd|git[ \t]+-C)[ \t]+/, "", word)
+            print word
+            line = substr(line, RSTART + RLENGTH)
+        }
+    }'
+}
+
+# The absolute path a word from a Bash command names: surrounding quotes
+# stripped, a leading ~ as $HOME, a relative path against directory $2. Status
+# 1 for a word only the shell could resolve (a variable, a substitution).
+resolve_word() {
+    local word=$1
+
+    word=${word#\"}
+    word=${word#\'}
+    word=${word%\"}
+    word=${word%\'}
+    case "$word" in
+        '' | *'$'* | *'`'*) return 1 ;;
+        '~')                word=$HOME ;;
+        '~/'*)              word="$HOME/${word#'~/'}" ;;
+    esac
+
+    absolute_path "$word" "$2"
+}
+
+# The directories a Bash call works in: every existing one its command names
+# with cd or git -C, else directory $1, the call's cwd. A word that does not
+# resolve is a miss, visible as a missing freshness line.
+bash_targets() {
+    local cwd=$1 word dir found=""
+
+    while IFS= read -r word; do
+        [ -n "$word" ] || continue
+        dir=$(resolve_word "$word" "$cwd") || continue
+        [ -d "$dir" ] || continue
+        printf '%s\n' "$dir"
+        found=1
+    done <<< "$(payload_string command | bash_words)"
+
+    [ -n "$found" ] || printf '%s\n' "$cwd"
 }
 
 session_id=$(payload_field session_id)
@@ -154,8 +243,9 @@ newest_fetch_mtime() {
     printf '%s' "$newest"
 }
 
-# Print this invocation's one hook JSON object. Whatever sync_config_repos found
-# rides along, because Claude Code reads a single object per hook run.
+# Print this invocation's one hook JSON object: the repo reports collected in
+# repo_context/repo_summary, plus whatever sync_config_repos found, because
+# Claude Code reads a single object per hook run.
 emit() {
     local event=$1 context=$2 summary=$3
 
@@ -167,7 +257,6 @@ emit() {
     if [ -n "$config_tags" ]; then
         summary="${summary}${summary:+ }Config repos: ${config_tags}."
     fi
-    emitted=1
 
     printf '{'
     printf '"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}' \
@@ -178,6 +267,17 @@ emit() {
         printf ',"suppressOutput":true'
     fi
     printf '}\n'
+}
+
+# Add one repo's report to this invocation's single emit(). Reports are joined
+# by a blank line, summaries by a space.
+add_report() {
+    local context=$1 summary=$2
+
+    repo_context="${repo_context}${repo_context:+
+
+}${context}"
+    [ -z "$summary" ] || repo_summary="${repo_summary}${repo_summary:+ }${summary}"
 }
 
 # Incoming changes whose arrival has a concrete local consequence. Anything that
@@ -375,6 +475,8 @@ sync_base_branch() {
 
 # Fetch origin in the current repo, unless it fetched within the TTL. The network
 # call is capped at $1 seconds: a dead connection must not hang the session.
+# Returns 1 when a fetch ran and did not finish (killed at the cap, offline,
+# refused), so the caller can say its answer is only as fresh as the last fetch.
 fetch_if_stale() {
     local cap=$1 now last fetch_pid ticks=0
 
@@ -394,13 +496,15 @@ fetch_if_stale() {
         sleep 0.25
         ticks=$((ticks + 1))
     done
-    wait "$fetch_pid" 2>/dev/null
+    wait "$fetch_pid" 2>/dev/null || return 1
 
     # Re-point origin/HEAD at the remote's real default branch. This symref
     # is cached at clone time and goes stale silently — a clone made when
     # `develop` was default still claims `develop` years after the repo
     # moved to `main`, which would have us measure against the wrong branch.
+    # Skipped after a failed fetch: it is a second network call, uncapped.
     git remote set-head origin --auto >/dev/null 2>&1
+    return 0
 }
 
 # The branch the current repo is measured against: origin/HEAD, which
@@ -523,6 +627,13 @@ sync_config_repos() {
     while IFS= read -r repo; do
         [ -n "$repo" ] && cd "$repo" 2>/dev/null || continue
         git rev-parse --git-dir >/dev/null 2>&1 || continue
+
+        # Every skill is a symlink into this checkout, so nearly every session
+        # reads a file here. The session has just synced it: a skill read must
+        # not check it again and tell a session that does not work here to
+        # raise it and wait.
+        claim_repo "$(git rev-parse --show-toplevel)" || :
+
         name=$(basename "$repo")
         base_ref=$(resolve_base_ref)
 
@@ -572,124 +683,255 @@ remind_retired_vault() {
     config_tags="${config_tags}${config_tags:+, }SecondBrain leftovers found"
 }
 
-# Report on the repo containing $1. Prints hook JSON, or nothing when the path
-# is not a git repo with an origin.
+# Path $1 as an absolute path, a relative one taken against directory $2.
+absolute_path() {
+    case "$1" in
+        /*) printf '%s\n' "$1" ;;
+        *)  printf '%s/%s\n' "$2" "$1" ;;
+    esac
+}
+
+# The repo path $1 is in: its --show-toplevel. A path that is no directory is
+# looked up by its dirname, so a file about to be written still finds its repo.
+# Prints nothing, status 1, when the path does not exist or is in no repo. Each
+# worktree, a slot included, is its own toplevel.
+repo_toplevel() {
+    local dir=$1
+
+    [ -d "$dir" ] || dir=$(dirname "$dir")
+    [ -d "$dir" ] || return 1
+    git -C "$dir" rev-parse --show-toplevel 2>/dev/null
+}
+
+# Claim repo $1 for this session: true the first time only. mkdir is atomic, so
+# of two tool calls racing into one repo exactly one wins, and a marker left as
+# a file by an older edit mode blocks it as well. The claim comes before the
+# check, so a repo that fails it (no origin, a dead network) is not retried.
+claim_repo() {
+    mkdir -p "$cache_dir" 2>/dev/null || return 1
+    mkdir "$(repo_marker "$1")" 2>/dev/null
+}
+
+# The marker that claims repo $1 for this session.
+repo_marker() {
+    printf '%s/%s\n' "$cache_dir" "$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')"
+}
+
+# Release this session's claim on each repo among paths $1 (one per line), so
+# its next touch checks it again. A file marker left by an older edit mode goes
+# the same way.
+release_repos() {
+    local target toplevel
+
+    while IFS= read -r target; do
+        [ -n "$target" ] || continue
+        toplevel=$(repo_toplevel "$target") || continue
+        [ -n "$toplevel" ] || continue
+        rm -rf "$(repo_marker "$toplevel")" 2>/dev/null
+    done <<< "$1"
+}
+
+# The paths the payload's tool call acts on, one per line. Tools that carry no
+# path (WebFetch, MCP tools, Task tools) name none.
+touch_targets() {
+    local cwd path
+
+    cwd=$(payload_field cwd)
+    case "$(payload_field tool_name)" in
+        Read | Edit | Write | MultiEdit) path=$(payload_field file_path) ;;
+        NotebookEdit)                    path=$(payload_field notebook_path) ;;
+        Glob | Grep)                     path=$(payload_field path); path=${path:-$cwd} ;;
+        Bash)                            bash_targets "$cwd"; return 0 ;;
+        *)                               return 0 ;;
+    esac
+
+    [ -z "$path" ] || absolute_path "$path" "$cwd"
+}
+
+# Check each repo among paths $2 (one per line) that this session has not
+# claimed yet, then print one $1 hook object for all of them, or nothing.
+check_first_touches() {
+    local event=$1 target toplevel
+
+    while IFS= read -r target; do
+        [ -n "$target" ] || continue
+        toplevel=$(repo_toplevel "$target") || continue
+        [ -n "$toplevel" ] || continue
+        claim_repo "$toplevel" || continue
+        check_repo "$toplevel" </dev/null
+    done <<< "$2"
+
+    [ -z "$repo_context" ] || emit "$event" "$repo_context" "$repo_summary"
+}
+
+# Is branch $1 a /pipeline run's own branch? Its manifest sits in the worktree at
+# the path manifest_path() in skills/pipeline/checks/manifest.php builds, and the
+# run's own code decides whether a step merges the base (pipeline engine.md
+# §Catching up with the base): telling every step agent to raise it and wait on
+# its first Read would contradict the brief it runs on.
+runs_pipeline() {
+    local toplevel
+
+    toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
+    [ -f "$toplevel/.claude/pipeline/$(printf '%s' "$1" | tr '/' '-').json" ]
+}
+
+# What catching up with base $1 costs the local work: migrations, lockfiles,
+# files to merge by hand. Only work to protect earns it: a branch with no local
+# commits and a clean tree catches up as a plain fast-forward.
+report_consequences() {
+    local base_ref=$1 ahead dirty mb conflicts n_conf shown
+
+    ahead=$(git rev-list --count "$base_ref..HEAD" 2>/dev/null || echo 0)
+    dirty=$(git status --porcelain 2>/dev/null | grep -c . || true)
+    [ "${ahead:-0}" -gt 0 ] || [ "${dirty:-0}" -gt 0 ] || return 0
+
+    mb=$(git merge-base HEAD "$base_ref" 2>/dev/null)
+    [ -n "$mb" ] || return 0
+    classify_incoming "$mb" "$base_ref"
+
+    # No local commits means no divergence, so nothing can conflict.
+    [ "${ahead:-0}" -gt 0 ] || return 0
+    conflicts=$(predict_conflicts "$mb" "$base_ref")
+    n_conf=$(count_lines "$conflicts")
+    [ "${n_conf:-0}" -gt 0 ] || return 0
+
+    shown=$(printf '%s\n' "$conflicts" | head -"$max_listed_files" | sed 's/^/      /')
+    insights="${insights}
+  - catching up would need manual merging in ${n_conf} file(s):
+${shown}"
+    if [ "$n_conf" -gt "$max_listed_files" ]; then
+        insights="${insights}
+      (+$((n_conf - max_listed_files)) more)"
+    fi
+    tags="${tags}${tags:+, }${n_conf} to merge by hand"
+}
+
+# The working branch against base $3, after the base sync. A branch behind it
+# gets the headline with its count, then its consequences; a detached HEAD
+# ($2 empty) names no branch to bring up, so it gets the consequences only; a
+# /pipeline run's own branch gets neither.
+report_behind_base() {
+    local name=$1 branch=$2 base_ref=$3 behind
+
+    [ -n "$base_ref" ] || return 0
+    if [ -n "$branch" ] && runs_pipeline "$branch"; then
+        return 0
+    fi
+
+    behind=$(git rev-list --count "HEAD..$base_ref" 2>/dev/null || echo 0)
+    [ "${behind:-0}" -gt 0 ] || return 0
+
+    if [ -n "$branch" ]; then
+        headline="Stale checkout: $name on '$branch' is $behind commit(s) behind $base_ref."
+        tags="${tags}${tags:+, }$behind behind $base_ref"
+    fi
+    report_consequences "$base_ref"
+}
+
+# Someone pushed to *this* branch: another machine, or another slot, is ahead
+# of this checkout. Always worth knowing and always actionable.
+report_pushed_elsewhere() {
+    local upstream=$1 behind
+
+    [ -n "$upstream" ] || return 0
+    behind=$(git rev-list --count "HEAD..$upstream" 2>/dev/null || echo 0)
+    [ "${behind:-0}" -gt 0 ] || return 0
+
+    insights="${insights}
+  - $upstream has $behind commit(s) not in this checkout — another machine or slot pushed to this branch; pull before continuing"
+    tags="${tags}${tags:+, }branch pushed elsewhere"
+}
+
+# The fetch did not finish: the report stands, but only for the last fetch.
+report_fetch_failed() {
+    fetch_note="Fetch from origin did not finish (timed out after ${max_fetch_seconds}s, or failed); freshness unknown, measured against the last fetch ($1)."
+    tags="${tags}${tags:+, }freshness unknown"
+}
+
+# Fold this repo's findings into one report: the headline (or the consequences'
+# header) with the raise-and-wait instruction, then the notes that ask for no
+# decision. A repo with nothing to say gets one quiet line of context.
+add_repo_report() {
+    local name=$1 branch=$2 age=$3 context="" summary=""
+
+    if [ -n "$headline$insights" ]; then
+        context="${headline:-Stale checkout with consequences: $name on '$branch'}${insights}
+Last fetch: $age.
+
+Do NOT pull, rebase, or merge on your own initiative. Raise this with the user
+before working in this repo and wait for their decision: bring the branch up to
+date, or deliberately continue on the current base."
+    fi
+
+    if [ -n "$fetch_note" ]; then
+        context="${context}${context:+
+
+}${fetch_note}"
+    fi
+
+    # A sync that changed nothing anyone has to act on is still recorded, so
+    # the reason main moved is never a mystery; it just earns no line on screen.
+    if [ -n "$sync_notes" ]; then
+        context="${context}${context:+
+
+}Base branch sync: $name${sync_notes}"
+    fi
+
+    if [ -z "$context" ]; then
+        add_report "git freshness: $name on '$branch' — nothing incoming that affects this work (fetched $age)." ""
+        return 0
+    fi
+
+    [ -z "$tags" ] || summary="$name '$branch': $tags."
+    if [ -n "$sync_tags" ] && [ -n "$summary" ]; then
+        summary="$summary Also: $sync_tags."
+    elif [ -n "$sync_tags" ]; then
+        summary="$name: $sync_tags."
+    fi
+
+    add_report "$context" "$summary"
+}
+
+# Report on the repo containing $1 into repo_context/repo_summary, which the
+# mode emits. Adds nothing when the path is not a git repo with an origin.
 check_repo() {
-    local target=$1 event=$2
+    local target=$1
 
     cd "$target" 2>/dev/null || return 0
     git rev-parse --git-dir >/dev/null 2>&1 || return 0
     git remote get-url origin >/dev/null 2>&1 || return 0
 
-    fetch_if_stale "$max_fetch_seconds"
+    # A failed fetch rewrites FETCH_HEAD as well, so its age is taken before.
+    local fetched=1 last_fetch
+    last_fetch=$(newest_fetch_mtime)
+    fetch_if_stale "$max_fetch_seconds" || fetched=""
+    [ -z "$fetched" ] || last_fetch=$(newest_fetch_mtime)
 
-    local age
-    age=$(( $(date +%s) - $(newest_fetch_mtime) ))
-
-    local branch upstream base_ref
+    local name age branch upstream base_ref
+    name=$(basename "$target")
+    age=$(human_age $(( $(date +%s) - last_fetch )))
     branch=$(git symbolic-ref --short -q HEAD 2>/dev/null || echo "")
-    [ -z "$branch" ] && branch="(detached HEAD)"
-
     upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo "")
     base_ref=$(resolve_base_ref)
 
+    headline=""
+    fetch_note=""
     insights=""
     tags=""
     sync_notes=""
     sync_tags=""
 
-    # Catch the local base branch up first, so a branch cut later in this
-    # session starts from the right base rather than from wherever main was
-    # left the last time anyone pulled by hand.
+    # Catch the local base branch up first, so the count below, and a branch
+    # cut later in this session, measure against the right base.
     sync_base_branch "$base_ref"
+    report_behind_base "$name" "$branch" "$base_ref"
 
-    # Someone pushed to *this* branch. Always worth knowing and always
-    # actionable — it means another machine, or another slot, is ahead of you.
-    local counts behind_up
-    if [ -n "$upstream" ]; then
-        counts=$(git rev-list --left-right --count "$upstream...HEAD" 2>/dev/null || echo "0 0")
-        behind_up=$(echo "$counts" | awk '{print $1+0}')
-        if [ "$behind_up" -gt 0 ]; then
-            insights="${insights}
-  - $upstream has $behind_up commit(s) not in this checkout — another machine or slot pushed to this branch; pull before continuing"
-            tags="${tags}${tags:+, }branch pushed elsewhere"
-        fi
-    fi
+    # A branch whose upstream is the base already got the behind line.
+    [ "$upstream" = "$base_ref" ] || report_pushed_elsewhere "$upstream"
+    [ -n "$fetched" ] || report_fetch_failed "$age"
 
-    # The base branch has moved. Only speak if there is local work to protect: a
-    # branch with no local commits and a clean tree catches up as a risk-free
-    # fast-forward, and announcing that is precisely the noise this replaces.
-    local behind_base ahead_base dirty mb conflicts n_conf shown
-    if [ -n "$base_ref" ] && [ "$upstream" != "$base_ref" ]; then
-        behind_base=$(git rev-list --count "HEAD..$base_ref" 2>/dev/null || echo 0)
-        ahead_base=$(git rev-list --count "$base_ref..HEAD" 2>/dev/null || echo 0)
-        dirty=$(git status --porcelain 2>/dev/null | grep -c . || true)
-
-        if [ "$behind_base" -gt 0 ] && { [ "$ahead_base" -gt 0 ] || [ "${dirty:-0}" -gt 0 ]; }; then
-            mb=$(git merge-base HEAD "$base_ref" 2>/dev/null)
-
-            if [ -n "$mb" ]; then
-                classify_incoming "$mb" "$base_ref"
-
-                # No local commits means no divergence, so nothing can conflict.
-                if [ "$ahead_base" -gt 0 ]; then
-                    conflicts=$(predict_conflicts "$mb" "$base_ref")
-                    n_conf=$(count_lines "$conflicts")
-                    if [ "${n_conf:-0}" -gt 0 ]; then
-                        shown=$(printf '%s\n' "$conflicts" | head -"$max_listed_files" | sed 's/^/      /')
-                        insights="${insights}
-  - catching up would need manual merging in ${n_conf} file(s):
-${shown}"
-                        if [ "$n_conf" -gt "$max_listed_files" ]; then
-                            insights="${insights}
-      (+$((n_conf - max_listed_files)) more)"
-                        fi
-                        tags="${tags}${tags:+, }${n_conf} to merge by hand"
-                    fi
-                fi
-            fi
-        fi
-    fi
-
-    # Nothing with a consequence attached: stay silent. This is the common case,
-    # and keeping it silent is the entire point of the rewrite.
-    if [ -z "$insights" ] && [ -z "$sync_notes" ]; then
-        emit "$event" \
-            "git freshness: $(basename "$target") on '$branch' — nothing incoming that affects this work (fetched $(human_age "$age"))." \
-            ""
-        return 0
-    fi
-
-    local context="" summary=""
-
-    if [ -n "$insights" ]; then
-        context="Stale checkout with consequences: $(basename "$target") on '$branch'${insights}
-Last fetch: $(human_age "$age").
-
-Do NOT pull, rebase, or merge on your own initiative. Raise this with the user
-before starting work and let them decide whether to bring the branch up to date
-or deliberately continue on the current base."
-        summary="$(basename "$target") '$branch': ${tags} — incoming from ${base_ref:-origin}."
-    fi
-
-    # A sync that changed nothing anyone has to act on still gets recorded in
-    # the context, so the reason main moved is never a mystery — it just does
-    # not earn a line on screen.
-    if [ -n "$sync_notes" ]; then
-        context="${context}${context:+
-
-}Base branch sync: $(basename "$target")${sync_notes}"
-    fi
-
-    if [ -n "$sync_tags" ]; then
-        if [ -n "$summary" ]; then
-            summary="${summary} Also: ${sync_tags}."
-        else
-            summary="$(basename "$target"): ${sync_tags}."
-        fi
-    fi
-
-    emit "$event" "$context" "$summary"
+    add_repo_report "$name" "${branch:-(detached HEAD)}" "$age"
 }
 
 # Sourcing this file with GIT_FRESHNESS_LIB=1 defines the functions above
@@ -700,43 +942,43 @@ fi
 
 case "$mode" in
     checkout)
-        # A branch switch invalidates every verdict cached for this session.
-        [ -n "$session_id" ] && rm -rf "$cache_dir" 2>/dev/null
+        # A branch switch changes the answer for the repo it ran in, and only
+        # that one: the config repos session claimed stay claimed.
+        release_repos "$(bash_targets "$(payload_field cwd)")"
         exit 0
         ;;
 
-    edit)
-        file_path=$(payload_field file_path)
-        [ -n "$file_path" ] || exit 0
-
-        dir=$file_path
-        [ -d "$dir" ] || dir=$(dirname "$file_path")
-        [ -d "$dir" ] || exit 0
-
-        toplevel=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || exit 0
-        [ -n "$toplevel" ] || exit 0
-
-        # Once per repo per session. The marker is written before the check runs
-        # so that non-repos and origin-less repos are cached too, and a second
-        # edit never re-spawns the work.
-        marker="$cache_dir/$(printf '%s' "$toplevel" | tr -c 'A-Za-z0-9._-' '_')"
-        [ -e "$marker" ] && exit 0
-        mkdir -p "$cache_dir" 2>/dev/null && : > "$marker" 2>/dev/null
-
-        check_repo "$toplevel" PostToolUse
+    touch)
+        check_first_touches PreToolUse "$(touch_targets)"
         ;;
 
-    session | *)
+    edit)
+        # The legacy PostToolUse wiring: the same check on the written file's
+        # repo, sharing touch's markers, so with both wired it is a no-op. It
+        # reads file_path without tool_name, as it always has.
+        check_first_touches PostToolUse "$(payload_field file_path)"
+        ;;
+
+    session)
         # Nothing has been edited yet, so the session's own cwd is all we have.
         repo=$(payload_field cwd)
         [ -n "$repo" ] && [ -d "$repo" ] || repo="$PWD"
 
         sync_config_repos
         remind_retired_vault
-        check_repo "$repo" SessionStart
 
-        # check_repo stays silent outside a git repo; config news still gets out.
-        [ -z "$emitted" ] && [ -n "$config_notes$config_tags" ] && emit SessionStart "" ""
+        # Mark the launch repo as touched, so its first tool call does not
+        # report it again. A resumed or cleared session checks regardless.
+        toplevel=$(repo_toplevel "$repo") && claim_repo "$toplevel"
+        check_repo "${toplevel:-$repo}"
+
+        # check_repo adds nothing outside a git repo; config news still gets out.
+        [ -z "$repo_context$config_notes$config_tags" ] \
+            || emit SessionStart "$repo_context" "$repo_summary"
+        ;;
+
+    *)
+        exit 0
         ;;
 esac
 

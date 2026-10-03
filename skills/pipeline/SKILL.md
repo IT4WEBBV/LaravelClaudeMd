@@ -106,6 +106,8 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    manifest's `base`, else the default branch), then
    `php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff"`.
    `done` or a halt: report it and stop. A resume starts here: `launch` starts from the cursor.
+   A `fresh session:` halt is resumed from a new session, where `/pipeline` runs `launch` from the cursor:
+   in this session every start halts alike.
 3. **Start the saved workflow `pipeline-autoflow` through the detour** (#134). Claude Code relays the
    owner's last chat message to every step of a workflow started in a reply a human message opened,
    and the steps then do that message instead of their own work; a reply a background job's notice
@@ -133,6 +135,8 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    again, with no `--from` and no `--decision`, and nothing else: no PR body entry, no proof page, no
    question; the report gets one line, *restarted through the detour: the first start was framed*. A
    `relay:` halt without `relaunch` is a halt like any other.
+   A `fresh session:` halt (the relay check found its agent type missing) is resumed from a new session, as
+   in step 2.
 5. **`finish` printed `done`: the CI gate** on the PR's head commit, which must be the worktree's `HEAD`
    (`references/engine.md` §The CI gate), polled in one background Bash; wait for its completion notice:
    `poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll); echo "$answer" | grep -q '"action":"wait"'; do sleep 30; poll=$((poll + 1)); done; echo "$answer"`.
@@ -150,8 +154,8 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    merge, which marks the page `merged` or `closed` when it fires).
 
 **Remove when** upstream fixes the relay (anthropics/claude-code#95369, #96640): the detour, the relay
-check, `agents/pipeline-relay-check.md` and the hook's agents link go together (`references/engine.md`
-§`autoflow`).
+check, `launch`'s link check and the `fresh session:` reasons, `agents/pipeline-relay-check.md` and the
+hook's agents link go together (`references/engine.md` §`autoflow`).
 
 `~/.claude/workflows/pipeline-autoflow.js` is a symlink to `workflow/pipeline-autoflow.js`, and
 `~/.claude/agents/pipeline-relay-check.md` one to `agents/pipeline-relay-check.md`, both linked by

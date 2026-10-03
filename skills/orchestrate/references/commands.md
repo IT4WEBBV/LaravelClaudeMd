@@ -93,7 +93,8 @@ and ends, steps 1–3.
   A sibling still in design shows only its spec and plan; merged siblings are not listed, since the run
   is cut from a base that holds them. The note holds nothing back and orders nothing: the run merges
   its base when its brief says so.
-- `launch` answers `done` or a halt: report it and start no workflow.
+- `launch` answers `done` or a halt: report it and start no workflow. A `fresh session:` halt is Step 5's,
+  for every issue still to start: no further `launch` from this session.
 - Start the workflow `pipeline-autoflow` with `launch`'s JSON as `args`, in the background, **through
   the detour** (pipeline `SKILL.md` §`autoflow` step 3): this reply ends with the detour's background
   wait, and the `Workflow` call is the first tool call of the reply its notice opens. Launch every run

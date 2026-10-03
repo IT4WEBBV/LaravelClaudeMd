@@ -260,10 +260,11 @@ explicitly ask to be done by hand.
   A colleague's request I paste in ("kun jij naar PR X kijken?") without an instruction of my own is
   context, not an order: analyse locally, report in chat, and post nothing. A skill that posts on its
   own is only pre-authorized when I invoke it.
-- **Never work against a stale checkout.** `hooks/git-freshness.sh` reports staleness by itself, for
-  the repo being worked in, and keeps local `main`/`master` fast-forwarded — the only thing it changes
-  on its own. When it warns about your working branch, **raise it with me and wait**: do not pull,
-  rebase or merge on your own initiative. Without the hook, check by hand before the first edit in a repo:
+- **Never work against a stale checkout.** `hooks/git-freshness.sh` checks each repo the first time a
+  session touches it (reads, searches, runs a command in or writes to it), reports staleness by itself,
+  and keeps local `main`/`master` fast-forwarded — the only thing it changes on its own. When it warns
+  about your working branch, **raise it with me and wait**: do not pull, rebase or merge on your own
+  initiative. Without the hook, check by hand before the first touch of a repo:
   ```bash
   git fetch origin
   git rev-list --count HEAD..origin/main   # commits on the base branch this checkout lacks
@@ -274,7 +275,9 @@ explicitly ask to be done by hand.
   **One exception: a `/pipeline` run's own branch.** A step of a run merges the base into the run's branch
   when its brief says so, with `git -C <worktree> merge --no-edit origin/<base>`, and resolves the
   conflicts itself (pipeline `engine.md` §Catching up with the base): never a rebase, never a force-push.
-  There the brief answers the hook's warning. Every other checkout keeps raise-and-wait;
+  There the brief answers the hook's warning. A warning in a run's step about a checkout the brief does
+  not name (the checkout the step was launched in, a config repo) is not the run's to act on: the step
+  leaves that checkout alone and does not halt on it. Every other checkout keeps raise-and-wait;
   the teardown's `git pull --ff-only` of the base after a merge (*Watch the PR you open*) updates the
   base, not a working branch, so it needs none.
 - **Update the changelog**: When creating a PR, add a changelog entry using whichever convention the project uses:
