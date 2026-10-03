@@ -9,6 +9,8 @@
  * the skill's non-goal: "no persistent state not reconstructable from git + gh".
  */
 
+require_once __DIR__ . '/questions.php';
+
 /**
  * The longest a run's `title` or a shot's `title` may be. A title *names* something — the page
  * heading, the browser tab, the store index — and a sentence of findings stops naming it.
@@ -196,6 +198,29 @@ function proof_shot_state_problem(int $number, mixed $state): ?string
         $state === null => "shot {$number} has no state: " . ProofShotState::named(),
         ! is_string($state) || ProofShotState::tryFrom($state) === null
             => "shot {$number} state is " . json_encode($state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ': ' . ProofShotState::named(),
+        default => null,
+    };
+}
+
+/**
+ * What is wrong with a payload's `openQuestions`: each item an object with a non-empty `question` and a `kind`
+ * (`../references/engine.md` §Open questions). Judged on the payload, not the run as filed, so a run filed before
+ * kinds, with string items, is not refused on a write that leaves `openQuestions` out.
+ *
+ * @return list<string>
+ */
+function proof_open_questions_problems(array $payload): array
+{
+    $items = array_values((array) ($payload['openQuestions'] ?? []));
+
+    return array_values(array_filter(array_map(proof_open_question_problem(...), array_keys($items), $items)));
+}
+
+function proof_open_question_problem(int $index, mixed $item): ?string
+{
+    return match (true) {
+        ! is_array($item) || ! is_string($item['question'] ?? null) || trim($item['question']) === '' => "openQuestions[{$index}] has no question",
+        ! is_string($item['kind'] ?? null) || QuestionKind::tryFrom($item['kind']) === null => "openQuestions[{$index}] has no kind: " . QuestionKind::listed(),
         default => null,
     };
 }

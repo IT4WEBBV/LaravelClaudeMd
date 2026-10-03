@@ -43,6 +43,8 @@ it('keeps every engine.md section a brief names', function () {
             pipeline_catch_up_line(['worktree' => '/tmp/wt'], ['base' => 'origin/main', 'behind' => 1, 'shared' => []]),
             pipeline_conflict_round_line('review'),
             pipeline_conflict_round_line('resolve'),
+            pipeline_answer_round_line('review'),
+            pipeline_answer_round_line('resolve'),
         ]],
     );
     preg_match_all('/§([^,):;]+)/', implode("\n", $lines), $names);
@@ -111,7 +113,7 @@ it('keeps work-on out of the sections that describe a step', function () {
 it('keeps engine.md §The proof store in lock-step with the fields the store files and checks', function () {
     $section = lockstep_section('engine.md', 'The proof store');
 
-    foreach (['clientSummary', 'explainer', 'worktree', 'base', 'state', ...PROOF_STORE_KEYS, ...array_column(ProofShotState::cases(), 'value')] as $field) {
+    foreach (['clientSummary', 'explainer', 'worktree', 'base', 'state', ...PROOF_STORE_KEYS, ...array_column(ProofShotState::cases(), 'value'), ...array_column(QuestionKind::cases(), 'value')] as $field) {
         expect($section)->toContain("`{$field}`");
     }
     expect($section)->toContain('at most ' . PROOF_SUMMARY_MAX . ' characters');
