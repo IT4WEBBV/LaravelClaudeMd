@@ -363,6 +363,48 @@ Questions brainstorming would have asked the owner, and the answer assumed:
 - **A9. Does the measurement go on the issue?** Assumed yes, as an impersonal comment posted by the
   implement step, since "the measurement is recorded in this issue" is a done-when.
 
+Added by the plan step, for answers the plan needed and the design above does not give:
+
+- **A10. How does a doc or a brief cite a file?** Assumed by its path relative to `references/`, in every
+  pipeline doc as in the briefs: `shared/catch-up.md`, `steps/design.md`, `session.md`; `SKILL.md` and
+  `DECISIONS.md` by their name (or `../SKILL.md` from a reference). A brief's citation is that path in
+  parentheses, several separated by `, `: `(shared/checks.md, shared/suite.md)`. `DocLinksTest` resolves a
+  citation by dropping a leading `~/.claude/skills/pipeline/`, `skills/pipeline/`, `pipeline/`, `../` and
+  `references/`; a bare `SKILL.md` outside `skills/pipeline/` is another skill's and is not checked.
+- **A11. Which `references/` directory does a brief name?** Assumed the one beside the checks that print it,
+  `dirname(__DIR__) . '/references'`, in the role paragraph and in the new pointer line alike, instead of the
+  literal `~/.claude/skills/pipeline/references/`: a run launched from a checkout then reads that checkout's
+  references, as `pipeline_cli()` already runs that checkout's code. On the owner's machines the two are the
+  same directory through the skill link.
+- **A12. Does `DECISIONS.md` fall under "nothing outside `docs/` names `engine.md`"?** Assumed no: it is
+  history, as `docs/` is, and its #128 entry names the file it replaced. It cites no section of it.
+- **A13. Is the history guard's `before #<digits>` case-sensitive?** Assumed not: rule text says "Before #85"
+  as readily as "before #116".
+- **A14. Does `design:run` get a row in the overview's per-step table?** Assumed yes: it is a step of
+  `pipeline_steps()` in `interactive`, and the overview's test walks every step of both modes.
+- **A15. Where do the parts the file tables leave unassigned go?**
+  - §Who takes the PR out of draft is split by reader: the guarantee (nothing undrafts before `review-pr`'s
+    finish step) into `gates.md` §Navigation guardrail; the session running `gh pr ready` into `session.md`;
+    "not the `review-pr` skill" into `shared/review-pr.md`; the trap from a plan or a PR comment and the
+    `ci` label into `steps/implement.md`.
+  - §Stations' table becomes the overview's per-step table and the opening of each step file; *`handoff` in
+    order* goes to `machinery.md` as the spec says.
+  - `<manifest stem>` and `<base>` (§The loop) go to a new `manifest.md` §The run's files: every reader uses
+    them, and they name the manifest's own files and its `base`.
+  - The kinds of open question: their meaning in `shared/resolving.md` (the writer's rule), when each reaches
+    the owner in `session.md`, which points at the meanings.
+  - Before, after and defect shots: the payload's fields and the pairing in `shared/proof-payload.md`; taking
+    them (the base checkout, the switch back) in `steps/verify-ui.md`.
+  - The Fable usage limit stays in `session.md` §Failure policy, as one of the stops.
+  - "A design that departs from a mockup (#145, when it lands)" is not yet a rule: it leaves the rule text and
+    is noted under `DECISIONS.md`'s #146 entry.
+- **A16. What happens to a rationale longer than one line that is not history?** Assumed it is cut to one
+  line in the rule text and the rest goes to `DECISIONS.md` under the issue, PR or date that introduced it
+  (found with `git log -S`), not deleted: the maintainer is one of the three readers.
+- **A17. Runs in flight when this merges.** Assumed there are none: a brief printed before the merge names
+  `engine.md`, which a step reading after the owner's pull would not find. The owner merges between batches, as
+  for every pipeline change.
+
 ## Appendix: the measurement script
 
 ```python
