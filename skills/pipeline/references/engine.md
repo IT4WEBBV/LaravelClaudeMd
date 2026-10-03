@@ -117,6 +117,10 @@ launched the run, with its reason.
   an escalation (`pipeline_escalated()`), from which the script seeds its own, so a resume keeps
   `full` and the one exemption as a run does; an invalid `agents` override in the
   manifest halts `launch` with the other manifest checks, before anything is written.
+  So does a relay-check agent that is not linked (`dispatch_cli_relay_agent_problem()`): when
+  `~/.claude/agents/pipeline-relay-check.md` is not a file (no link, or a dangling one), `launch` halts with
+  `fresh session: ~/.claude/agents/pipeline-relay-check.md is not linked, …`, which names the hook to run and a
+  new session to resume from: Claude Code reads agent types only when a session starts (#150).
 - **The script** gives each step a schema whose `status` allows only what that step may return
   (`tables.allowed`, from `LegStatus::allowedFor()`), continues, loops back or returns on that status,
   counts each loop-back against `tables.bound`, 2 per gate (`gates.md` §Loop-backs), and returns `{action: done}` or
@@ -141,8 +145,11 @@ launched the run, with its reason.
   letters and digits, single spaces) and accepts a head that starts with the harness's clean label
   `[Workflow harness — computed task]` or with its own prompt's first 40 characters. Anything else,
   an empty head or no answer, halts with `relay: … (head: "<normalised head>")` before any step, so the
-  manifest is as `launch` left it; a check that throws halts with `the relay check failed: …` and no
-  `relay:` prefix. The start-step check runs before it, so a halt that needs no agent still starts none.
+  manifest is as `launch` left it. A check whose agent type is not found halts with `fresh session: this
+  session started before … was linked, …`: `launch` found the link, so this session predates it (#150). Any
+  other throw halts with `the relay check failed: <message>`. Neither carries `relay:`, so `finish` relaunches
+  neither: a start from the same session halts alike, and the run is resumed from a new session. The
+  start-step check runs before it, so a halt that needs no agent still starts none.
 - **A step** first runs `dispatch_cli.php brief <manifest> <leg> <step>`, followed on every step but
   the run's first by what the step before it returned: `--after <leg>:<step> --status <status>`, plus
   `--ui` after `implement` and `--size` after `design` (§The check at the next boundary). It checks that
@@ -180,8 +187,8 @@ launched the run, with its reason.
 
 **Remove when** upstream fixes the relay (anthropics/claude-code#95369, #96640) or ships a switch that
 works, which shows as the relay check no longer halting with a relay head: the detour (`../SKILL.md`
-§`autoflow` step 3), the check, `../agents/pipeline-relay-check.md` and the hook's agents link go
-together.
+§`autoflow` step 3), the check, `launch`'s link check and the `fresh session:` reasons,
+`../agents/pipeline-relay-check.md` and the hook's agents link go together.
 
 **The check at the next boundary.** The script routes on the `status` a step returns; the step's
 return is checked at the next command, by a separate process and no extra agent. `brief`, told by
