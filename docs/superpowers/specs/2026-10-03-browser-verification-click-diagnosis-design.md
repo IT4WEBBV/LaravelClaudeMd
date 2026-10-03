@@ -147,6 +147,18 @@ it adds no rule an agent would be tempted to argue away. No visual change, so `v
    was `url.includes('livewire') && method === 'POST'` and it caught the `showModal` call. Probed: a Livewire 4.2.4
    action POST has `livewire` in its URL: yes, the `showModal` POST matched (`page.on('request', …)` in the throwaway
    Playwright script).
+7. *The Testing check says `Livewire.find` is found once, but the new Red Flags line also names it: which count
+   holds?* The snippet's call line, `window.Livewire.find(`, appears exactly once; the bare word may appear in the
+   Red Flags line and in prose. The plan's grep counts `window.Livewire.find(`.
+8. *Does step 3 give the agent a ready `browser_evaluate` function, and how does it reach the clicked element?*
+   Yes: one short function taking `(element)`, passed with the clicked element's snapshot ref as `target` (the
+   tool's `target` parameter), which scrolls the element into view and returns its `outerHTML` and the
+   `outerHTML` of `document.elementFromPoint` at its centre, cut to 300 characters.
+9. *Are the four parts numbered?* No: they are four bold lead-ins in the spec's order (*What is known*, *Did the
+   click reach the server?*, *No request: look at the target*, *Only then drive the component*), since the first
+   is a finding, not a step.
+10. *Who writes the PR body's probe record?* The step that opens the PR, from the text the plan supplies under
+    its `## PR body` section; the implement step changes only the skill file.
 
 ## What was read
 
