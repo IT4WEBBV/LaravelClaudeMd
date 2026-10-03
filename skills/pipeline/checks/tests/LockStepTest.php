@@ -182,3 +182,25 @@ it('keeps proof-store.md in lock-step with the statuses, the seen key and who fi
     expect(lockstep_section('proof-store.md', 'The index'))->toContain('`seen:<repo>/<run>`');
     expect(lockstep_section('proof-store.md', 'Where a page lives'))->toContain('`handoff` files');
 });
+
+it('keeps SKILL.md the one-page overview: the state machine, a row per step, the links', function () {
+    $skill = (string) file_get_contents(__DIR__ . '/../../SKILL.md');
+
+    expect(substr_count($skill, "\n"))->toBeLessThan(150);
+    expect($skill)
+        ->toContain('description: Use when walking a feature end-to-end through the full development chain — design, plan review, handoff, implement, UI verification, PR review — interactive or unattended, and when resuming or navigating an in-progress run. Triggers on "/pipeline", "run the pipeline", "take this through the pipeline", "next step" / "go to step X" while a run is active.')
+        ->toContain("```mermaid\nstateDiagram-v2")
+        ->toContain('/pipeline [interactive|autoflow] [medium|light] [base <branch>] <idea | number | spec-path>');
+    foreach (['autoflow', 'interactive'] as $mode) {
+        foreach (pipeline_legs() as $leg) {
+            foreach (pipeline_steps($leg, $mode) as $step) {
+                $row = '/^\| `' . preg_quote("{$leg}:{$step}", '/') . '`.*`references\/' . preg_quote(pipeline_step_reference($leg, $step), '/') . '` \|$/m';
+                expect($skill)->toMatch($row, "SKILL.md has no row for {$leg}:{$step}");
+            }
+        }
+    }
+    foreach (['references/session.md', 'references/machinery.md', 'references/proof-store.md', 'references/gates.md', 'references/manifest.md', 'DECISIONS.md'] as $doc) {
+        expect($skill)->toContain("`{$doc}`");
+    }
+    expect($skill)->not->toContain('engine.md');
+});
