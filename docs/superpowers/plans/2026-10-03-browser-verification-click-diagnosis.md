@@ -39,6 +39,7 @@ plan: the plan argues from it, and its `## Assumptions` 7–10 are the answers t
 | File | Responsibility |
 |---|---|
 | `skills/browser-verification/SKILL.md` (modify) | §When a click does nothing (lines 149–168) replaced; Red Flags list gains one line |
+| the draft PR's body (no repo file) | gains a `## Probe record` section (Task 1 Step 6) |
 
 ## Review Focus
 
@@ -106,16 +107,18 @@ Replace everything from the line `## When a click does nothing` up to (not inclu
 **What is known.** `browser_click` on a TallDataTable row action
 (`<button x-on:click="$wire.call(...)">`) fires its handler, and so does a plain Playwright
 `page.click` (probed 2026-10-03 on TallDataTable 4.4, Livewire 4.2, Playwright MCP 0.0.83, #165).
-The dead clicks first reported were on ViewieMedia's forked table, whose row actions are `<span>`s,
-and on a Flux modal `wire:click` button; neither is reproduced. A click that seems to do nothing is
-a question to answer, not a harness fact to work around.
+Before TallDataTable 4.2 row actions are `<div>`s, not buttons, and ViewieMedia's fork renders
+`<span>`s; that markup is not covered. The dead clicks first reported were on ViewieMedia and on a
+Flux modal `wire:click` button; neither is reproduced. A click that seems to do nothing is a
+question to answer, not a harness fact to work around.
 
 **Did the click reach the server?** The snapshot `browser_click` returns can be taken before a
-Livewire round trip lands, so it is not the verdict. List the requests since the page loaded with
-`browser_network_requests`, `filter: "livewire"`, `static: false`. A POST after the click means the
-handler fired: `browser_wait_for` the text the result shows (the modal's heading, the new row) and
-snapshot again. `browser_network_request` with that request's `index` and `part: "request-body"`
-shows which method was called (`"method":"showModal"`).
+Livewire round trip lands, so it is not the verdict. Before clicking, run `browser_network_requests`
+with `filter: "livewire"`, `static: false` and note the last number: the list holds every request
+since the page loaded, earlier Livewire POSTs included. After the click, run it again: only a POST
+numbered higher is the click's. `browser_network_request` with that `index` and
+`part: "request-body"` showing the expected method (`"method":"showModal"`) means the handler fired:
+`browser_wait_for` the text the result shows (the modal's heading, the new row) and snapshot again.
 
 **No request: look at the target.** Run `browser_evaluate` with the clicked element's ref as
 `target`:
@@ -173,14 +176,30 @@ git add skills/browser-verification/SKILL.md
 git commit -m "Diagnose a dead click before bypassing it in browser-verification (#165)"
 ```
 
+- [ ] **Step 6: Record the probe in the PR body**
+
+The draft PR exists (`artifacts.pr`, opened by `handoff`). Append the text under `## PR body` below to its body
+under a `## Probe record` heading, the way engine.md §Catching up with the base edits it for `## Base merges`:
+read the body into a file, append, write it back, never blanking it, and only when no `## Probe record` heading is
+there yet.
+
+```bash
+gh pr view <pr> --json body -q .body > /tmp/pr-165-body.md
+test -s /tmp/pr-165-body.md && ! grep -q '^## Probe record$' /tmp/pr-165-body.md
+printf '\n## Probe record\n\n' >> /tmp/pr-165-body.md
+# append the fenced text of `## PR body` below, without its fence lines
+gh pr edit <pr> --body-file /tmp/pr-165-body.md
+```
+
+Expected: `gh pr view <pr> --json body -q .body` shows the earlier body unchanged, followed by `## Probe record` and
+the probe text. No closing keyword is written: `review-pr`'s finish step settles that (engine.md §Closing links).
+
 ## PR body
 
-For the step that opens the PR (spec *Assumptions* 10). It records the probe so the issue's questions have their
-answers in one place:
+Appended by Task 1 Step 6 under `## Probe record` (spec *Assumptions* 10). It records the probe so the issue's
+questions have their answers in one place:
 
 ```markdown
-Closes #165.
-
 `browser-verification` §When a click does nothing no longer calls the cause open or sends agents straight to
 `Livewire.find`. It states what was probed, checks for a Livewire request after the click, inspects the clicked
 element, and keeps the component bypass as the last step, which the proof must then justify.
@@ -204,5 +223,6 @@ actions are `<button x-on:click="$wire.call('showModal', 'edit', '1')">` inside 
 
 Still open, not reproduced: the Flux modal `wire:click` case (its probe was refused by the permission classifier),
 and ViewieMedia's forked table (`it4web/talldatatableviewie`), whose row actions are `<span x-on:click>`, seen under
-an earlier Playwright MCP release. The new diagnosis steps name either cause the next time it happens.
+an earlier Playwright MCP release. TallDataTable before v4.2.0 renders row actions as `<div>`s, which the probe did not
+cover either. The new diagnosis steps name either cause the next time it happens.
 ```

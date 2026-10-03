@@ -81,14 +81,16 @@ The new section, in this order:
 
 1. **What is known.** One short paragraph replacing "The cause is still open (#165)": `browser_click` on a
    TallDataTable row action (`<button x-on:click="$wire.call(...)">`) fires its handler, as plain Playwright does
-   (probed 2026-10-03, TallDataTable 4.4, Livewire 4.2, Playwright MCP 0.0.83). The dead clicks of #165 were seen on
-   ViewieMedia's forked table, whose row actions are `<span>`s, and on a Flux modal button; neither is reproduced. So
+   (probed 2026-10-03, TallDataTable 4.4, Livewire 4.2, Playwright MCP 0.0.83). Before TallDataTable 4.2 row actions are
+   `<div>`s, not buttons, and ViewieMedia's fork renders `<span>`s; that markup is not covered. The dead clicks of
+   #165 were seen on ViewieMedia and on a Flux modal button; neither is reproduced. So
    a click that seems to do nothing is first a question, not a harness fact.
 2. **Did the click reach the server?** The snapshot `browser_click` returns can be taken before a Livewire round trip
-   lands, so it is not the verdict. Run `browser_network_requests` with `filter: "livewire"` (and `static: false`);
-   a POST after the click means the handler fired: `browser_wait_for` the text the result shows (the modal's heading,
-   the new row) and snapshot again. `browser_network_request` with its number shows the body, whose `"method":"…"`
-   names the call.
+   lands, so it is not the verdict. Run `browser_network_requests` with `filter: "livewire"` (and `static: false`)
+   before the click and note the last number, since the list holds every request since the page loaded; after the
+   click, only a POST numbered higher is the click's. `browser_network_request` with that number and
+   `part: "request-body"` showing the expected `"method":"…"` means the handler fired: `browser_wait_for` the text the
+   result shows (the modal's heading, the new row) and snapshot again.
 3. **No request: look at the target.** `browser_evaluate` on the clicked element's `outerHTML` and on
    `document.elementFromPoint` at its centre: is the handler on the element that was clicked or on a wrapper, is it a
    `<span>`/`<div>` rather than a `<button>`, does something else sit on top (a backdrop, a `pointer-events` wrapper)?
@@ -157,8 +159,10 @@ it adds no rule an agent would be tempted to argue away. No visual change, so `v
 9. *Are the four parts numbered?* No: they are four bold lead-ins in the spec's order (*What is known*, *Did the
    click reach the server?*, *No request: look at the target*, *Only then drive the component*), since the first
    is a finding, not a step.
-10. *Who writes the PR body's probe record?* The step that opens the PR, from the text the plan supplies under
-    its `## PR body` section; the implement step changes only the skill file.
+10. *Who writes the PR body's probe record?* The implement step, as the plan's last step: once the draft PR exists it
+    appends the text the plan supplies under `## PR body` beneath a `## Probe record` heading, editing the body the way
+    engine.md §Catching up with the base does for `## Base merges`. `handoff` writes only its own body and reads no
+    plan section. The record carries no closing keyword: `review-pr`'s finish step settles that (§Closing links).
 
 ## What was read
 
