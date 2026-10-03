@@ -138,7 +138,15 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    `relay:` halt without `relaunch` is a halt like any other.
    A `fresh session:` halt (the relay check found its agent type missing) is resumed from a new session, as
    in step 2.
-5. **`finish` printed `done`: the CI gate** on the PR's head commit, which must be the worktree's `HEAD`
+   **`ask`** (a `blocking` open question is unanswered; `references/engine.md` §Open questions): the run
+   is done but the PR stays draft. Ask every question in one `AskUserQuestion`, 2–4 options each from its
+   `note`, the one the PR built first, recommendation first. Record each answer as the question's
+   `decision` with the answer appended, and append the same lines to the PR body (`gh pr view <pr> --json
+   body`, append, `gh pr edit <pr> --body-file`). When every answer keeps what the PR built: the diff as
+   in step 2, `launch <manifest> "<manifest stem>.diff" --decision "…"`… (it answers `done`), then step 5.
+   When any changes the code: `launch <manifest> "<manifest stem>.diff" --from review-pr --decision "…"`…
+   with all the answers, and steps 3–5 again.
+5. **`finish` printed `done`, or `ask` and every answer is recorded: the CI gate** on the PR's head commit, which must be the worktree's `HEAD`
    (`references/engine.md` §The CI gate), polled in one background Bash; wait for its completion notice:
    `poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll); echo "$answer" | grep -q '"action":"wait"'; do sleep 30; poll=$((poll + 1)); done; echo "$answer"`.
    **`ready`:** `gh pr ready <pr>`, then `php "$CHECKS/proof_cli.php" status <proof> ready` with the `proof`
@@ -146,11 +154,11 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    PR stays draft and no halt is written: put the denial in the report, and the owner runs
    `gh pr ready` by hand. **`fix`** (a red CI, a merge the last review did not see, or a conflict with the base): the diff as in step 2, then
    `launch <manifest> "<manifest stem>.diff" --from review-pr --decision "<its decision>"`, and steps
-   3–5 again. **`halt`:** `finish <manifest> '<the answer>'`, then as any halt; on a `mismatch` GitHub's
+   3–5 again. **`ask`:** as step 4's `ask`. **`halt`:** `finish <manifest> '<the answer>'`, then as any halt; on a `mismatch` GitHub's
    head and the worktree's `HEAD` differ: once they match (push the branch, or reconcile it when GitHub
    is ahead), the loop runs again by hand. **A halt after `handoff`:** the reason into the PR body,
    and the report names the proof page (`references/engine.md` §Failure policy).
-6. **Report** the result, naming the proof page (the `proof` `finish` printed), with the two cost-per-run outputs above (`run_cost_cli.php` given
+6. **Report** the result, naming the proof page (the `proof` `finish` printed), listing `finish`'s `followUps` once and then asking them as one batched *file an issue* / *drop* question, or filing them directly (a `remark` is never asked), with the two cost-per-run outputs above (`run_cost_cli.php` given
    `artifacts.proof` files its figures into the page), and arm the merge watch (`references/engine.md` §After the
    merge, which marks the page `merged` or `closed` when it fires).
 

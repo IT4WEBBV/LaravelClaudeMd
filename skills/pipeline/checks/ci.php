@@ -85,9 +85,14 @@ function pipeline_ci_verdict(array $rollup): array
  * files where a merge since the last completed review met the branch's changes, which get one review round
  * before the PR or its checks are read. A PR that conflicts with its base, or whose mergeability GitHub has
  * not worked out, is answered before its checks: GitHub runs no CI on a conflicting PR's merge ref.
+ * `$unanswered` the `blocking` open questions no decision answers (`pipeline_unanswered()`), which the owner
+ * answers before anything else is read (`../references/engine.md` §Open questions).
  */
-function pipeline_ci_answer(array $manifest, ?array $view, string $head, bool $workflows, int $poll, array $unreviewed = []): array
+function pipeline_ci_answer(array $manifest, ?array $view, string $head, bool $workflows, int $poll, array $unreviewed = [], array $unanswered = []): array
 {
+    if ($unanswered !== []) {
+        return pipeline_ci_ask($unanswered);
+    }
     if ($unreviewed !== [] && pipeline_merge_rounds($manifest) === 0) {
         return pipeline_ci_unreviewed($head, $unreviewed);
     }
@@ -117,6 +122,12 @@ function pipeline_ci_answer(array $manifest, ?array $view, string $head, bool $w
             : ['action' => 'wait', ...$read],
         'red' => pipeline_ci_red($manifest, [...$read, 'failing' => $ci['failing']]),
     };
+}
+
+/** A `blocking` open question no decision answers keeps the PR draft: the session asks the owner, records the answers and runs the gate again. */
+function pipeline_ci_ask(array $unanswered): array
+{
+    return ['action' => 'ask', 'questions' => $unanswered];
 }
 
 /** GitHub's head is not the worktree's: waited for while a push may still be showing, a halt naming both shas once it persists. */

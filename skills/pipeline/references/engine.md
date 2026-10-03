@@ -89,7 +89,8 @@ php "$CHECKS/dispatch_cli.php" launch <manifest> "<manifest stem>.diff" [--from 
 #   | {"action":"done"} | {"action":"halt","reason":…}
 # start: through the detour (SKILL.md §autoflow step 3): this reply ends on a background wait; the reply its notice opens calls the workflow pipeline-autoflow with that JSON as args, first; wait for its completion notice
 php "$CHECKS/dispatch_cli.php" finish <manifest> '<the workflow return, as JSON>'
-# → {"action":"done","proof":<artifacts.proof, or null>} | {"action":"halt","reason":…} | {"action":"halt","reason":"relay: …","relaunch":true}, once
+# → {"action":"done","proof":<artifacts.proof, or null>,"followUps":[…]} | {"action":"ask","proof":…,"questions":[…],"followUps":[…]} (§Open questions)
+#   | {"action":"halt","reason":…} | {"action":"halt","reason":"relay: …","relaunch":true}, once
 php "$CHECKS/dispatch_cli.php" ci <manifest> --poll <n>                  # after done: the CI gate, polled (§The CI gate)
 ```
 
@@ -178,6 +179,9 @@ launched the run, with its reason.
   **`gh pr ready <pr>`**, then `proof_cli.php status <proof> ready` with the `proof` `done` names
   (§The CI gate, §Who takes the PR out of draft, §The proof store); on a halt after `handoff`,
   §Failure policy's duties.
+  A `done` that holds answers `ask` instead while a `blocking` open question is unanswered: the cursor
+  still says `done`, and the session asks the owner and records the answers before the CI gate runs
+  (§Open questions). Both answers carry `followUps`, the `follow-up` questions for the report.
   A `relay:` halt also answers `relaunch: true` unless the cursor it overwrites already holds a `relay:`
   halt: the invoking session then runs `launch` again with no `--from` and no `--decision` and starts
   the run through the detour, with no PR body entry, no proof page and no question. A run that got past
@@ -576,7 +580,7 @@ Leg names are exactly `pipeline_legs()`: `design, review-plan, handoff, implemen
 | **handoff** | `dispatch_cli.php handoff <manifest>` | the same command, run by the dispatched agent | pushes the branch (never forced), opens the **draft PR** or adopts the open draft the branch already has, with `--base` on a run on a base; English title `Implement: <the spec's heading> (issue: #N)` and a body that names the spec and the plan; references the issue **without a closing keyword**, `Part of #N` (§Closing links) — this PR carries no implementation yet; sets the board Component where the repo's `## Board` names a `component-default`; posts no comment; files the run's **proof page** (§The proof store) | the command records the PR# pointer and the proof page itself, through `record`'s code |
 | **implement** | no skill: §Implement, in the current worktree (no slot) — read the item, the spec and the plan, validate the names the plan relies on, execute it test-first, running the suite and `static-analysis` after each step and `format` once before the push (§Mechanical checks); the `ci` label before the first push. **Leaves the PR draft** (below); in `autoflow` it does not wait on CI (§The CI gate). The step brings the stack up itself (§Dev-stack readiness). | — | autonomous-capable; needs the stack up | updates `last_sha`, marks implemented |
 | **verify-ui** *(conditional — runs only when `pipeline_triggers(...)['ui']`)* | `browser-verification` | the skill's "show me" hand-off is an interactive nicety | runs the check, adds the shots to the run's page in the **proof store** (`~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/`) via `checks/proof_cli.php write` — a `state` on every shot, and a first client summary and explainer — and posts a **text-only** record comment to the PR | records `verifyUi`; **non-skippable once triggered** |
-| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | a **review** agent invokes `/critique pr` (in `autoflow` it applies `/critique pr`'s procedure itself) and appends an open `pr-review` entry; the **finish** step (its resolve step) acts on it, runs the suite unless reused, reconciles closing links (§Closing links), rewrites the proof page and runs `gh pr ready`; no page opens by itself (§The proof store). In `autoflow` the finish step leaves the PR draft, and the invoking session runs the CI gate and `gh pr ready` after `finish` (§The CI gate, §Who takes the PR out of draft) | feeds the PR-review gate; writes `issue_links` onto the entry; re-runs `checks/proof_cli.php write` with the client summary, the explainer, the finalised open questions and gate ledger |
+| **review-pr** | `/critique pr` | reviewer writes a review; you read it and decide | a **review** agent invokes `/critique pr` (in `autoflow` it applies `/critique pr`'s procedure itself) and appends an open `pr-review` entry; the **finish** step (its resolve step) acts on it, runs the suite unless reused, reconciles closing links (§Closing links), rewrites the proof page and runs `gh pr ready`; no page opens by itself (§The proof store). In `autoflow` the finish step leaves the PR draft, and the invoking session runs the CI gate and `gh pr ready` after `finish` (§The CI gate, §Who takes the PR out of draft) | feeds the PR-review gate; writes `issue_links` onto the entry; re-runs `checks/proof_cli.php write` with the client summary, the explainer, the finalised open questions, each with its kind, and the gate ledger |
 
 **`handoff` in order.** `record`'s own checks first (the manifest, this step's snapshot), so a refusal
 pushes nothing. Then, read-only: `artifacts.spec` and `artifacts.plan` exist at `HEAD`, the worktree is on
@@ -920,8 +924,8 @@ replaced, never appended to; `[]` empties one), and a key it leaves out is kept.
    Its page shows the client summary and the explainer as *Pending*.
 2. **`verify-ui`** (a UI run) adds the shots and a first client summary and explainer.
 3. **The finish step** (`review-pr`'s resolve step, every run) writes the client summary and the
-   explainer as the finished work stands, the suite line under `checks`, and the final open questions
-   and ledger.
+   explainer as the finished work stands, the suite line under `checks`, and the final open questions,
+   each with its kind, and the ledger.
 
 An agent's write takes `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, so it
 lands in the directory `handoff` filed; a run without `artifacts.proof` gets its page from that write,
@@ -1013,7 +1017,7 @@ characters in five runs.
 | `headline` | one or two sentences: what was verified and the outcome. Rendered as the lead under the explainer |
 | `problem`, `solution` | the technical account; prose, blank lines become paragraphs |
 | `checks` | `tests`, `staticAnalysis` (scope-qualified), `format`, `suppressions` (list) |
-| `openQuestions` | list, carried verbatim |
+| `openQuestions` | list of `{kind, question}`: `question` verbatim, `kind` one of `blocking`, `follow-up`, `remark` (§Open questions), shown as a label before the text. `write` refuses a payload with any other item; a run filed before kinds keeps its string items, shown without a label |
 | `ledger` | list of `{gate, outcome, note}` |
 | `shots` | list of `{title, caption, route, badges, state}`. `title` is at most 70 characters and names the state shown ("Unreachable swarm"); `caption` says what the shot proves and has no limit. `state` is **required**: `before`, `after` or `defect`, the ribbon on the shot; a `before` directly followed by an `after` renders as one pair. A badge's `note` also shows on hover |
 | `shotSources` | absolute paths of the screenshots, in `shots` order, `null` for a shot carried forward with its `file`; ingested into the run's `shots/` as `<NN>-<route>-<hash>.png`, so a new shot never overwrites a carried one |
@@ -1027,7 +1031,7 @@ shot and before the pass returns, whatever its status; before it writes the page
 --abbrev-ref HEAD` names the branch. Pairing is positional: in `shots` each before shot is immediately
 followed by its after shot, so shoot the before shots on the base, then the after shots in the same order,
 and interleave them in the payload. When the base cannot render the state (a migration it does not
-expect), the before shot is left out and that is an open question, never a halt. A pass that finds a
+expect), the before shot is left out and that is an open question of kind `remark`, never a halt. A pass that finds a
 defect shoots it as `defect`; the next pass carries the earlier defect shots forward (their `file`,
 `null` in `shotSources`) beside its own.
 
@@ -1114,8 +1118,8 @@ runs (#77), while `review-pr:review` reads the diff, not CI.
 - **`implement` does not wait on CI in `autoflow`.** It adds the `ci` label before its first push (§Who
   takes the PR out of draft), pushes and returns.
   `review-pr:review` runs while CI runs. In `interactive` it watches its push's checks (§Implement).
-- **One gate, in the session that runs `gh pr ready`:** the invoking session once `finish` prints `done`
-  in `autoflow`, the finish step in `interactive`. `dispatch_cli.php ci <manifest> --poll <n>`
+- **One gate, in the session that runs `gh pr ready`:** the invoking session once `finish` prints `done`,
+  or `ask` and every answer is recorded, in `autoflow`, the finish step in `interactive`. `dispatch_cli.php ci <manifest> --poll <n>`
   (`../checks/ci.php`) reads the worktree's `HEAD` (`git rev-parse HEAD`; a git error halts at once), then
   the PR's head commit, whether it merges into its base, and its checks once (`gh pr view <pr> --json
   headRefOid,mergeable,statusCheckRollup`), writes nothing, and prints one JSON line. GitHub's head has to
@@ -1126,6 +1130,7 @@ runs (#77), while `review-pr:review` reads the diff, not CI.
 
 | Verdict on the head commit | Answer |
 |---|---|
+| `ask`: a `blocking` open question no decision answers (`autoflow`) | `ask`, with the questions, before git or gh is read; it spends no round (§Open questions) |
 | `merge`: a merge since the last completed review met the branch's changes (`autoflow`) | `fix` the first time in a run, before the PR is read; after that round the gate goes on to the rows below |
 | `mismatch`: GitHub's head is not the worktree's `HEAD` | `wait`; `halt` at the third read, naming both shas: a push GitHub shows within seconds, and one it does not show by then did not land |
 | `conflicting`: GitHub reports the PR `CONFLICTING` with its base | `fix` the first time in a run; `halt` once that round is spent |
@@ -1144,6 +1149,9 @@ poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll
 ```
 
 - **`ready`** → `gh pr ready <pr>`, then `php "$CHECKS/proof_cli.php" status <proof> ready`, `<proof>` the `proof` that `finish`'s `done` named (null: nothing to mark).
+- **`ask`** → the questions go to the owner as on `finish`'s `ask` (§Open questions); once every answer
+  is recorded, the gate runs again. The poll loop ends on it at the first read, as on every answer but
+  `wait`. It is the backstop for a resume, a skipped ask or an answer recorded under a mistyped prefix.
 - **`fix`** → one automatic round per run for each of the gate's three records: a red CI (owner, #85), a
   merge the review did not see and a conflict with the base (both below). The answer's `decision`, for a
   red `CI red on the PR's head commit <sha>: <check> failed (<link>)`, goes into `decisions` verbatim with
@@ -1191,7 +1199,7 @@ poll=1; while answer=$(php "$CHECKS/dispatch_cli.php" ci <manifest> --poll $poll
   rounds: a conflict after it halts, naming `review-pr`.
   `UNKNOWN` is a `wait`, as a pending check is, and a halt at the 120th read.
 - **In `interactive`** the finish step runs the same loop, `gh pr ready` on `ready` and then `proof_cli.php status <page> ready`, and shows any other
-  answer to the human; there is no automatic round, no merge round and no conflict round: the human
+  answer to the human; there is no automatic round, no merge round, no conflict round and no `ask`: the human
   resolves the review, sees the merge as it is made, and on a `conflicting` answer merges the base.
 - **The merge watch stays on `state`** (§After the merge): once the PR is ready, CI on its head has
   settled.
@@ -1556,8 +1564,10 @@ exists to protect.
 - **Loop back** where the review says the work is fundamentally wrong: `review-plan` → `design`,
   `verify-ui` → `implement`, `review-pr` → `implement` (`gates.md` §Loop-backs). Bounded (§Failure
   policy).
-- **Never interrupt on a finding.** Anything unresolved goes into the PR body as an open question,
-  carried **verbatim**. Ambiguity buys a line in the PR, not an interrupt.
+- **Never interrupt on a finding.** Anything unresolved goes into the PR body as an open question with
+  its kind, carried **verbatim** (§Open questions). Ambiguity buys a line in the PR, not an interrupt:
+  the run is still never interrupted mid-workflow, and a `blocking` question is asked once the workflow
+  returns.
 - **Log** the actions and the outcome on the open entry (`manifest.md`), projected onto the PR.
   *Overruling a reviewer is fine; overruling one invisibly is what turns a gate into decoration.*
 
@@ -1569,6 +1579,63 @@ saw the design leg**, gives it the point plus the code, and asks it to refute th
 `file:line`. That is judgment exercised where it pays, not a mandatory step with an outcome enum — and
 it cannot stop the run; it only informs what the resolve step does next. In `autoflow` there is none:
 a workflow agent cannot start one, and its step prompt says so.
+
+## Open questions — a kind each, and when each reaches the owner
+
+On IT4WEBBV/Deploy #480 the run finished, the CI gate went green, `gh pr ready` ran and the proof page
+opened; only then were the two open questions from the PR body asked, and the owner had already merged.
+Both were remarks on a choice already made, not forks. Before #146 nothing told a fork from a remark, and
+no command read open questions. Now every open question carries a kind, and the kind says when it
+reaches the owner:
+
+| Kind | Meaning | When it reaches the owner |
+|---|---|---|
+| `blocking` | a real fork: the answer changes this PR's code | before `gh pr ready` and before the proof is presented: `finish` answers `ask`, and the session asks it with `AskUserQuestion` right away; the PR goes ready only once no `blocking` question is open |
+| `follow-up` | work outside this PR | after the report, once, as one batched question (*file an issue* / *drop*), or filed directly |
+| `remark` | a note on a choice already made | never asked; recorded in the PR body only |
+
+- **Who writes the kind.** Both resolve steps, on every `open-question` action (`manifest.md`,
+  `actions[].kind`); `record` refuses an open question without one. Unsure is `blocking`. A `blocking`
+  question names its options in `note`, the one the PR built first. An action written before kinds
+  existed reads as `blocking`. In the PR body, under `## Open questions`, each open question is one line
+  led by its kind (`- **blocking:** …`), or the section says `None.`; on the proof page each is
+  `{kind, question}` (§The proof store).
+- **The id and the answer.** A question's id is its place in the ledger, `gate_ledger[<i>].actions[<j>]`:
+  entries are append-only and a completed entry's actions are never rewritten, so the id holds for the
+  run's life. An answer is a `decisions` entry that starts `Answer to open question <id>`, written by
+  `launch --decision` (`../checks/questions.php`). A question is open while no decision starts with its
+  prefix, so a mistyped prefix leaves it open and the gate asks again. Every question counts,
+  `plan-approval` ones included; one a later loop-back made moot is answered by keeping what was built.
+  A `plan-approval` question is asked only after the run built one branch of its fork through
+  `review-pr`, so an answer that picks the other branch goes through the detour below and may spend a
+  `pr-review` loop-back.
+- **`finish` answers `ask`** while a `blocking` question is unanswered:
+  `{"action":"ask","proof":…,"questions":[{id, gate, kind, question, note, decision}],"followUps":[{question, note}]}`,
+  and otherwise `done` with `followUps` too (`[]` when there are none). The cursor says `done` either
+  way: the workflow is finished, and what is left is the session's. `decision` is the text the session
+  completes with the owner's answer.
+- **The CI gate is the backstop.** In `autoflow`, while any `blocking` question is unanswered, `ci`
+  answers `{"action":"ask","questions":[…]}` before it reads git or gh (§The CI gate), so after a resume,
+  a skipped ask or a mistyped answer, `ready` stays out of reach. `interactive` has neither `ask`: its
+  finish step has the human at hand, who settles the questions there.
+- **The session's sequence on `ask`** (`../SKILL.md` §`autoflow` step 4; orchestrate
+  `references/commands.md` §Finish):
+  1. Ask every question in one `AskUserQuestion`: 2–4 options per question from its `note`, the one the
+     PR built first, recommendation first.
+  2. Record each answer: the question's `decision` with the owner's answer appended, as `--decision`.
+     Append the same lines at the end of the PR body (fetch the body, append, `gh pr edit --body-file`,
+     as a halt's reason is appended), below the `## Open questions` section a fix round rewrites, so the
+     answer outlives the disposable manifest.
+  3. Every answer keeps what the PR built: `launch <manifest> "<manifest stem>.diff" --decision "…"`…
+     answers `done`; then the CI gate. Any answer changes the code: `launch <manifest> "<manifest
+     stem>.diff" --from review-pr --decision "…"`… with all the answers, and a new workflow through the
+     detour. Its review step names what an answer changes as a finding, its resolve step integrates it,
+     and its `finish` may ask again about new `blocking` questions. The cycle is owner-paced, so it has
+     no bound.
+- **`follow-up`s** are listed once in the report with the ready PR (`finish`'s `followUps`), then asked
+  as one batched *file an issue* / *drop* question, or filed directly. A **`remark`** is never asked.
+- **A design that departs from a mockup** (#145, when it lands) records the departure as a `blocking`
+  open question.
 
 ## Failure policy — what still stops
 

@@ -688,8 +688,50 @@ it('finishes only after a review-pr resolve step whose return holds', function (
     expect(manifest_read($fixture['manifest'])['cursor'])->toMatchArray(['leg' => 'review-pr', 'status' => 'halted']);
 
     dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => ['leg' => 'review-pr', 'status' => 'continued'], 'gate_ledger' => [[...$open, 'actions' => [], 'outcome' => 'continued']]]);
-    expect($finish())->toBe(['action' => 'done', 'proof' => null]);
+    expect($finish())->toBe(['action' => 'done', 'proof' => null, 'followUps' => []]);
     expect(manifest_read($fixture['manifest'])['cursor'])->toBe(['leg' => 'review-pr', 'status' => 'done']);
+});
+
+/** A finished `autoflow` run's review-pr resolve step that completed its entry with `$actions`; its `finish` answer. */
+function finish_with_actions(array $actions): array
+{
+    $open = boundary_open('pr-review');
+    $fixture = boundary_fixture('review-pr', 'resolve', ['cursor' => ['leg' => 'review-pr', 'status' => 'pending'], 'gate_ledger' => [$open]]);
+    dispatch_leg_writes($fixture['manifest'], fn (array $m) => [...$m, 'cursor' => ['leg' => 'review-pr', 'status' => 'continued'], 'gate_ledger' => [[...$open, 'actions' => $actions, 'outcome' => 'continued']]]);
+
+    return [...$fixture, 'answer' => dispatch_cli(['finish', $fixture['manifest'], '{"action":"done"}'])['json']];
+}
+
+it('answers ask on a done run with an unanswered blocking question, the cursor done all the same (#146)', function () {
+    $finished = finish_with_actions([
+        ['claim' => 'Keep the <x-time> tag?', 'disposition' => 'open-question', 'note' => '<x-time> (built), a plain div', 'kind' => 'blocking'],
+        ['claim' => 'File the date-format cleanup?', 'disposition' => 'open-question', 'note' => 'outside this PR', 'kind' => 'follow-up'],
+        ['claim' => 'self-end alignment', 'disposition' => 'open-question', 'note' => 'kept', 'kind' => 'remark'],
+    ]);
+
+    expect($finished['answer'])->toBe([
+        'action' => 'ask', 'proof' => null,
+        'questions' => [[
+            'id' => 'gate_ledger[0].actions[0]', 'gate' => 'pr-review', 'kind' => 'blocking', 'question' => 'Keep the <x-time> tag?', 'note' => '<x-time> (built), a plain div',
+            'decision' => 'Answer to open question gate_ledger[0].actions[0] ("Keep the <x-time> tag?"): ',
+        ]],
+        'followUps' => [['question' => 'File the date-format cleanup?', 'note' => 'outside this PR']],
+    ]);
+    expect(manifest_read($finished['manifest'])['cursor'])->toBe(['leg' => 'review-pr', 'status' => 'done']);
+});
+
+it('answers done with the follow-ups on a run with only follow-up and remark questions, and done after an answer launch recorded (#146)', function () {
+    $followUp = ['claim' => 'File the date-format cleanup?', 'disposition' => 'open-question', 'note' => 'outside this PR', 'kind' => 'follow-up'];
+    $remark = ['claim' => 'self-end alignment', 'disposition' => 'open-question', 'note' => 'kept', 'kind' => 'remark'];
+
+    expect(finish_with_actions([$followUp, $remark])['answer'])
+        ->toBe(['action' => 'done', 'proof' => null, 'followUps' => [['question' => 'File the date-format cleanup?', 'note' => 'outside this PR']]]);
+
+    $asked = finish_with_actions([['claim' => 'Queue or cron?', 'disposition' => 'open-question', 'note' => 'cron (built), queue', 'kind' => 'blocking']]);
+    $decision = $asked['answer']['questions'][0]['decision'] . 'cron, as built';
+    expect(dispatch_cli(['launch', $asked['manifest'], $asked['diff'], '--decision', $decision])['json'])->toBe(['action' => 'done']);
+    expect(manifest_read($asked['manifest']))->toMatchArray(['cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'decisions' => [$decision]]);
+    expect(pipeline_unanswered(manifest_read($asked['manifest'])))->toBe([]);
 });
 
 it('refuses done when the last snapshot is not review-pr\'s resolve step, or there is none', function () {
@@ -830,9 +872,9 @@ it('refuses size without a readable manifest and ui without a diff file', functi
  * A finished autoflow run on PR 7, with a fake gh first on PATH that answers `pr view` from pr.json (none:
  * gh fails) and a fake git that answers `rev-parse HEAD` from head (none: git fails).
  */
-function ci_fixture(?array $view, bool $workflows = true, array $decisions = [], ?string $head = 'abc123'): array
+function ci_fixture(?array $view, bool $workflows = true, array $decisions = [], ?string $head = 'abc123', array $extra = []): array
 {
-    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'artifacts' => ['spec' => null, 'plan' => null, 'pr' => 7, 'issue' => null], 'decisions' => $decisions]);
+    $fixture = dispatch_fixture(['mode' => 'autoflow', 'cursor' => ['leg' => 'review-pr', 'status' => 'done'], 'artifacts' => ['spec' => null, 'plan' => null, 'pr' => 7, 'issue' => null], 'decisions' => $decisions, ...$extra]);
     mkdir($fixture['dir'] . '/bin');
     file_put_contents($fixture['dir'] . '/bin/gh', <<<'SH'
 #!/bin/sh
@@ -1017,6 +1059,41 @@ it('answers the merge round for an autoflow run whose finish step merged a share
 
     expect(ci_gate(ci_merge_fixture('autoflow', [$decision]))['json'])->toBe(['action' => 'wait', 'verdict' => 'unreadable']);
     expect(ci_gate(ci_merge_fixture('interactive'))['json'])->toBe(['action' => 'wait', 'verdict' => 'unreadable']);
+});
+
+/**
+ * A completed pr-review entry whose resolve step left one blocking open question, `gate_ledger[0].actions[0]`. It has
+ * no `reviewed_sha`, so the merge round finds no review to scope from (`pipeline_review_base()`) and stays out of it.
+ */
+function ci_asking_ledger(): array
+{
+    return ['gate_ledger' => [[
+        'gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-10-02T10:00:00Z', 'review' => 'r',
+        'actions' => [['claim' => 'Queue or cron?', 'disposition' => 'open-question', 'note' => 'cron (built), queue', 'kind' => 'blocking']],
+        'outcome' => 'continued',
+    ]]];
+}
+
+it('answers ask on an unanswered autoflow run without asking git or gh, and ready once launch recorded the answer (#146)', function () {
+    $fixture = ci_fixture(ci_head('SUCCESS'), true, [], null, ci_asking_ledger());
+    $decision = 'Answer to open question gate_ledger[0].actions[0] ("Queue or cron?"): ';
+
+    $asked = ci_gate($fixture)['json'];
+    expect($asked['action'])->toBe('ask');
+    expect(array_column($asked['questions'], 'decision'))->toBe([$decision]);
+    expect(is_file($fixture['dir'] . '/calls'))->toBeFalse();
+
+    file_put_contents($fixture['dir'] . '/head', 'abc123');
+    expect(dispatch_cli(['launch', $fixture['manifest'], $fixture['diff'], '--decision', "{$decision}cron, as built"])['json'])->toBe(['action' => 'done']);
+    expect(ci_gate($fixture)['json'])->toBe(['action' => 'ready', 'verdict' => 'green', 'sha' => 'abc123']);
+});
+
+it('asks again after an answer recorded under a mistyped prefix, and never in an interactive run (#146)', function () {
+    $typo = ci_fixture(ci_head('SUCCESS'), true, ['Answer to open question gate_ledger[0].action[0] ("Queue or cron?"): cron'], 'abc123', ci_asking_ledger());
+    expect(ci_gate($typo)['json']['action'])->toBe('ask');
+
+    $interactive = ci_fixture(ci_head('SUCCESS'), true, [], 'abc123', ['mode' => 'interactive', ...ci_asking_ledger()]);
+    expect(ci_gate($interactive)['json'])->toBe(['action' => 'ready', 'verdict' => 'green', 'sha' => 'abc123']);
 });
 
 function kickoff_issue(array $overrides = []): array
