@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Open questions (`../references/engine.md` §Open questions): the kind a resolve step gives each, which ones are
+ * Open questions (`../references/session.md` §Open questions): the kind a resolve step gives each, which ones are
  * still open, and how an owner's answer is recorded. Pure: it reads the manifest array and requires no other
  * check file. `pipeline_open_questions()` reads `ActionDisposition` from `record.php`, which requires this file;
  * the proof path (`proof.php`) loads this file without `record.php` and uses `QuestionKind` only.

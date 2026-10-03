@@ -1,7 +1,7 @@
 <?php
 
 /**
- * The `handoff` step (`../references/engine.md` §Stations): push the branch, open the draft PR or adopt
+ * The `handoff` step (`../references/machinery.md` §`handoff` in order): push the branch, open the draft PR or adopt
  * the one the branch has, set the board Component, file the run's proof page. The decisions are pure; `pipeline_handoff()` runs them
  * over two runners, and `dispatch_cli.php handoff` records what it returns or the halt it throws.
  */
@@ -42,7 +42,7 @@ function pipeline_handoff_title(string $spec, string $branch, ?int $issue): stri
 }
 
 /**
- * The proof page `handoff` files (`../references/engine.md` §The proof store): where the run belongs, from the
+ * The proof page `handoff` files (`../references/proof-store.md` §Where a page lives): where the run belongs, from the
  * manifest and the PR as gh lists it, `base` being the branch the PR now goes into. The title is a default, so a
  * title a step wrote stays when the step runs again.
  *
@@ -78,7 +78,7 @@ function pipeline_handoff_body(string $spec, string $plan, ?int $issue): string
 /**
  * An existing body with the lines it lacks put in front, or null when it names the spec, the plan and the
  * issue: a body is only ever added to, so what `implement` or the finish step wrote stays. `Part of` is
- * the non-closing form (`../references/engine.md` §Closing links).
+ * the non-closing form (`../references/steps/finish.md` §Closing links).
  */
 function pipeline_handoff_body_update(string $body, string $spec, string $plan, ?int $issue): ?string
 {

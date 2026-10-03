@@ -957,7 +957,7 @@ it('waits while gh cannot read the PR, and halts at the last read', function () 
 
 it('answers the issue\'s three through the CLI: a conflicting PR fix, an unknown one wait, a clean one ready (#149)', function () {
     $view = fn (string $mergeable) => ['headRefOid' => 'abc123', 'mergeable' => $mergeable, 'statusCheckRollup' => []];
-    $decision = "Conflict with the base on the PR's head commit abc123: GitHub reports PR #7 CONFLICTING with its base; review-pr's resolve step merges the base (engine.md §Catching up with the base)";
+    $decision = "Conflict with the base on the PR's head commit abc123: GitHub reports PR #7 CONFLICTING with its base; review-pr's resolve step merges the base (shared/catch-up.md)";
     $conflicting = ci_fixture($view('CONFLICTING'), false);
     $before = file_get_contents($conflicting['manifest']);
 
@@ -968,8 +968,8 @@ it('answers the issue\'s three through the CLI: a conflicting PR fix, an unknown
 });
 
 it('halts a conflict once the conflict round is spent, and finish records it on review-pr (#149)', function () {
-    $decision = "Conflict with the base on the PR's head commit abc123: GitHub reports PR #7 CONFLICTING with its base; review-pr's resolve step merges the base (engine.md §Catching up with the base)";
-    $reason = 'PR #7 conflicts with its base again after the conflict round, on abc123: merge the base into the branch (engine.md §Catching up with the base), push, and run the CI gate again';
+    $decision = "Conflict with the base on the PR's head commit abc123: GitHub reports PR #7 CONFLICTING with its base; review-pr's resolve step merges the base (shared/catch-up.md)";
+    $reason = 'PR #7 conflicts with its base again after the conflict round, on abc123: merge the base into the branch (shared/catch-up.md), push, and run the CI gate again';
     $spent = ci_fixture(ci_head('SUCCESS', 'CONFLICTING'), true, [$decision]);
 
     $halt = ci_gate($spent)['stdout'];
@@ -1487,7 +1487,7 @@ it('prints the catch-up line first in the brief of a writing step behind its bas
 
         return $dir;
     };
-    $line = fn (string $dir) => "## Overrides\n\n- Catch up with the base first (engine.md §Catching up with the base): `origin/main` is 1 commit ahead and changed files this branch changes too (`shared.php`). Before any other work run `cd {$dir} && git merge --no-edit origin/main`, as its own command in exactly that form.";
+    $line = fn (string $dir) => "## Overrides\n\n- Catch up with the base first (shared/catch-up.md): `origin/main` is 1 commit ahead and changed files this branch changes too (`shared.php`). Before any other work run `cd {$dir} && git merge --no-edit origin/main`, as its own command in exactly that form.";
 
     $dir = $behind();
     $flow = dispatch_fixture(['mode' => 'autoflow', 'worktree' => $dir, 'cursor' => ['leg' => 'implement', 'status' => 'pending']]);

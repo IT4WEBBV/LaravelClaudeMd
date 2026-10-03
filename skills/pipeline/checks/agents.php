@@ -1,8 +1,8 @@
 <?php
 
 /**
- * Which model and effort each `autoflow` step's agent runs on (`../references/engine.md` §Agents per
- * step): one table, handed to the workflow script in `launch`'s `start` answer, so the script names no
+ * Which model and effort each `autoflow` step's agent runs on (`../references/machinery.md`
+ * §Agents per step): one table, handed to the workflow script in `launch`'s `start` answer, so the script names no
  * model or effort and nothing inherits the session's settings. Models are `agent()`'s aliases, efforts
  * its levels. Pure: `dispatch_cli.php` reads the manifest.
  */
@@ -12,7 +12,7 @@ const PIPELINE_AGENT_MODELS = ['opus', 'sonnet', 'fable'];
 const PIPELINE_AGENT_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 /**
- * The agents tier an `autoflow` run's invocation named (`../references/engine.md` §Agents per step):
+ * The agents tier an `autoflow` run's invocation named (`../references/machinery.md` §Agents per step):
  * `medium` or `light`, and `full` with no word. Its values are `PIPELINE_AGENTS`' tier keys.
  */
 enum AgentTier: string
@@ -33,7 +33,7 @@ enum AgentTier: string
         return empty($manifest['light']) ? self::Full : self::Medium;
     }
 
-    /** Whether the word permits a Bounded design (`../references/engine.md` §Design size). */
+    /** Whether the word permits a Bounded design (`../references/steps/design.md` §Design size). */
     public function permitsBounded(): bool
     {
         return $this !== self::Full;

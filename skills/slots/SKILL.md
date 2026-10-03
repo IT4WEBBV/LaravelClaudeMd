@@ -68,7 +68,7 @@ NOT run `stop.sh`.**
 created, or one a session opened its PR from (`CLAUDE.md` §Git Workflow), is removed by that session
 once the PR is `MERGED`, with no confirm step and with its local branch, by
 `orchestrate/teardown.py`, which removes it only when its checks pass (pipeline
-`references/engine.md` §After the merge). The owner does not clean up after a run.
+`references/session.md` §After the merge). The owner does not clean up after a run.
 
 ## Red flags — you're about to get it wrong
 

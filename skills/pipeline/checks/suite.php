@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Suite reuse — once per tree (`../references/engine.md` §Suite reuse). A green full suite is
+ * Suite reuse — once per tree (`../references/shared/suite.md` §Suite reuse). A green full suite is
  * reused while the working tree's *content* is unchanged; committing already-tested content keeps
  * the key, because the key is a tree, not a commit.
  */

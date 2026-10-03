@@ -20,7 +20,7 @@ payload and running:
 php ~/.claude/skills/pipeline/checks/proof_cli.php write <payload.json>
 ```
 
-The payload fields are listed in `pipeline/references/engine.md` §The proof store. Name the run
+The payload fields are listed in `pipeline/references/shared/proof-payload.md` §The payload. Name the run
 with a short `title` (at most 70 characters, e.g. `PR #430: service logs that follow`) and put the
 summary in `headline`. Give each shot a short `title` for the state it shows, and put what it proves
 in `caption`. `write` rejects a title that is too long and files nothing. Do not copy another run's

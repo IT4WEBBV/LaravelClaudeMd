@@ -3,7 +3,7 @@
 /**
  * After a `/pipeline autoflow` run: the two things the workflow takes on report (spec 2026-09-23 §No check
  * on what a step reports), as facts, and the bound it takes on transcription (#86). Each step's return is
- * checked at the next `brief` (engine.md §`autoflow`, The check at the next boundary); a MISMATCH here
+ * checked at the next `brief` (`../references/machinery.md` §The check at the next boundary); a MISMATCH here
  * means a check has a hole or the script ran with another bound, never a halt.
  *
  *   php run_audit.php <manifest> <final PR diff> <run transcript dir>

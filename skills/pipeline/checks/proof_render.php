@@ -874,7 +874,7 @@ function proof_index_search(array $run): string
 }
 
 /**
- * The unread rule (`../references/engine.md` §The proof store, *What changed since the last look*): one global function
+ * The unread rule (`../references/proof-store.md` §The index): one global function
  * the index script calls and the tests run under `node`. `seen` is the row's number (`proof_run_seen()`, 0 without a
  * revision: never unread), `stored` what this browser holds under the run's `seen:` key (null when it never opened the
  * page, `'0'` when the owner marked it unread, which opening a page never stores), `status` the row's status. Returns

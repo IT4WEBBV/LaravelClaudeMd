@@ -1,7 +1,7 @@
 <?php
 
 /**
- * The pipeline's commands (`../references/engine.md` §The loop).
+ * The pipeline's commands (`../references/machinery.md` §The control rule).
  *
  *   interactive:  php dispatch_cli.php next <manifest>
  *                 php dispatch_cli.php returned <manifest> <diff-file>
@@ -67,8 +67,8 @@ function dispatch_cli_emit(string $manifestPath, array $manifest, string $action
 }
 
 /**
- * Marks the run's proof page (`artifacts.proof`) when the manifest names one (`../references/engine.md` §The proof
- * store, *who writes each status*). Never part of the answer and never a halt: a page that cannot be amended is one
+ * Marks the run's proof page (`artifacts.proof`) when the manifest names one (`../references/proof-store.md`
+ * §Statuses). Never part of the answer and never a halt: a page that cannot be amended is one
  * line on stderr. The engine still never reads the store to decide anything.
  */
 function dispatch_cli_proof_status(array $manifest, ProofRunStatus $status, string $reason = ''): void
@@ -132,7 +132,7 @@ function dispatch_cli_mode_problem(string $refusal, array $manifest): ?string
     return pipeline_retired_mode($mode) ?? ($mode === 'autoflow' ? null : "{$refusal}; this run's mode is {$mode} (resume it with /pipeline, which uses next)");
 }
 
-/** A hand-set `agents` override `launch` cannot hand to the script (`../references/engine.md` §Agents per step), or null. */
+/** A hand-set `agents` override `launch` cannot hand to the script (`../references/machinery.md` §Agents per step), or null. */
 function dispatch_cli_agents_problem(array $manifest): ?string
 {
     $problem = pipeline_agent_override_problem($manifest['agents'] ?? []);
@@ -152,7 +152,7 @@ function dispatch_cli_tier_problem(array $manifest): ?string
 
 /**
  * Why this machine cannot run the script's relay check: its agent type is not linked where Claude Code reads it
- * (`../references/engine.md` §`autoflow`), or null. The dir is `PIPELINE_AGENTS_DIR`, a test seam as
+ * (`../references/machinery.md` §The relay check), or null. The dir is `PIPELINE_AGENTS_DIR`, a test seam as
  * `PIPELINE_PROOF_ROOT` is, else `~/.claude/agents`, where `hooks/git-freshness.sh` links it. `is_file()`
  * follows a link, so a dangling one counts as missing.
  */
@@ -204,7 +204,7 @@ function dispatch_cli_done(string $manifestPath, array $manifest): array
 /**
  * An `autoflow` `done` that holds: recorded as done, then `ask` while a `blocking` open question is unanswered,
  * so the session asks the owner before the CI gate, else `done`; both carry the `follow-up` questions for the
- * report (`../references/engine.md` §Open questions).
+ * report (`../references/session.md` §Open questions).
  */
 function dispatch_cli_finished(string $manifestPath, array $manifest): array
 {
@@ -227,7 +227,7 @@ function dispatch_cli_design_size(array $manifest): DesignSize
 }
 
 /**
- * What the run needs once, at its start (`../references/engine.md` §`autoflow` — a program that calls agents): the workflow script's `args`.
+ * What the run needs once, at its start (`../references/machinery.md` §`launch`): the workflow script's `args`.
  * `$decisions` are appended to `decisions` verbatim, in the same write as `--from`'s re-arm and after its checks.
  */
 function dispatch_cli_launch(string $manifestPath, string $diffPath, ?string $from, array $decisions = []): array
@@ -419,7 +419,7 @@ function dispatch_cli_return_problem(string $manifestPath, array $before, array 
     return $reason === null ? null : ['leg' => $leg, 'reason' => $reason];
 }
 
-/** A halt the script's relay check returned: the run started framed by a relayed chat message, and no step ran (`../references/engine.md` §`autoflow`). */
+/** A halt the script's relay check returned: the run started framed by a relayed chat message, and no step ran (`../references/machinery.md` §The relay check). */
 function dispatch_cli_is_relay(string $reason): bool
 {
     return str_starts_with(trim($reason), 'relay:');
@@ -497,7 +497,7 @@ function dispatch_cli_ui(string $diffPath): ?string
 }
 
 /**
- * The CI gate's reads (`../references/engine.md` §The CI gate): the worktree's `HEAD`, then the PR's head
+ * The CI gate's reads (`../references/machinery.md` §The CI gate): the worktree's `HEAD`, then the PR's head
  * commit, its mergeability and its checks in one gh call, the merges since the last completed review in an
  * `autoflow` run, and what the session does next; while a `blocking` open question is unanswered in an
  * `autoflow` run, `ask` before git or gh is read. It never writes the manifest, so polling it changes
@@ -538,7 +538,7 @@ function dispatch_cli_ci(string $manifestPath, int $poll): array
 }
 
 /**
- * The files where a merge since the last completed review met the branch's changes (`../references/engine.md`
+ * The files where a merge since the last completed review met the branch's changes (`../references/machinery.md`
  * §The CI gate). `autoflow` only: there `finish` closed that review before the gate runs; an `interactive`
  * finish step runs the gate while its own review entry is still open.
  */
@@ -911,7 +911,7 @@ function dispatch_cli_record_command(array $arguments): ?array
 }
 
 /**
- * The write a step makes before it returns (`../references/engine.md` §Suite reuse): only the `suite` key,
+ * The write a step makes before it returns (`../references/shared/suite.md` §Suite reuse): only the `suite` key,
  * into the manifest as it is, with the tree key computed here. A key that cannot be computed is a machinery
  * failure: nothing is written, so that run is never reused.
  */
@@ -956,7 +956,7 @@ function dispatch_cli_suite_command(array $arguments): ?array
 }
 
 /**
- * The whole `handoff` step (`../references/engine.md` §Stations): `record`'s checks before anything
+ * The whole `handoff` step (`../references/machinery.md` §`handoff` in order): `record`'s checks before anything
  * leaves the machine, then `pipeline_handoff()` over the snapshot `record` builds on, then the proof page
  * (`dispatch_cli_handoff_page()`), then the step's one write through `dispatch_cli_record()`, for a halt as
  * for the PR. A record refused once the PR is open names the PR: the next run adopts it (#118).

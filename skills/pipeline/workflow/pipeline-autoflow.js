@@ -15,7 +15,7 @@ export const meta = {
 // The routing tables are launch's: `tables` in its start answer, built by pipeline_routing_tables() from
 // the functions interactive mode uses. So are the agents: `agents` (pipeline_agent_table()), the
 // profile the run starts on (pipeline_start_profile()) and `tier`, the tier its invocation named, so
-// the script names no model or effort, and no tier but `full` (engine.md §Agents per step). And so is
+// the script names no model or effort, and no tier but `full` (`machinery.md` §Agents per step). And so is
 // `escalated`, whether the ledger records an escalation (pipeline_escalated()): the script seeds its
 // own from it, so a resume keeps `full` and the one exemption as a run does.
 // meta.phases repeats the legs as labels only (meta must be a pure

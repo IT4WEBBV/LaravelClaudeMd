@@ -1,7 +1,7 @@
 <?php
 
 /**
- * The CI gate on the PR's head commit, before `gh pr ready` (`../references/engine.md` §The CI gate).
+ * The CI gate on the PR's head commit, before `gh pr ready` (`../references/machinery.md` §The CI gate).
  * Pure: `dispatch_cli.php ci` reads the PR with gh and hands the view in.
  */
 
@@ -86,7 +86,7 @@ function pipeline_ci_verdict(array $rollup): array
  * before the PR or its checks are read. A PR that conflicts with its base, or whose mergeability GitHub has
  * not worked out, is answered before its checks: GitHub runs no CI on a conflicting PR's merge ref.
  * `$unanswered` the `blocking` open questions no decision answers (`pipeline_unanswered()`), which the owner
- * answers before anything else is read (`../references/engine.md` §Open questions).
+ * answers before anything else is read (`../references/session.md` §Open questions).
  */
 function pipeline_ci_answer(array $manifest, ?array $view, string $head, bool $workflows, int $poll, array $unreviewed = [], array $unanswered = []): array
 {
@@ -166,8 +166,8 @@ function pipeline_ci_conflict(array $manifest, array $read): array
     $pr = $manifest['artifacts']['pr'];
 
     return pipeline_conflict_rounds($manifest) === 0
-        ? ['action' => 'fix', ...$read, 'decision' => PIPELINE_CONFLICT . "{$read['sha']}: GitHub reports PR #{$pr} CONFLICTING with its base; review-pr's resolve step merges the base (engine.md §Catching up with the base)"]
-        : pipeline_ci_halt("PR #{$pr} conflicts with its base again after the conflict round, on {$read['sha']}: merge the base into the branch (engine.md §Catching up with the base), push, and run the CI gate again", $read);
+        ? ['action' => 'fix', ...$read, 'decision' => PIPELINE_CONFLICT . "{$read['sha']}: GitHub reports PR #{$pr} CONFLICTING with its base; review-pr's resolve step merges the base (shared/catch-up.md)"]
+        : pipeline_ci_halt("PR #{$pr} conflicts with its base again after the conflict round, on {$read['sha']}: merge the base into the branch (shared/catch-up.md), push, and run the CI gate again", $read);
 }
 
 /** A gate halt names `review-pr`, so `finish` records it there as it stands. */

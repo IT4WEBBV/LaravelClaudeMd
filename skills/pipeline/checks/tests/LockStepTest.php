@@ -11,6 +11,28 @@ function lockstep_section(string $doc, string $heading): string
     return $end === false ? substr($markdown, $start) : substr($markdown, $start, $end - $start);
 }
 
+it('keeps shared/proof-payload.md in lock-step with the fields the store files and checks', function () {
+    $section = lockstep_section('shared/proof-payload.md', 'The payload');
+
+    foreach (['clientSummary', 'explainer', 'worktree', 'base', 'state', ...PROOF_STORE_KEYS, ...array_column(ProofShotState::cases(), 'value'), ...array_column(QuestionKind::cases(), 'value')] as $field) {
+        expect($section)->toContain("`{$field}`");
+    }
+    expect($section)->toContain('at most ' . PROOF_SUMMARY_MAX . ' characters');
+});
+
+it('keeps work-on out of the shared dev-stack rules', function () {
+    expect((string) file_get_contents(__DIR__ . '/../../references/shared/dev-stack.md'))->not->toContain('`work-on`');
+});
+
+it('opens every shared file with the steps that read it', function () {
+    $files = glob(__DIR__ . '/../../references/shared/*.md');
+
+    expect($files)->toHaveCount(9);
+    foreach ($files as $path) {
+        expect((string) file_get_contents($path))->toMatch('/\A# .+\n\nRead by: `steps\/[a-z-]+\.md`/', basename($path) . ' opens without its readers');
+    }
+});
+
 it('keeps manifest.md in lock-step with the statuses and the leg-writable keys', function () {
     $section = lockstep_section('manifest.md', 'What a leg writes');
 
@@ -33,26 +55,36 @@ it('keeps gates.md in lock-step with the loop-back targets', function () {
     }
 });
 
-it('keeps every engine.md section a brief names', function () {
-    preg_match_all('/^## (.+?)(?: — .*)?$/m', (string) file_get_contents(__DIR__ . '/../../references/engine.md'), $headings);
+it('has briefs cite files under references/, never a section', function () {
+    $planGap = ['gate' => 'plan-approval', 'leg' => 'implement', 'cycle' => 1, 'at' => '2026-10-03T10:00:00Z', 'reason' => 'r', 'outcome' => 'looped-back'];
+    $design = ['branch' => 'feature/x', 'worktree' => '/tmp/wt', 'mode' => 'autoflow', 'cursor' => ['leg' => 'design', 'status' => 'pending'],
+        'artifacts' => ['spec' => 'docs/superpowers/specs/2026-10-03-x-design.md'], 'gate_ledger' => [$planGap]];
     $lines = array_merge(
         ...array_values(pipeline_leg_overrides('autoflow', '/tmp/m.json')),
         ...array_values(pipeline_leg_overrides('interactive', '/tmp/m.json')),
+        ...array_map(fn (string $step) => pipeline_plan_gap_lines($step), ['review', 'run', 'resolve']),
         ...[[
             pipeline_review_scope_line(['since' => 'abc', 'base' => 'origin/main', 'commits' => 1, 'files' => []]),
             pipeline_catch_up_line(['worktree' => '/tmp/wt'], ['base' => 'origin/main', 'behind' => 1, 'shared' => []]),
-            pipeline_conflict_round_line('review'),
-            pipeline_conflict_round_line('resolve'),
-            pipeline_answer_round_line('review'),
-            pipeline_answer_round_line('resolve'),
+            pipeline_ci_round_line('review'), pipeline_ci_round_line('resolve'),
+            pipeline_conflict_round_line('review'), pipeline_conflict_round_line('resolve'),
+            pipeline_answer_round_line('review'), pipeline_answer_round_line('resolve'),
+            pipeline_grow_form_line('spec'), pipeline_grow_form_line('plan'), pipeline_grow_form_line('run'),
+            pipeline_brief_state(['base' => 'feature/integration', 'last_sha' => 'abc'], 'implement'),
+            pipeline_brief_overrides($design, '/tmp/m.json', 'design', 'plan'),
         ]],
     );
-    preg_match_all('/§([^,):;]+)/', implode("\n", $lines), $names);
+    $text = implode("\n", $lines);
 
-    expect($names[1])->not->toBeEmpty();
-    foreach ($names[1] as $name) {
-        expect(array_filter($headings[1], fn (string $heading) => str_starts_with($name, $heading)))->not->toBeEmpty("engine.md has no section '{$name}'");
+    expect($text)->not->toContain('engine.md')->not->toContain('§');
+    preg_match_all('/\(((?:[a-z-]+\/)?[a-z-]+\.md(?:, (?:[a-z-]+\/)?[a-z-]+\.md)*)\)/', $text, $citations);
+    $files = array_unique(array_merge(...array_map(fn (string $list) => explode(', ', $list), $citations[1])));
+
+    expect($files)->not->toBeEmpty();
+    foreach ($files as $file) {
+        expect(__DIR__ . "/../../references/{$file}")->toBeFile("a brief cites {$file}");
     }
+    expect(pipeline_brief_overrides($design, '/tmp/m.json', 'design', 'plan'))->toContain('(steps/design.md)');
 });
 
 it('keeps every model and effort out of the autoflow script, which takes them from launch', function () {
@@ -63,8 +95,8 @@ it('keeps every model and effort out of the autoflow script, which takes them fr
     }
 });
 
-it('keeps engine.md\'s agents table in lock-step with pipeline_agent_table()', function () {
-    $section = lockstep_section('engine.md', 'Agents per step');
+it('keeps machinery.md\'s agents table in lock-step with pipeline_agent_table()', function () {
+    $section = lockstep_section('machinery.md', 'Agents per step');
     $table = pipeline_agent_table([]);
     $cell = fn (array $entry) => "{$entry['model']} {$entry['effort']}";
     $same = fn (array $entry) => implode(' | ', array_fill(0, count(AgentTier::cases()), $cell($entry)));
@@ -85,8 +117,8 @@ it('keeps engine.md\'s agents table in lock-step with pipeline_agent_table()', f
     }
 });
 
-it('keeps engine.md\'s repo config section in lock-step with the keys the parsers read', function () {
-    $section = lockstep_section('engine.md', 'The repo config');
+it('keeps session.md\'s repo config section in lock-step with the keys the parsers read', function () {
+    $section = lockstep_section('session.md', 'The repo config');
 
     foreach ([...PIPELINE_CHECK_KEYS, ...PIPELINE_BOARD_KEYS, ...PIPELINE_BOARD_OPTIONAL_KEYS] as $key) {
         expect($section)->toContain("`{$key}`");
@@ -96,31 +128,79 @@ it('keeps engine.md\'s repo config section in lock-step with the keys the parser
     }
 });
 
-it('keeps engine.md §Implement whole, down to its last paragraph', function () {
-    expect(lockstep_section('engine.md', 'Implement'))
+it('keeps steps/implement.md whole, down to its last paragraph', function () {
+    expect(lockstep_section('steps/implement.md', 'Implement'))
         ->toContain('`gh pr checks <pr> --watch`')
         ->toContain('**`/work-on <pr>` on a pipeline PR is outside the run.**');
 });
 
-it('keeps work-on out of the sections that describe a step', function () {
-    foreach (['Stations', 'Implement', 'Dev-stack readiness', 'Who takes the PR out of draft', 'The CI gate'] as $heading) {
-        expect(lockstep_section('engine.md', $heading))->not->toContain('`work-on`', "engine.md §{$heading} names `work-on`");
+it('keeps work-on out of the step files', function () {
+    foreach (['steps/implement.md', 'steps/handoff.md'] as $doc) {
+        $text = (string) file_get_contents(__DIR__ . "/../../references/{$doc}");
+        expect($text)->not->toContain('`work-on`', "{$doc} names `work-on`")->not->toContain('`work-on`\'s');
     }
-    expect((string) file_get_contents(__DIR__ . '/../../references/engine.md'))->not->toContain('`work-on`\'s');
+});
+
+it('has every step file read exactly the shared files that name it', function () {
+    $references = __DIR__ . '/../../references';
+    $readBy = [];
+    foreach (glob("{$references}/shared/*.md") as $path) {
+        preg_match('/^Read by: (.+)$/m', (string) file_get_contents($path), $line);
+        preg_match_all('/`(steps\/[a-z-]+\.md)`/', $line[1] ?? '', $steps);
+        foreach ($steps[1] as $step) {
+            expect("{$references}/{$step}")->toBeFile('shared/' . basename($path) . " names {$step}");
+            $readBy[$step][] = 'shared/' . basename($path);
+        }
+    }
+    $files = glob("{$references}/steps/*.md");
+
+    expect($files)->toHaveCount(8);
+    foreach ($files as $path) {
+        $step = 'steps/' . basename($path);
+        expect((string) file_get_contents($path))->toMatch('/\A# .+\n\nRead also: /', "{$step} opens without its Read also line");
+        preg_match('/^Read also: (.+)$/m', (string) file_get_contents($path), $line);
+        preg_match_all('/`(shared\/[a-z-]+\.md)`/', $line[1], $shared);
+        expect($shared[1])->toEqualCanonicalizing($readBy[$step] ?? [], "{$step}'s Read also line");
+    }
+});
+
+it('keeps work-on out of the session\'s CI gate and out of SKILL.md', function () {
+    expect(lockstep_section('session.md', 'The CI gate'))->not->toContain('`work-on`');
+    foreach (glob(__DIR__ . '/../../references/{,steps/,shared/}*.md', GLOB_BRACE) as $path) {
+        expect((string) file_get_contents($path))->not->toContain('`work-on`\'s', basename($path));
+    }
     expect((string) file_get_contents(__DIR__ . '/../../SKILL.md'))->not->toContain('`work-on`');
 });
 
-it('keeps engine.md §The proof store in lock-step with the fields the store files and checks', function () {
-    $section = lockstep_section('engine.md', 'The proof store');
+it('keeps proof-store.md in lock-step with the statuses, the seen key and who files a page', function () {
+    $statuses = lockstep_section('proof-store.md', 'Statuses');
 
-    foreach (['clientSummary', 'explainer', 'worktree', 'base', 'state', ...PROOF_STORE_KEYS, ...array_column(ProofShotState::cases(), 'value'), ...array_column(QuestionKind::cases(), 'value')] as $field) {
-        expect($section)->toContain("`{$field}`");
-    }
-    expect($section)->toContain('at most ' . PROOF_SUMMARY_MAX . ' characters');
-    expect($section)->toContain('`handoff` files');
     foreach (ProofRunStatus::cases() as $status) {
-        expect($section)->toContain("`{$status->value}`");
+        expect($statuses)->toContain("`{$status->value}`");
     }
-    expect($section)->toContain('proof_cli.php status <page>');
-    expect($section)->toContain('`seen:<repo>/<run>`');
+    expect($statuses)->toContain('proof_cli.php status <page>');
+    expect(lockstep_section('proof-store.md', 'The index'))->toContain('`seen:<repo>/<run>`');
+    expect(lockstep_section('proof-store.md', 'Where a page lives'))->toContain('`handoff` files');
+});
+
+it('keeps SKILL.md the one-page overview: the state machine, a row per step, the links', function () {
+    $skill = (string) file_get_contents(__DIR__ . '/../../SKILL.md');
+
+    expect(substr_count($skill, "\n"))->toBeLessThan(150);
+    expect($skill)
+        ->toContain('description: Use when walking a feature end-to-end through the full development chain — design, plan review, handoff, implement, UI verification, PR review — interactive or unattended, and when resuming or navigating an in-progress run. Triggers on "/pipeline", "run the pipeline", "take this through the pipeline", "next step" / "go to step X" while a run is active.')
+        ->toContain("```mermaid\nstateDiagram-v2")
+        ->toContain('/pipeline [interactive|autoflow] [medium|light] [base <branch>] <idea | number | spec-path>');
+    foreach (['autoflow', 'interactive'] as $mode) {
+        foreach (pipeline_legs() as $leg) {
+            foreach (pipeline_steps($leg, $mode) as $step) {
+                $row = '/^\| `' . preg_quote("{$leg}:{$step}", '/') . '`.*`references\/' . preg_quote(pipeline_step_reference($leg, $step), '/') . '` \|$/m';
+                expect($skill)->toMatch($row, "SKILL.md has no row for {$leg}:{$step}");
+            }
+        }
+    }
+    foreach (['references/session.md', 'references/machinery.md', 'references/proof-store.md', 'references/gates.md', 'references/manifest.md', 'DECISIONS.md'] as $doc) {
+        expect($skill)->toContain("`{$doc}`");
+    }
+    expect($skill)->not->toContain('engine.md');
 });

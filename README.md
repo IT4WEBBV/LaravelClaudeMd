@@ -88,8 +88,8 @@ the other machine on its own:
 
 ### Permissions for unattended runs
 
-A `/pipeline` run merges its base into its own branch when its brief says so (pipeline `engine.md`
-§Catching up with the base). A denial in a background step is final, so allow them, and the `handoff`
+A `/pipeline` run merges its base into its own branch when its brief says so (pipeline
+`references/shared/catch-up.md` §Catching up with the base). A denial in a background step is final, so allow them, and the `handoff`
 command below, in `~/.claude/settings.json`: user level, so they reach every project on the machine, and
 a per-machine step like the hooks:
 

@@ -52,7 +52,7 @@ function pipeline_triggers(string $diff, ?string $repoPackageName = null): array
 /**
  * Lines of code a change touches — added plus removed — outside tests, docs, markdown,
  * changelog fragments and lockfiles. The size a Bounded design may reach before it must grow
- * (`../references/engine.md` §Design size). A deleted file is judged by its old path.
+ * (`../references/shared/plan-falls-short.md`). A deleted file is judged by its old path.
  */
 function pipeline_code_lines(string $diff): int
 {

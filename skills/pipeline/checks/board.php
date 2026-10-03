@@ -1,6 +1,6 @@
 <?php
 
-/** The `## Board` keys, required together (`../references/engine.md` §The repo config). */
+/** The `## Board` keys, required together (`../references/session.md` §The repo config). */
 const PIPELINE_BOARD_KEYS = ['org', 'number', 'project-id', 'status-field-id', 'in-progress-option-id'];
 
 /** The `## Board` keys a section may add; `component-alts` and `docs` are read by nothing, accepted so a shared config parses. */
@@ -10,12 +10,12 @@ const PIPELINE_BOARD_OPTIONAL_KEYS = ['component-field-id', 'component-default',
  * Parse the `## Board` block out of a repo's `.claude/work-on.config.md`.
  *
  * Same tri-state contract as `pipeline_repo_checks()` (`checks.php`), and for the same
- * reason (`../references/engine.md` §The work item): a board move that silently does not
+ * reason (`../references/session.md` §The work item): a board move that silently does not
  * happen looks exactly like a repo that has no board. `absent` therefore means "this repo
  * deliberately has no board", and a malformed section is `invalid` — never `absent`.
  *
  * The section is **all-or-nothing**: the five `PIPELINE_BOARD_KEYS` are required together
- * (`../references/engine.md` §The repo config), so a half-filled section cannot half-run a
+ * (`../references/session.md` §The repo config), so a half-filled section cannot half-run a
  * status move.
  *
  * A value that is still a template placeholder (`<org-login>`) counts as *not filled in*.
