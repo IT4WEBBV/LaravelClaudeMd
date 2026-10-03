@@ -90,7 +90,9 @@ The new section, in this order:
    before the click and note the last number, since the list holds every request since the page loaded; after the
    click, only a POST numbered higher is the click's. `browser_network_request` with that number and
    `part: "request-body"` showing the expected `"method":"…"` means the handler fired: `browser_wait_for` the text the
-   result shows (the modal's heading, the new row) and snapshot again.
+   result shows (the modal's heading, the new row) and snapshot again. An agent that reaches the step after the click,
+   with no list taken before it, takes one now and clicks again when the action is safe to repeat; for an action that
+   changes data it reads the database count first, so a late first click is not doubled unseen.
 3. **No request: look at the target.** `browser_evaluate` on the clicked element's `outerHTML` and on
    `document.elementFromPoint` at its centre: is the handler on the element that was clicked or on a wrapper, is it a
    `<span>`/`<div>` rather than a `<button>`, does something else sit on top (a backdrop, a `pointer-events` wrapper)?

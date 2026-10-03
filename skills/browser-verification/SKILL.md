@@ -163,6 +163,10 @@ since the page loaded, earlier Livewire POSTs included. After the click, run it 
 numbered higher is the click's. `browser_network_request` with that `index` and
 `part: "request-body"` showing the expected method (`"method":"showModal"`) means the handler fired:
 `browser_wait_for` the text the result shows (the modal's heading, the new row) and snapshot again.
+Reached this section after the click, with no list taken before it? Take one now and click again
+when the action is safe to repeat (it opens a modal or a form); when it changes data (`duplicate`,
+`delete`), read the database count first, since the first click may have landed late and a second
+one would double it.
 
 **No request: look at the target.** Run `browser_evaluate` with the clicked element's ref as
 `target`:
