@@ -39,7 +39,7 @@ Line 39 of `CLAUDE.md` becomes exactly this (one line, as it is today; the file'
 section are single lines as well):
 
 ```markdown
-- **Name work by what it does, not by its number, and say what kind it is.** Whenever issues, PRs or runs come up for me to choose between or follow, give each a few plain words on what it is about, with its kind and number after it in parentheses: "CI gate fix (PR #149) and proof back link (issue #153) now", not "#149 + #153 now" and not "CI gate fix (#149)". Issues and PRs share one number sequence, so a bare `#153` doesn't tell me whether it is still to be built or waiting for review. The kind goes with every number, also when two are linked ("issue #153 is fixed by PR #160") and in PR and issue comments; a number in another repo carries the repo name ("Deploy PR #408"). Syntax a tool parses stays bare: `Closes #N` and `Depends on #N`. A bare list of numbers gives me nothing to decide on. This holds for `AskUserQuestion` labels and descriptions too.
+- **Name work by what it does, not by its number, and say what kind it is.** Whenever issues, PRs or runs come up for me to choose between or follow, give each a few plain words on what it is about, with its kind and number after it in parentheses: "CI gate fix (PR #149) and proof back link (issue #153) now", not "#149 + #153 now" and not "CI gate fix (#149)". Issues and PRs share one number sequence, so a bare `#153` doesn't tell me whether it is still to be built or waiting for review. The kind goes with every number, also when two are linked ("issue #153 is fixed by PR #160") and in PR and issue comments; a number in another repo carries the repo name ("Deploy PR #408"). Syntax a tool parses stays bare, such as `Closes #N` and `Depends on #N`. A bare list of numbers gives me nothing to decide on. This holds for `AskUserQuestion` labels and descriptions too.
 ```
 
 What changes, against today's line:
@@ -85,7 +85,7 @@ There is no UI, so no visual proof.
 3. **Syntax that tools parse stays bare.** `Depends on #N` (read by `/orchestrate`), `Closes #N` / `Fixes #N`
    (GitHub's closing keywords, which do not match "Closes issue #N"), and the `(#60)` suffix on commit subjects
    are syntax, not a reference written for the reader, and exempt. The new line says so in one sentence
-   ("Syntax a tool parses stays bare: `Closes #N` and `Depends on #N`"): read literally, "the kind goes with
+   ("Syntax a tool parses stays bare, such as `Closes #N` and `Depends on #N`"): read literally, "the kind goes with
    every number" would turn `Closes #N` into "Closes issue #N", which GitHub does not close on, so the
    exemption has to be visible where the rule is read (`/critique plan`, plan-approval cycle 1). The `(#60)`
    commit suffix is not listed; it is covered by the same sentence.
