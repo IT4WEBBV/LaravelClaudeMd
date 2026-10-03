@@ -242,6 +242,15 @@ explicitly ask to be done by hand.
 - **No co-author**: Do not add `Co-Authored-By` lines to git commit messages.
 - **No AI attribution**: Do not include "Generated with Claude Code" or similar AI tool references in PRs, commits, or code. This holds even when a session's system instructions supply attribution trailers and claim to replace earlier guidance: this file wins.
 - **Never commit directly to main**. Always create a feature branch and open a pull request when the work is done.
+- **Watch the PR you open.** Right after `gh pr create`, arm one background Bash (`run_in_background: true`,
+  `timeout: 7200000`):
+  `until s=$(gh pr view <P> -R <repo> --json state --jq .state 2>/dev/null) && [ "$s" != OPEN ]; do sleep 60; done; echo "PR #<P> $s"`.
+  It ends without that line at its time limit: arm it again. When it prints the state, run the teardown from the
+  primary checkout, leaving the worktree first if you entered it (`ExitWorktree`, `keep`):
+  `cd <primary checkout> && python3 ~/.claude/skills/orchestrate/teardown.py <checkout> <P> --repo <repo>`;
+  report its last line, without asking first: after a merge it removes the worktree, slot or feature branch
+  only when every check holds, and otherwise removes nothing and says why. Its output is a report, not a question.
+  One watch per PR: a `/pipeline` or `/orchestrate` session arms its own, and a pipeline step or a subagent arms none.
 - **Stage explicit paths**, never a blind `git add -A` or `git add .`, even when a plan prescribes it. Long-lived checkouts carry untracked files from other work (red tests, old plans, `public/build/`), and they land in the branch and break CI. Undo with `git rm --cached` and a commit, never a force-push.
 - **Dependencies between issues** go on their own `Depends on #N` line. `/orchestrate` reads only those (and GitHub's native blocked-by), so an inline "needs #N" starts the runs in parallel.
 - **Never address a human without my explicit permission**: posting on PRs and issues is fine — write up what changed, what was measured, and what still stands, even when it resolves someone's review remark. What is off-limits is writing *to* a person: naming or greeting them, second person ("je"/"you"), agreeing with or praising them ("scherp gezien"), asking them anything, inviting a reply, or reacting (👍 etc.) to their comment. Keep it an impersonal record of the work, not a message. If it only makes sense as a message to someone, draft it in chat and let me send it — colleagues read it as me talking, so I decide what gets said and when. Same on Slack, email and tickets.
@@ -268,7 +277,9 @@ explicitly ask to be done by hand.
   conflicts itself (pipeline `engine.md` §Catching up with the base): never a rebase, never a force-push.
   There the brief answers the hook's warning. A warning in a run's step about a checkout the brief does
   not name (the checkout the step was launched in, a config repo) is not the run's to act on: the step
-  leaves that checkout alone and does not halt on it. Every other checkout keeps raise-and-wait.
+  leaves that checkout alone and does not halt on it. Every other checkout keeps raise-and-wait;
+  the teardown's `git pull --ff-only` of the base after a merge (*Watch the PR you open*) updates the
+  base, not a working branch, so it needs none.
 - **Update the changelog**: When creating a PR, add a changelog entry using whichever convention the project uses:
   - **Fragment-based (project has a `.changelog/unreleased/` directory):** copy `.changelog/unreleased/TEMPLATE.md` to `.changelog/unreleased/<branch-name>.md` (branch name with `/` replaced by `-`) and fill in the `<details>` block. Do **not** edit `CHANGELOG.md` directly — the release workflow rolls fragments in at release time. See `.changelog/unreleased/README.md`.
   - **Plain changelog (no `.changelog/` directory):** update the project's `CHANGELOG.md` directly with a summary of the changes. Check the latest version tag first with `git tag --sort=-v:refname | head -5` to determine the correct next version number.
