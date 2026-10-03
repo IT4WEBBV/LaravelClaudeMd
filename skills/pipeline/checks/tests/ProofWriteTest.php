@@ -69,15 +69,48 @@ it('files nothing and says why when the title is a summary rather than a name', 
 
 it('keeps what an earlier write filed when a later one leaves it out', function () {
     $root = sys_get_temp_dir() . '/proof-write-' . uniqid();
-    proof_write_cli(proof_write_payload(['headline' => 'Logs follow', 'openQuestions' => ['a', 'b']]), $root);
+    proof_write_cli(proof_write_payload(['headline' => 'Logs follow', 'openQuestions' => [['kind' => 'remark', 'question' => 'a'], ['kind' => 'remark', 'question' => 'b']]]), $root);
 
-    $result = proof_write_cli(['repo' => 'Deploy', 'branch' => 'feature/logs', 'pr' => 5, 'openQuestions' => ['c']], $root);
+    $result = proof_write_cli(['repo' => 'Deploy', 'branch' => 'feature/logs', 'pr' => 5, 'openQuestions' => [['kind' => 'follow-up', 'question' => 'c']]], $root);
 
     expect($result['stdout'])->toContain("{$root}/Deploy/pr-5-logs/index.html");
     expect(proof_write_stored($root))->toMatchArray([
-        'title' => 'PR #5: logs that follow', 'headline' => 'Logs follow', 'openQuestions' => ['c'],
+        'title' => 'PR #5: logs that follow', 'headline' => 'Logs follow', 'openQuestions' => [['kind' => 'follow-up', 'question' => 'c']],
         'clientSummary' => 'De servicelogboeken lopen nu live mee.', 'schema' => 2,
     ]);
+});
+
+it('files nothing for open questions that are not {kind, question}, and names each item (#146)', function () {
+    $root = sys_get_temp_dir() . '/proof-write-' . uniqid();
+    mkdir($root);
+
+    $result = proof_write_cli(proof_write_payload(['openQuestions' => [
+        ['kind' => 'blocking', 'question' => 'Keep the guard?'],
+        'A string from before kinds',
+        ['kind' => 'urgent', 'question' => 'Rename it?'],
+        ['kind' => 'remark', 'question' => ' '],
+        ['question' => 'No kind'],
+    ]]), $root);
+
+    expect($result['stdout'])->not->toContain("{$root}/Deploy/");
+    expect($result['stderr'])->toContain('proof: payload rejected')
+        ->toContain('openQuestions[1] has no question')
+        ->toContain('openQuestions[2] has no kind: blocking, follow-up, remark')
+        ->toContain('openQuestions[3] has no question')
+        ->toContain('openQuestions[4] has no kind: blocking, follow-up, remark')
+        ->not->toContain('openQuestions[0]');
+    expect(is_dir("{$root}/Deploy"))->toBeFalse();
+});
+
+it('files a later write over a run filed before kinds, keeping its string questions, when the write leaves them out (#146)', function () {
+    $root = sys_get_temp_dir() . '/proof-write-' . uniqid();
+    proof_write_run("{$root}/Deploy/pr-5-logs", [...proof_write_payload(), 'openQuestions' => ['Filed before kinds']], date('c'));
+
+    $result = proof_write_cli(proof_write_payload(['headline' => 'Logs follow']), $root);
+
+    expect($result['stdout'])->toContain("{$root}/Deploy/pr-5-logs/index.html");
+    expect(proof_write_stored($root)['openQuestions'])->toBe(['Filed before kinds']);
+    expect((string) file_get_contents("{$root}/Deploy/pr-5-logs/index.html"))->toContain('<li>Filed before kinds</li>');
 });
 
 it('files nothing for a run without a client summary, and says so', function () {

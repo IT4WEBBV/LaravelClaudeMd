@@ -363,17 +363,26 @@ function proof_render_checks(array $checks): string
     return $rows === '' ? '' : "<h2>Checks</h2>\n<table>\n{$rows}</table>\n";
 }
 
-function proof_render_list(string $heading, array $items): string
+/** Each open question with its kind's label before the text; an item filed before kinds, a string, without one. */
+function proof_render_open_questions(array $items): string
 {
     if ($items === []) {
         return '';
     }
-    $out = '<h2>' . proof_e($heading) . "</h2>\n<ul>\n";
+    $out = "<h2>Open questions</h2>\n<ul>\n";
     foreach ($items as $item) {
-        $out .= '<li>' . proof_e((string) $item) . "</li>\n";
+        $out .= '<li>' . proof_render_open_question($item) . "</li>\n";
     }
 
     return $out . "</ul>\n";
+}
+
+/** A stored item passed `proof_open_questions_problems()` when it was filed, so an object's kind is one of `QuestionKind`. */
+function proof_render_open_question(string|array $item): string
+{
+    return is_string($item)
+        ? proof_e($item)
+        : '<strong>' . proof_e(QuestionKind::from($item['kind'])->label()) . ':</strong> ' . proof_e($item['question']);
 }
 
 function proof_render_ledger(array $ledger): string
@@ -569,7 +578,7 @@ function proof_render_run(array $run): string
     }
     $body .= proof_render_shots($run['shots'] ?? []);
     $body .= proof_render_checks($run['checks'] ?? []);
-    $body .= proof_render_list('Open questions', $run['openQuestions'] ?? []);
+    $body .= proof_render_open_questions($run['openQuestions'] ?? []);
     $body .= proof_render_cost($run['cost'] ?? []);
     $body .= proof_render_ledger($run['ledger'] ?? []);
     $body .= "<dialog class=\"zoom\" id=\"zoom\"></dialog>\n<script>\n" . proof_render_script() . "\n</script>\n";

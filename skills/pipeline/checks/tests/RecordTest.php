@@ -174,7 +174,24 @@ it('refuses an actions file that is not a list of {claim, disposition, note}, na
     'an empty claim' => ['[{"claim":" ","disposition":"integrated","note":"n"}]', 'actions[0]: `claim` is not a non-empty string'],
     'an unknown disposition' => ['[{"claim":"a","disposition":"integrated","note":"n"},{"claim":"x","disposition":"done","note":"n"}]', 'actions[1]: `disposition` is not one of integrated, recorded, open-question'],
     'a note that is no string' => ['[{"claim":"x","disposition":"recorded","note":null}]', 'actions[0]: `note` is not a string'],
+    'an open question without a kind' => ['[{"claim":"x","disposition":"open-question","note":"n"}]', 'actions[0] has no `kind`'],
+    'an open question of an unknown kind' => ['[{"claim":"a","disposition":"integrated","note":"n"},{"claim":"x","disposition":"open-question","note":"n","kind":"urgent"}]', 'actions[1]: `kind` is not one of blocking, follow-up, remark'],
+    'a kind that is no string' => ['[{"claim":"x","disposition":"open-question","note":"n","kind":1}]', 'actions[0]: `kind` is not one of blocking, follow-up, remark'],
+    'a kind on an integrated action' => ['[{"claim":"x","disposition":"integrated","note":"n","kind":"remark"}]', 'actions[0] has an unknown key `kind`'],
 ]);
+
+it('completes the open entry with each open question\'s kind kept (#146)', function () {
+    $before = record_snapshot('review-pr', 'resolve');
+    $actions = [
+        ['claim' => 'Keep the <x-time> tag?', 'disposition' => 'open-question', 'note' => '<x-time> (built), a plain div', 'kind' => 'blocking'],
+        ['claim' => 'self-end alignment', 'disposition' => 'open-question', 'note' => 'kept', 'kind' => 'remark'],
+        ['claim' => 'step 4 drops the link', 'disposition' => 'integrated', 'note' => 'restored it'],
+    ];
+    $given = record_given('review-pr', 'resolve', 'continued', ['actions-file' => json_encode($actions)]);
+
+    expect(pipeline_record($before, $before, 'review-pr', 'resolve', $given, record_facts())['gate_ledger'][0])
+        ->toBe([...record_open('pr-review'), 'actions' => $actions, 'outcome' => 'continued']);
+});
 
 it('refuses an issue link that is not <number>=<outcome>', function (string $link) {
     $before = record_snapshot('review-pr', 'resolve');

@@ -337,6 +337,38 @@ it('makes a recorded conflict with the base a finding of review-pr\'s review and
     expect(strpos($both, '`CI red on the PR\'s head commit` decision is a finding'))->toBeLessThan(strpos($both, $review));
 });
 
+it('has both resolve steps give every open question a kind, blocking when unsure, in both modes (#146)', function (string $mode, string $leg) {
+    $open = ['gate' => pipeline_gate_of($leg), 'leg' => $leg, 'cycle' => 1, 'at' => '2026-09-22T12:00:00Z', 'review' => 'r'];
+    $brief = pipeline_brief(brief_manifest($leg, ['mode' => $mode, 'gate_ledger' => [$open]]), $leg, '/tmp/m.json', 'resolve');
+
+    expect($brief)
+        ->toContain('- Carry anything unresolved verbatim as an open question with its kind: `blocking` when the answer changes this PR\'s code, `follow-up` for work outside it, `remark` for a note on a choice already made; `blocking` when unsure. A `blocking` question names its options in `note`, the one the PR built first (engine.md §Open questions).')
+        ->not->toContain('- Carry anything unresolved verbatim as an open question.');
+})->with(['autoflow', 'interactive'])->with(['review-plan', 'review-pr']);
+
+it('has review-pr\'s finish step lead each PR body open question with its kind, and verify-ui file an unrenderable before state as a remark (#146)', function () {
+    $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 1, 'at' => '2026-09-22T12:00:00Z', 'review' => 'r'];
+
+    expect(pipeline_brief(brief_manifest('review-pr', ['mode' => 'autoflow', 'gate_ledger' => [$open]]), 'review-pr', '/tmp/m.json', 'resolve'))
+        ->toContain('- Under the PR body\'s `## Open questions`, one line per open question led by its kind (`- **blocking:** …`), or `None.`; a question a settled `Answer to open question` decision answers is no longer open.');
+    expect(pipeline_brief(brief_manifest('verify-ui', ['mode' => 'autoflow']), 'verify-ui', '/tmp/m.json', 'run'))
+        ->toContain('- A before state the base cannot render is left out, and is an open question of kind `remark` in `openQuestions`, whose items are `{kind, question}` (engine.md §The proof store).');
+});
+
+it('makes a recorded answer to an open question a finding of review-pr\'s review and resolve steps, and only then (#146)', function () {
+    $open = ['gate' => 'pr-review', 'leg' => 'review-pr', 'cycle' => 2, 'at' => '2026-09-22T12:00:00Z', 'review' => 'r'];
+    $answer = 'Answer to open question gate_ledger[3].actions[0] ("Queue or cron?"): queue';
+    $round = ['mode' => 'autoflow', 'decisions' => ['The engine never edits.', $answer]];
+    $review = 'A settled `Answer to open question` decision whose answer departs from what the PR built is a finding of this review: name what it changes (engine.md §Open questions).';
+    $resolve = 'Integrate each settled `Answer to open question` decision that departs from what the PR built, and name it in `actions`; the question it answers is no longer open (engine.md §Open questions).';
+
+    expect(pipeline_brief(brief_manifest('review-pr', $round), 'review-pr', '/tmp/m.json', 'review'))->toContain($review)->not->toContain($resolve);
+    expect(pipeline_brief(brief_manifest('review-pr', [...$round, 'gate_ledger' => [$open]]), 'review-pr', '/tmp/m.json', 'resolve'))->toContain($resolve)->not->toContain($review);
+    expect(pipeline_brief(brief_manifest('review-pr', ['mode' => 'autoflow']), 'review-pr', '/tmp/m.json', 'review'))->not->toContain($review);
+    expect(pipeline_brief(brief_manifest('review-pr', ['mode' => 'autoflow', 'gate_ledger' => [$open]]), 'review-pr', '/tmp/m.json', 'resolve'))->not->toContain($resolve);
+    expect(pipeline_brief(brief_manifest('implement', $round), 'implement', '/tmp/m.json'))->not->toContain($review)->not->toContain($resolve);
+});
+
 it('tells every autoflow step where to work, that the run is authorised, and to return a structured result', function () {
     foreach (pipeline_legs() as $leg) {
         foreach (in_array($leg, ['review-plan', 'review-pr'], true) ? ['review', 'resolve'] : ['run'] as $step) {
@@ -601,7 +633,7 @@ it('says what each step passes to record, and describes no JSON', function () {
     expect($brief('interactive', 'review-pr', 'review'))
         ->toContain('`record` appends it as the open `pr-review` entry, with the commit you reviewed.');
     expect($brief('autoflow', 'review-plan', 'resolve'))
-        ->toContain('- Write what you did with each point to `/tmp/wt/.claude/pipeline/feature-x.actions.json` as a JSON list of `{claim, disposition, note}`, `disposition` one of `integrated`, `recorded`, `open-question`, and `[]` when you acted on nothing; `record` completes the open entry from it.');
+        ->toContain('- Write what you did with each point to `/tmp/wt/.claude/pipeline/feature-x.actions.json` as a JSON list of `{claim, disposition, note}`, `disposition` one of `integrated`, `recorded`, `open-question`, plus `kind` on an `open-question`, one of `blocking`, `follow-up`, `remark` (engine.md §Open questions), and `[]` when you acted on nothing; `record` completes the open entry from it.');
     expect($brief('autoflow', 'review-pr', 'resolve'))
         ->toContain("- Run the suite unless engine.md §Suite reuse finds this tree green, and record the run: `{$suite}`.")
         ->toContain('- Reconcile the closing links (engine.md §Closing links): each related issue\'s outcome goes to `record` as an `--issue-link`.');
@@ -612,7 +644,7 @@ it('says what each step passes to record, and describes no JSON', function () {
         ->toContain('- Post the text-only record comment; the path `write` printed goes to `record` as `--proof`.')
         ->toContain('- Return `continued`, or `looped-back` when the check fails.');
     expect($brief('autoflow', 'review-pr', 'resolve'))
-        ->toContain('- Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` as the finished work stands, the suite line under `checks`, the final open questions and ledger; `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, and a run without `artifacts.proof` gets its page from this write, with `repo` (the GitHub name), `branch` and `pr` from the PR.')
+        ->toContain('- Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` as the finished work stands, the suite line under `checks`, the final open questions, each `{kind, question}`, and the ledger; `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, and a run without `artifacts.proof` gets its page from this write, with `repo` (the GitHub name), `branch` and `pr` from the PR.')
         ->not->toContain('proof_cli.php open')
         ->not->toContain('When `artifacts.proof` is set');
 });

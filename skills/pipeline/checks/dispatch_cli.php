@@ -201,6 +201,22 @@ function dispatch_cli_done(string $manifestPath, array $manifest): array
     return ['action' => 'done', 'proof' => $manifest['artifacts']['proof'] ?? null];
 }
 
+/**
+ * An `autoflow` `done` that holds: recorded as done, then `ask` while a `blocking` open question is unanswered,
+ * so the session asks the owner before the CI gate, else `done`; both carry the `follow-up` questions for the
+ * report (`../references/engine.md` §Open questions).
+ */
+function dispatch_cli_finished(string $manifestPath, array $manifest): array
+{
+    $done = dispatch_cli_done($manifestPath, $manifest);
+    $questions = pipeline_unanswered($manifest);
+    $followUps = pipeline_follow_ups($manifest);
+
+    return $questions === []
+        ? [...$done, 'followUps' => $followUps]
+        : ['action' => 'ask', 'proof' => $done['proof'], 'questions' => $questions, 'followUps' => $followUps];
+}
+
 /** Read from the committed spec, never stored; a spec that cannot be read is Architectural. */
 function dispatch_cli_design_size(array $manifest): DesignSize
 {
@@ -435,7 +451,7 @@ function dispatch_cli_finish(string $manifestPath, string $decisionJson): array
     if (($decision['action'] ?? null) === 'done') {
         $problem = $leg === 'review-pr' ? dispatch_cli_finish_problem($manifestPath, $manifest) : "the workflow returned done at {$leg}";
 
-        return $problem === null ? dispatch_cli_done($manifestPath, $manifest) : dispatch_cli_halt($manifestPath, $manifest, $leg, $problem);
+        return $problem === null ? dispatch_cli_finished($manifestPath, $manifest) : dispatch_cli_halt($manifestPath, $manifest, $leg, $problem);
     }
     $reason = trim((string) ($decision['reason'] ?? ''));
     $named = $decision['leg'] ?? null;
@@ -483,7 +499,8 @@ function dispatch_cli_ui(string $diffPath): ?string
 /**
  * The CI gate's reads (`../references/engine.md` §The CI gate): the worktree's `HEAD`, then the PR's head
  * commit, its mergeability and its checks in one gh call, the merges since the last completed review in an
- * `autoflow` run, and what the session does next. It never writes the manifest, so polling it changes
+ * `autoflow` run, and what the session does next; while a `blocking` open question is unanswered in an
+ * `autoflow` run, `ask` before git or gh is read. It never writes the manifest, so polling it changes
  * nothing.
  */
 function dispatch_cli_ci(string $manifestPath, int $poll): array
@@ -499,6 +516,10 @@ function dispatch_cli_ci(string $manifestPath, int $poll): array
     $pr = $manifest['artifacts']['pr'] ?? null;
     if ($pr === null) {
         return pipeline_halt('the CI gate needs a PR: artifacts.pr is not set');
+    }
+    $unanswered = $manifest['mode'] === 'autoflow' ? pipeline_unanswered($manifest) : [];
+    if ($unanswered !== []) {
+        return pipeline_ci_ask($unanswered);
     }
     $worktree = rtrim($manifest['worktree'], '/');
     [$code, $head, $error] = pipeline_git_run($worktree, ['rev-parse', 'HEAD']);

@@ -15,13 +15,14 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
     $files = manifest_files($manifestPath);
     $suite = '`' . pipeline_cli('suite', $manifestPath) . ' --outcome <green|red> --passed <n> --failed <n>`';
     $dispositions = implode(', ', array_map(fn (ActionDisposition $disposition) => "`{$disposition->value}`", ActionDisposition::cases()));
-    $writeActions = "Write what you did with each point to `{$files['actions']}` as a JSON list of `{claim, disposition, note}`, `disposition` one of {$dispositions}, and `[]` when you acted on nothing; `record` completes the open entry from it.";
+    $kinds = implode(', ', array_map(fn (QuestionKind $kind) => "`{$kind->value}`", QuestionKind::cases()));
+    $writeActions = "Write what you did with each point to `{$files['actions']}` as a JSON list of `{claim, disposition, note}`, `disposition` one of {$dispositions}, plus `kind` on an `open-question`, one of {$kinds} (engine.md §Open questions), and `[]` when you acted on nothing; `record` completes the open entry from it.";
     $writeReview = fn (string $gate, string $stamped = '') => "Write its review verbatim to `{$files['review']}`; `record` appends it as the open `{$gate}` entry{$stamped}.";
     $readOnly = 'Act on nothing. Read-only on the checkout: that file is the only one you write.';
     $actOnReview = [
         'Act on the open review with the edit/rework boundary (engine.md §Resolving a review): integrate and commit edits and small fixes; where the review says the work is fundamentally wrong, loop back.',
         'Change nothing the review did not name.',
-        'Carry anything unresolved verbatim as an open question.',
+        'Carry anything unresolved verbatim as an open question with its kind: `blocking` when the answer changes this PR\'s code, `follow-up` for work outside it, `remark` for a note on a choice already made; `blocking` when unsure. A `blocking` question names its options in `note`, the one the PR built first (engine.md §Open questions).',
     ];
     $yourself = fn (string $procedure, string $subject) => "Apply `/critique`'s `{$procedure}` procedure to {$subject} yourself: Stage 0, Stage 1 and the rubric in `~/.claude/skills/critique/references/rubrics.md`. You are the reviewer; do not dispatch one, so `--verify` and `alternatives` are not available.";
     $checks = 'When the repo declares a `## Checks` block, run its checks first and state their result qualified by its scope (engine.md §Mechanical checks); a repo that declares none says nothing about checks.';
@@ -88,6 +89,7 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
         'verify-ui:run' => [
             'Bring the dev stack up if it is down. Invoke `browser-verification`.',
             'Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` (a first version), and a `state` on every shot; before shots only when the spec names a before state to show, captured on the base, each immediately followed in `shots` by its after shot; `git switch <branch>` before any after shot and before returning, whatever the status, and `git rev-parse --abbrev-ref HEAD` names the branch before the page is written; a defect found is shot as `defect`, and a later pass carries the earlier defect shots forward beside its own. `repo`, `branch` and `pr` are the ones in the `run.json` beside `artifacts.proof`.',
+            'A before state the base cannot render is left out, and is an open question of kind `remark` in `openQuestions`, whose items are `{kind, question}` (engine.md §The proof store).',
             'Post the text-only record comment; the path `write` printed goes to `record` as `--proof`.',
             'Return `continued`, or `looped-back` when the check fails.',
         ],
@@ -101,10 +103,11 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
             $notTheSkill,
             'You are the finish step.',
             ...$actOnReview,
+            'Under the PR body\'s `## Open questions`, one line per open question led by its kind (`- **blocking:** …`), or `None.`; a question a settled `Answer to open question` decision answers is no longer open.',
             $autoflow ? 'On a loop-back, stop there: no suite.' : 'On a loop-back, stop there: no suite, no `gh pr ready`.',
             'Run the suite unless engine.md §Suite reuse finds this tree green, and record the run: ' . $suite . '.',
             'Reconcile the closing links (engine.md §Closing links): each related issue\'s outcome goes to `record` as an `--issue-link`.',
-            'Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` as the finished work stands, the suite line under `checks`, the final open questions and ledger; `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, and a run without `artifacts.proof` gets its page from this write, with `repo` (the GitHub name), `branch` and `pr` from the PR.',
+            'Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` as the finished work stands, the suite line under `checks`, the final open questions, each `{kind, question}`, and the ledger; `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, and a run without `artifacts.proof` gets its page from this write, with `repo` (the GitHub name), `branch` and `pr` from the PR.',
             $writeActions,
             $autoflow
                 ? 'Push your commits and leave the PR draft; the session that launched the run marks it ready after the CI gate (engine.md §The CI gate).'
@@ -232,6 +235,9 @@ function pipeline_brief_overrides(array $manifest, string $manifestPath, string 
     if ($leg === 'review-pr' && pipeline_conflict_rounds($manifest) > 0) {
         $lines[] = pipeline_conflict_round_line($step);
     }
+    if ($leg === 'review-pr' && pipeline_decisions_starting($manifest, PIPELINE_ANSWER) > 0) {
+        $lines[] = pipeline_answer_round_line($step);
+    }
     if ($scope !== null) {
         $lines[] = pipeline_review_scope_line($scope);
     }
@@ -274,6 +280,14 @@ function pipeline_conflict_round_line(string $step): string
     return $step === 'review'
         ? 'The settled `Conflict with the base` decision is a finding of this review: name the conflict and leave the merge to the resolve step, since a review step does not merge (engine.md §Catching up with the base).'
         : 'Resolve the `Conflict with the base` finding with the merge this brief\'s catch-up override asks for, and name it in `actions`; when this brief has no such override, say so in `actions` and change nothing for it: the CI gate reads the PR\'s mergeability again (engine.md §The CI gate).';
+}
+
+/** An owner's answer to a `blocking` open question (engine.md §Open questions): one that departs from what the PR built is a finding of `review-pr`. */
+function pipeline_answer_round_line(string $step): string
+{
+    return $step === 'review'
+        ? 'A settled `Answer to open question` decision whose answer departs from what the PR built is a finding of this review: name what it changes (engine.md §Open questions).'
+        : 'Integrate each settled `Answer to open question` decision that departs from what the PR built, and name it in `actions`; the question it answers is no longer open (engine.md §Open questions).';
 }
 
 /** A design-size escalation that no plan approval has answered yet. */
