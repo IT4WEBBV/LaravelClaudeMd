@@ -177,3 +177,12 @@ rule and stay as they are.
 10. **Sibling run #176 (issue #146)** also changes `brief.php`, `BriefTest.php`, `DispatchCliTest.php`, `engine.md`
    and pipeline `SKILL.md`, elsewhere in those files. The plan expects a merge of the base (engine.md §Catching up
    with the base) and no semantic conflict.
+11. **Q (plan): Which briefs does the `BriefTest` guard read?** A: Every step of both modes, each built with the
+   fake git that puts the base 27 commits ahead (`brief_git_behind()`), so the writing steps carry the catch-up
+   line and the guard reads its commands, and the handoff step carries its own command; a guard over briefs
+   without the line would pass on the merge strings vacuously.
+12. **Q (plan): The tests the spec lists by name miss two that pin the absolute handoff form.** A: They change too,
+   under the spec's rule (*the tests that pin the old form change to the new one*): `BriefTest`'s *prints the
+   return of a handoff step as its command, …* (its exact `toBe`, first command line) and *says what each step
+   passes to record, …* (its `handoff run` expectation). `HandoffCliTest` runs `dispatch_cli.php` directly and
+   prints no brief: unchanged.
