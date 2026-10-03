@@ -146,4 +146,26 @@ actual="$(printf '[{"id":"half-owner","name":"owner","state":"working","sessionI
   | python3 "$HERE/../owners.py" "$WT" --projects-dir "$P" --session-id ccc)" || fail "an owner with an unreadable step transcript did not exit 0"
 [ "$actual" = "$(printf 'owner\thalf-owner\tworking\t1')" ] || fail "an owner with an unreadable step transcript: $actual"
 
+# A session working in a worktree nested in the primary checkout (.claude/worktrees/*) does not own the
+# primary; one working in the primary itself does, and so does one beside the nested worktree. git lists
+# real paths (/private/var on macOS) while this fixture's paths may not be real.
+NESTED="$PRIMARY/.claude/worktrees/b"
+git -C "$PRIMARY" worktree add -q "$NESTED" -b nested-b
+N="$TMP/projects-nested"
+mkdir -p "$N/x"
+entry "$NESTED/code/www"              > "$N/x/n-in.jsonl"        # inside the nested worktree -> not an owner
+entry "$PRIMARY"                      > "$N/x/n-primary.jsonl"   # the primary itself         -> owner
+entry "$PRIMARY/.claude/worktrees/bb" > "$N/x/n-prefix.jsonl"    # prefix trap: bb is not b   -> owner
+actual="$(printf '[{"id":"n-in","name":"in nested","state":"working","sessionId":"n-in"},{"id":"n-primary","name":"in primary","state":"working","sessionId":"n-primary"},{"id":"n-prefix","name":"beside nested","state":"working","sessionId":"n-prefix"}]' \
+  | python3 "$HERE/../owners.py" "$PRIMARY" --projects-dir "$N" --session-id ccc | sort)"
+expected="$(printf 'beside nested\tn-prefix\tworking\t1\nin primary\tn-primary\tworking\t1\n' | sort)"
+[ "$actual" = "$expected" ] || fail "$(printf 'nested worktree\n--- expected\n%s\n--- actual\n%s' "$expected" "$actual")"
+
+# An unreadable live session rooted in the nested worktree still blocks the primary: same repository.
+status=0
+printf '[{"id":"n-ghost","name":"ghost","state":"working","sessionId":"n-ghost","cwd":"%s"}]' "$NESTED" \
+  | python3 "$HERE/../owners.py" "$PRIMARY" --projects-dir "$N" --session-id ccc >/dev/null 2>"$TMP/err" || status=$?
+[ "$status" -eq 2 ] || fail "an unreadable session in a nested worktree exited $status, expected 2"
+grep -q "ghost" "$TMP/err" || fail "the error does not name the nested session: $(cat "$TMP/err")"
+
 echo "PASS owners.py"

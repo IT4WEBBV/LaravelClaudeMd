@@ -49,6 +49,8 @@ The PR is found by prefix: `closingIssuesReferences` stays empty until the run's
   session rooted in, above, or in the same repository as the worktree, so treat the worktree as owned
   and ask the owner, quoting the error. An unreadable session rooted anywhere else is skipped.
   Only a `working` or `blocked` session owns a worktree; `done`, `failed` and `stopped` rows never do.
+  A session working in a worktree nested in the primary checkout (`.claude/worktrees/*`) does not own
+  the primary checkout.
   An open PR with no worktree has no owner to find: treat it as orphaned.
   An `autoflow` run's steps work from the launch directory, so for those `owners.py` also reads the
   workflow step transcripts and matches what names the run's worktree: its `dispatch_cli.php` calls,
@@ -91,7 +93,8 @@ and ends, steps 1–3.
   A sibling still in design shows only its spec and plan; merged siblings are not listed, since the run
   is cut from a base that holds them. The note holds nothing back and orders nothing: the run merges
   its base when its brief says so.
-- `launch` answers `done` or a halt: report it and start no workflow.
+- `launch` answers `done` or a halt: report it and start no workflow. A `fresh session:` halt is Step 5's,
+  for every issue still to start: no further `launch` from this session.
 - Start the workflow `pipeline-autoflow` with `launch`'s JSON as `args`, in the background, **through
   the detour** (pipeline `SKILL.md` §`autoflow` step 3): this reply ends with the detour's background
   wait, and the `Workflow` call is the first tool call of the reply its notice opens. Launch every run
@@ -169,9 +172,10 @@ notice that arrives after a stall's `finish` is not finished again.
 
 ## Watch
 
-One background Bash (`run_in_background: true`) per PR. Each exits on the change being waited for.
-A `run_in_background` loop outlives its call; the Deploy orchestrator's watch on PR #431 ran two hours
-and exited on the change (2026-09-16).
+One background Bash per PR, with `run_in_background: true` and `timeout: 7200000`, the Bash tool's
+maximum: without it the tool stops the loop after 30 minutes. Each loop exits on the change being
+waited for and prints its `PR #<P> …` line. A watch that ends without that line was stopped at the
+time limit: arm it again, without a report.
 
 ```bash
 # awaiting merge: exits once the PR is merged or closed
@@ -219,32 +223,24 @@ php ~/.claude/skills/pipeline/checks/proof_cli.php open <that path>
 
 ## Teardown
 
-Verify, printed together:
-```bash
-git -C <worktree> status --porcelain | wc -l                                          # 0
-git -C <worktree> rev-parse HEAD                                                       # equals the sha below
-gh pr view <P> -R <repo> --json state,headRefOid --jq '"\(.state) \(.headRefOid)"'    # MERGED <sha>
-claude agents --json --all | python3 ~/.claude/skills/orchestrate/owners.py <worktree>   # nothing, exit 0, and no pending notice of yours
-```
-A non-zero exit from `owners.py` fails the check: do not tear down; ask, quoting its error.
+Once no completion notice of yours is pending for the run (the dispatch record), from the primary
+checkout:
 
-Mark the page before anything is removed (`<proof>`: the `proof` `finish` printed, else
-`jq -r '.artifacts.proof // empty' <manifest>`; none: skip):
 ```bash
-php ~/.claude/skills/pipeline/checks/proof_cli.php status <proof> merged
-```
-A PR closed without merge gets `status <proof> closed` instead, and no teardown.
-
-Then, from the primary checkout:
-```bash
-./scripts/worktree.sh remove <N> --force-local-branch-removal     # declared remove is scripts/worktree.sh
-```
-```bash
-<the declared worktree.remove>                                    # any other repo
-git branch -D <branch>
+python3 ~/.claude/skills/orchestrate/teardown.py <worktree> <P> --repo <repo> [--proof <proof>]
 ```
 
-In a batch on a base, the merge closed nothing: close the issue, so the runs it blocks can kick off.
+`<proof>`: the `proof` `finish` printed; left out, the script reads the manifest's `artifacts.proof`.
+It reads the PR, marks the page `merged` or `closed`, prints every check (clean, `HEAD` equals the
+merged `headRefOid`, the PR's branch, run from outside the worktree, nothing owns it per `owners.py`),
+and only when all hold removes the slot through `scripts/worktree.sh`, any other worktree with
+`git worktree remove`, and the branch. Exit 0: removed. Exit 1: nothing removed, and the last line says
+why (still open, closed without merge, the failed checks, `gh` failed). Exit 3: a removal command
+failed part-way, and the last line names it and what was already done. Put its last line in the
+report, not in a question.
+
+In a batch on a base, after exit 0 the merge closed nothing: close the issue, so the runs it blocks
+can kick off.
 ```bash
 gh issue close N -R <repo> --reason completed --comment "Merged into <base> in #<P>; reaches the default branch with <base>."
 ```

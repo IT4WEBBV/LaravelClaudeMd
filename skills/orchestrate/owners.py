@@ -16,6 +16,10 @@ the calling session are skipped.
 Grepping for the path or the branch is not enough: slot directories are recycled, and every session
 that mapped a worktree mentions it.
 
+A primary checkout contains the worktrees nested in it (.claude/worktrees/*): an entry whose cwd lies in
+one of those works in that worktree, not in the primary checkout. Fail-closed is unchanged, so an
+unreadable session rooted in a nested worktree still blocks the primary (same repository).
+
 Prints one line per owner: name, id, state, matching entries (tab-separated).
 No output and exit 0 means no live session owns it: the work is orphaned.
 
@@ -146,9 +150,27 @@ def normalised(path):
     return os.path.abspath(path).rstrip("/")
 
 
+@functools.lru_cache(maxsize=None)
+def nested_worktrees(worktree):
+    """The registered worktrees inside this one (a primary checkout's .claude/worktrees/*), as git prints them: real paths."""
+    result = subprocess.run(
+        ["git", "-C", worktree, "worktree", "list", "--porcelain"],
+        capture_output=True,
+        text=True,
+    )
+    root = os.path.realpath(worktree)
+    listed = (line[len("worktree "):] for line in result.stdout.splitlines() if line.startswith("worktree "))
+    return tuple(path for path in listed if path != root and inside(path, root))
+
+
+def in_nested_worktree(cwd, worktree):
+    real = os.path.realpath(cwd)
+    return any(inside(real, nested) for nested in nested_worktrees(worktree))
+
+
 def works_in(entry, worktree):
     cwd = entry.get("cwd")
-    if isinstance(cwd, str) and cwd and inside(cwd, worktree):
+    if isinstance(cwd, str) and cwd and inside(cwd, worktree) and not in_nested_worktree(cwd, worktree):
         return True
     return any(normalised(named) == worktree for named in named_worktrees(entry))
 

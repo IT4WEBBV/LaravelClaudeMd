@@ -473,12 +473,26 @@ function proof_github_url(array $run, string $path): ?string
     return $nameWithOwner === '' ? null : 'https://github.com/' . $nameWithOwner . '/' . $path;
 }
 
-/** A reference that becomes a link when there is a URL for it, and stays plain text otherwise. */
+/**
+ * A reference to GitHub that becomes a link, opening in a new tab so the proof page stays where it was, when there
+ * is a URL for it, and stays plain text otherwise.
+ */
 function proof_render_ref(?string $url, string $label): string
 {
     return $url === null
         ? proof_e($label)
-        : '<a href="' . proof_e($url) . '">' . proof_e($label) . '</a>';
+        : '<a href="' . proof_e($url) . '" target="_blank" rel="noopener">' . proof_e($label) . '</a>';
+}
+
+/**
+ * The PR's diff, where the review happens. Never plain text: without a PR or a URL the words would point at nothing,
+ * so it is left out (the meta line's array_filter drops the empty string).
+ */
+function proof_render_diff_ref(array $run): string
+{
+    $url = empty($run['pr']) ? null : proof_github_url($run, 'pull/' . (int) $run['pr'] . '/files');
+
+    return $url === null ? '' : proof_render_ref($url, 'Files changed');
 }
 
 /**
@@ -525,10 +539,11 @@ function proof_render_run(array $run): string
     $issue = proof_issue_number($run);
     $issueRef = $issue === null ? '' : proof_render_ref(proof_github_url($run, 'issues/' . $issue), 'issue #' . $issue);
 
-    // array_filter drops the issue reference when the run has none, so the separators stay right.
+    // array_filter drops the diff and issue references when the run has none, so the separators stay right.
     $meta = implode(' · ', array_filter([
         '<code>' . proof_e((string) ($run['repo'] ?? '')) . '</code>',
         $pr,
+        proof_render_diff_ref($run),
         $issueRef,
         '<code>' . proof_e((string) ($run['branch'] ?? '')) . '</code>',
         proof_e((string) ($run['mode'] ?? '')) . ' mode',

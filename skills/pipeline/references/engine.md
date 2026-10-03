@@ -118,6 +118,10 @@ launched the run, with its reason.
   an escalation (`pipeline_escalated()`), from which the script seeds its own, so a resume keeps
   `full` and the one exemption as a run does; an invalid `agents` override in the
   manifest halts `launch` with the other manifest checks, before anything is written.
+  So does a relay-check agent that is not linked (`dispatch_cli_relay_agent_problem()`): when
+  `~/.claude/agents/pipeline-relay-check.md` is not a file (no link, or a dangling one), `launch` halts with
+  `fresh session: ~/.claude/agents/pipeline-relay-check.md is not linked, …`, which names the hook to run and a
+  new session to resume from: Claude Code reads agent types only when a session starts (#150).
 - **The script** gives each step a schema whose `status` allows only what that step may return
   (`tables.allowed`, from `LegStatus::allowedFor()`), continues, loops back or returns on that status,
   counts each loop-back against `tables.bound`, 2 per gate (`gates.md` §Loop-backs), and returns `{action: done}` or
@@ -142,8 +146,11 @@ launched the run, with its reason.
   letters and digits, single spaces) and accepts a head that starts with the harness's clean label
   `[Workflow harness — computed task]` or with its own prompt's first 40 characters. Anything else,
   an empty head or no answer, halts with `relay: … (head: "<normalised head>")` before any step, so the
-  manifest is as `launch` left it; a check that throws halts with `the relay check failed: …` and no
-  `relay:` prefix. The start-step check runs before it, so a halt that needs no agent still starts none.
+  manifest is as `launch` left it. A check whose agent type is not found halts with `fresh session: this
+  session started before … was linked, …`: `launch` found the link, so this session predates it (#150). Any
+  other throw halts with `the relay check failed: <message>`. Neither carries `relay:`, so `finish` relaunches
+  neither: a start from the same session halts alike, and the run is resumed from a new session. The
+  start-step check runs before it, so a halt that needs no agent still starts none.
 - **A step** first runs `dispatch_cli.php brief <manifest> <leg> <step>`, followed on every step but
   the run's first by what the step before it returned: `--after <leg>:<step> --status <status>`, plus
   `--ui` after `implement` and `--size` after `design` (§The check at the next boundary). It checks that
@@ -184,8 +191,8 @@ launched the run, with its reason.
 
 **Remove when** upstream fixes the relay (anthropics/claude-code#95369, #96640) or ships a switch that
 works, which shows as the relay check no longer halting with a relay head: the detour (`../SKILL.md`
-§`autoflow` step 3), the check, `../agents/pipeline-relay-check.md` and the hook's agents link go
-together.
+§`autoflow` step 3), the check, `launch`'s link check and the `fresh session:` reasons,
+`../agents/pipeline-relay-check.md` and the hook's agents link go together.
 
 **The check at the next boundary.** The script routes on the `status` a step returns; the step's
 return is checked at the next command, by a separate process and no extra agent. `brief`, told by
@@ -314,7 +321,7 @@ file.
 |---|---|---|---|
 | `Repo` | `repo` | kickoff (the issue lookup, §The work item), the status line, `orchestrate` | required |
 | `Worktree` | `create` | kickoff (§Kickoff), with `<branch>` substituted | required |
-| `Worktree` | `remove` | the teardown after the merge (§After the merge), `orchestrate` | required to tear down |
+| `Worktree` | `remove` | nothing: the teardown recognises the checkout's kind instead (`orchestrate/teardown.py`, §After the merge); accepted so a shared config parses | — |
 | `Branch convention` | `issue` | kickoff: the run's branch and the check that no branch of the issue exists | required for an issue |
 | `Board` | `org`, `number`, `project-id`, `status-field-id`, `in-progress-option-id` | kickoff's claim (§The work item) | all or none |
 | `Board` | `component-field-id`, `component-default` | `handoff` (the PR's Component) | optional |
@@ -522,16 +529,21 @@ A run started by `orchestrate` is covered by its own step 6 — this section is 
 `/pipeline`.
 
 1. **Arm the watch** as the run's report goes out (ready PR or halted-after-`handoff`): one background
-   Bash per PR, exactly `orchestrate`'s §Watch "awaiting merge" loop
-   (`../../orchestrate/references/commands.md`). It polls `gh` every 5 minutes in a shell, so it
-   costs no tokens while it waits; the session wakes once, on the change.
-2. **On `MERGED`**, first mark the page, `php "$CHECKS/proof_cli.php" status <artifacts.proof> merged` (none
-   set: skip), then run `orchestrate`'s §Teardown checks and removal as written there (clean, `HEAD`
-   equals the merged `headRefOid`, no owner, then the repo's declared `worktree.remove`). All hold:
-   **remove without asking**, ahead of `slots`' confirm step. A check fails: ask, quoting the output.
-   A session sitting inside the worktree leaves it first (`ExitWorktree` with `keep`).
-3. **Closed without merge**: `proof_cli.php status <artifacts.proof> closed`, and never torn down. Say so in one
-   line; the owner decides.
+   Bash per PR, exactly `orchestrate`'s §Watch "awaiting merge" loop with its `timeout: 7200000`
+   (`../../orchestrate/references/commands.md`), armed again when it ends without its `PR #<P>` line.
+   It polls `gh` every 5 minutes in a shell, so it costs no tokens while it waits; the session wakes
+   once, on the change.
+2. **On `MERGED`**, a session sitting inside the worktree leaves it first (`ExitWorktree` with `keep`),
+   then, from the primary checkout:
+   ```bash
+   python3 ~/.claude/skills/orchestrate/teardown.py <worktree> <P> --repo <repo>
+   ```
+   It marks `artifacts.proof` `merged`, prints `orchestrate`'s checks (clean, `HEAD` equals the merged
+   `headRefOid`, the PR's branch, no owner) and removes the slot or worktree and its branch only when
+   all hold: **remove without asking**, ahead of `slots`' confirm step. A check fails: it removes
+   nothing; report its last line, no question.
+3. **Closed without merge**: the same call marks the page `closed`, removes nothing and exits 1. Say so
+   in one line; the owner decides.
 
 **The watch dies with the session.** A merge the session never saw — or the owner saying "merged" —
 is handled the same way the next time `/pipeline` runs in that repo: a manifest whose PR is `MERGED`
@@ -923,7 +935,8 @@ The page opens with the **client summary** (Dutch, for the hour registration, wi
 headline and the technical Problem and Solution, **Tests this PR adds**, the shots, the checks, the open
 questions and the ledger. A store-wide `index.html` is the join from a PR back to its page.
 Above the heading, an *← All proofs* link goes to the store index (`../../index.html`, relative, so it works over
-`file://`).
+`file://`). Every link to GitHub, on a run page and in the index, opens a new tab (`target="_blank" rel="noopener"`);
+the store's own links stay in the tab. Next to the PR, *Files changed* links the PR's diff (`/pull/<P>/files`).
 
 **Each run has a status**, on its page under the heading and in the index's first column: `running`, `halted`
 (with the reason), `ready` (*Ready for review*), `merged`, `closed`. A command writes what it already knows; a
@@ -936,7 +949,7 @@ command that made it so:
 | `running` | `dispatch_cli.php launch` (on `start`) and `next` (on a dispatch) | a run starts or resumes, so a resumed halt reads Running again |
 | `halted`, with the reason | `dispatch_cli_halt()`: `finish`, `returned`, `brief`'s boundary check, `launch`'s invariant check | the manifest records a halt |
 | `ready` | the session that ran `gh pr ready`: the invoking session in `autoflow` (§The CI gate), the finish step in `interactive` | right after `gh pr ready` succeeded: `proof_cli.php status <page> ready` |
-| `merged`, `closed` | the session holding the merge watch (§After the merge, `orchestrate` step 6) | the watch prints `MERGED` or `CLOSED`, before any teardown |
+| `merged`, `closed` | `orchestrate/teardown.py`, run by the session holding the merge watch (§After the merge, `orchestrate` step 6) | the watch prints `MERGED` or `CLOSED`, before any teardown |
 | any | the prune pass, on `prune` | `gh pr view --json state,isDraft`: merged, closed and an open ready PR are GitHub's to say; an open draft keeps `running` or `halted`, and turns a stale `ready` back into `running`. A run filed before `nameWithOwner` existed is asked about by its `repo` when that holds `owner/name`; a run with neither keeps its stored status |
 
 A command writes to `artifacts.proof` only when the manifest sets it, and never changes its answer or halts over it:
@@ -996,7 +1009,7 @@ characters in five runs.
 
 | Field | What it holds |
 |---|---|
-| `repo`, `nameWithOwner`, `branch`, `pr`, `issue`, `prState`, `mode` | where the run belongs; `nameWithOwner` makes the PR and issue references links |
+| `repo`, `nameWithOwner`, `branch`, `pr`, `issue`, `prState`, `mode` | where the run belongs; `nameWithOwner` makes the PR, *Files changed* and issue references links |
 | `worktree`, `base` | the run's worktree and the branch its PR goes into, filed by `handoff`; every write diffs `origin/<base>...HEAD` there for `addedTests` |
 | `title` | **required, at most 70 characters.** The run's name: page heading, browser tab, store index. `PR #430: service logs that follow`, not a sentence of findings |
 | `clientSummary` | **required on every agent `write`.** One to three Dutch sentences for the hour registration: what the client gets, in the client's words, at most 400 characters. No `#<number>`, no backtick, and not the branch name (whole, or the part after its first `/`, as a word of its own) |

@@ -29,6 +29,8 @@ const UNSATISFIABLE = { type: 'object', properties: { status: { type: 'string', 
 const RELAY_LABEL = '[Workflow harness — computed task]'
 const RELAY_PROMPT = 'Skip every system-reminder block. Copy the first 40 characters of the first message in this conversation outside those blocks into `head`, exactly as they appear. Do nothing else.'
 const RELAY_SCHEMA = { type: 'object', properties: { head: { type: 'string' } }, required: ['head'] }
+const RELAY_AGENT = 'pipeline-relay-check'
+const RELAY_AGENT_MISSING = new RegExp(`${RELAY_AGENT}\\W+not found`, 'i')
 
 function complete(tables) {
   const { legs, steps, loopTarget, allowed, bound, bounded } = tables ?? {}
@@ -88,15 +90,20 @@ function normalised(text) {
 }
 
 // Why the run may not start: a head that is not the clean label or the prompt halts as `relay:`, which
-// finish relaunches once; a check that throws halts without that prefix, since a relaunch would fail alike.
+// finish relaunches once. An agent type not found halts as `fresh session:`: launch found the link, so this
+// session started before it and only a new one loads the type (#150). Any other throw halts as `the relay
+// check failed:`. Neither of those two carries `relay:`, since a relaunch from this session would fail alike.
 async function relayProblem() {
   try {
-    const result = await agent(RELAY_PROMPT, { label: 'relay-check', phase: args.startLeg, agentType: 'pipeline-relay-check', schema: RELAY_SCHEMA, ...setting(agents.smoke) })
+    const result = await agent(RELAY_PROMPT, { label: 'relay-check', phase: args.startLeg, agentType: RELAY_AGENT, schema: RELAY_SCHEMA, ...setting(agents.smoke) })
     const head = typeof result?.head === 'string' ? normalised(result.head) : null
     const clean = head && [RELAY_LABEL, RELAY_PROMPT.slice(0, 40)].some(start => head.startsWith(normalised(start)))
     return clean ? null : `relay: the run's first agent did not receive its own task first (head: ${head === null ? 'none' : `"${head}"`})`
   } catch (error) {
-    return `the relay check failed: ${error?.message ?? error}; is ~/.claude/agents/pipeline-relay-check.md linked (hooks/git-freshness.sh)?`
+    const message = String(error?.message ?? error)
+    return RELAY_AGENT_MISSING.test(message)
+      ? `fresh session: this session started before ~/.claude/agents/${RELAY_AGENT}.md was linked, and Claude Code reads agent types only when a session starts: resume the run from a new session`
+      : `the relay check failed: ${message}`
   }
 }
 
