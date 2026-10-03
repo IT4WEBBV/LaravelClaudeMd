@@ -55,26 +55,36 @@ it('keeps gates.md in lock-step with the loop-back targets', function () {
     }
 });
 
-it('keeps every engine.md section a brief names', function () {
-    preg_match_all('/^## (.+?)(?: — .*)?$/m', (string) file_get_contents(__DIR__ . '/../../references/engine.md'), $headings);
+it('has briefs cite files under references/, never a section', function () {
+    $planGap = ['gate' => 'plan-approval', 'leg' => 'implement', 'cycle' => 1, 'at' => '2026-10-03T10:00:00Z', 'reason' => 'r', 'outcome' => 'looped-back'];
+    $design = ['branch' => 'feature/x', 'worktree' => '/tmp/wt', 'mode' => 'autoflow', 'cursor' => ['leg' => 'design', 'status' => 'pending'],
+        'artifacts' => ['spec' => 'docs/superpowers/specs/2026-10-03-x-design.md'], 'gate_ledger' => [$planGap]];
     $lines = array_merge(
         ...array_values(pipeline_leg_overrides('autoflow', '/tmp/m.json')),
         ...array_values(pipeline_leg_overrides('interactive', '/tmp/m.json')),
+        ...array_map(fn (string $step) => pipeline_plan_gap_lines($step), ['review', 'run', 'resolve']),
         ...[[
             pipeline_review_scope_line(['since' => 'abc', 'base' => 'origin/main', 'commits' => 1, 'files' => []]),
             pipeline_catch_up_line(['worktree' => '/tmp/wt'], ['base' => 'origin/main', 'behind' => 1, 'shared' => []]),
-            pipeline_conflict_round_line('review'),
-            pipeline_conflict_round_line('resolve'),
-            pipeline_answer_round_line('review'),
-            pipeline_answer_round_line('resolve'),
+            pipeline_ci_round_line('review'), pipeline_ci_round_line('resolve'),
+            pipeline_conflict_round_line('review'), pipeline_conflict_round_line('resolve'),
+            pipeline_answer_round_line('review'), pipeline_answer_round_line('resolve'),
+            pipeline_grow_form_line('spec'), pipeline_grow_form_line('plan'), pipeline_grow_form_line('run'),
+            pipeline_brief_state(['base' => 'feature/integration', 'last_sha' => 'abc'], 'implement'),
+            pipeline_brief_overrides($design, '/tmp/m.json', 'design', 'plan'),
         ]],
     );
-    preg_match_all('/§([^,):;]+)/', implode("\n", $lines), $names);
+    $text = implode("\n", $lines);
 
-    expect($names[1])->not->toBeEmpty();
-    foreach ($names[1] as $name) {
-        expect(array_filter($headings[1], fn (string $heading) => str_starts_with($name, $heading)))->not->toBeEmpty("engine.md has no section '{$name}'");
+    expect($text)->not->toContain('engine.md')->not->toContain('§');
+    preg_match_all('/\(((?:[a-z-]+\/)?[a-z-]+\.md(?:, (?:[a-z-]+\/)?[a-z-]+\.md)*)\)/', $text, $citations);
+    $files = array_unique(array_merge(...array_map(fn (string $list) => explode(', ', $list), $citations[1])));
+
+    expect($files)->not->toBeEmpty();
+    foreach ($files as $file) {
+        expect(__DIR__ . "/../../references/{$file}")->toBeFile("a brief cites {$file}");
     }
+    expect(pipeline_brief_overrides($design, '/tmp/m.json', 'design', 'plan'))->toContain('(steps/design.md)');
 });
 
 it('keeps every model and effort out of the autoflow script, which takes them from launch', function () {

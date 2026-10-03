@@ -146,12 +146,12 @@ it('counts the merge round and the CI fix round apart', function () {
 
 function ci_conflict_decision(): string
 {
-    return "Conflict with the base on the PR's head commit abc123: GitHub reports PR #7 CONFLICTING with its base; review-pr's resolve step merges the base (engine.md §Catching up with the base)";
+    return "Conflict with the base on the PR's head commit abc123: GitHub reports PR #7 CONFLICTING with its base; review-pr's resolve step merges the base (shared/catch-up.md)";
 }
 
 it('answers one conflict round on a PR that conflicts with its base, whatever its checks, and halts on a conflict after it (#149)', function () {
     $fix = ['action' => 'fix', 'verdict' => 'conflicting', 'sha' => 'abc123', 'decision' => ci_conflict_decision()];
-    $reason = 'PR #7 conflicts with its base again after the conflict round, on abc123: merge the base into the branch (engine.md §Catching up with the base), push, and run the CI gate again';
+    $reason = 'PR #7 conflicts with its base again after the conflict round, on abc123: merge the base into the branch (shared/catch-up.md), push, and run the CI gate again';
 
     expect(pipeline_ci_answer(ci_manifest(), ci_view([ci_run('ci', 'COMPLETED', 'SUCCESS')], 'CONFLICTING'), 'abc123', true, 1))->toBe($fix);
     expect(pipeline_ci_answer(ci_manifest(), ci_view([], 'CONFLICTING'), 'abc123', true, 1))->toBe($fix);
@@ -203,4 +203,10 @@ it('counts the conflict round apart from the CI and merge rounds (#149)', functi
         ->toMatchArray(['action' => 'fix', 'verdict' => 'red']);
     expect(pipeline_ci_answer(ci_manifest([$ci, $merge]), ci_view([], 'CONFLICTING'), 'abc123', true, 1, ['a.php']))
         ->toMatchArray(['action' => 'fix', 'verdict' => 'conflicting']);
+});
+
+it('counts a conflict round recorded before the decision cited shared/catch-up.md (#128)', function () {
+    $old = "Conflict with the base on the PR's head commit abc123: GitHub reports PR #7 CONFLICTING with its base; review-pr's resolve step merges the base (engine.md §Catching up with the base)";
+
+    expect(pipeline_conflict_rounds(ci_manifest([$old])))->toBe(1);
 });

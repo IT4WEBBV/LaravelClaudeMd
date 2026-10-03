@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Every step's brief (`../references/engine.md` §What a leg brief consists of). A brief points at the
+ * Every step's brief (`../references/machinery.md` §What a leg brief consists of). A brief points at the
  * rules; it never restates them, and it holds nothing a station does not ask for.
  */
 
@@ -16,26 +16,26 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
     $suite = '`' . pipeline_cli('suite', $manifestPath) . ' --outcome <green|red> --passed <n> --failed <n>`';
     $dispositions = implode(', ', array_map(fn (ActionDisposition $disposition) => "`{$disposition->value}`", ActionDisposition::cases()));
     $kinds = implode(', ', array_map(fn (QuestionKind $kind) => "`{$kind->value}`", QuestionKind::cases()));
-    $writeActions = "Write what you did with each point to `{$files['actions']}` as a JSON list of `{claim, disposition, note}`, `disposition` one of {$dispositions}, plus `kind` on an `open-question`, one of {$kinds} (engine.md §Open questions), and `[]` when you acted on nothing; `record` completes the open entry from it.";
+    $writeActions = "Write what you did with each point to `{$files['actions']}` as a JSON list of `{claim, disposition, note}`, `disposition` one of {$dispositions}, plus `kind` on an `open-question`, one of {$kinds} (shared/resolving.md), and `[]` when you acted on nothing; `record` completes the open entry from it.";
     $writeReview = fn (string $gate, string $stamped = '') => "Write its review verbatim to `{$files['review']}`; `record` appends it as the open `{$gate}` entry{$stamped}.";
     $readOnly = 'Act on nothing. Read-only on the checkout: that file is the only one you write.';
     $actOnReview = [
-        'Act on the open review with the edit/rework boundary (engine.md §Resolving a review): integrate and commit edits and small fixes; where the review says the work is fundamentally wrong, loop back.',
+        'Act on the open review with the edit/rework boundary (shared/resolving.md): integrate and commit edits and small fixes; where the review says the work is fundamentally wrong, loop back.',
         'Change nothing the review did not name.',
-        'Carry anything unresolved verbatim as an open question with its kind: `blocking` when the answer changes this PR\'s code, `follow-up` for work outside it, `remark` for a note on a choice already made; `blocking` when unsure. A `blocking` question names its options in `note`, the one the PR built first (engine.md §Open questions).',
+        'Carry anything unresolved verbatim as an open question with its kind: `blocking` when the answer changes this PR\'s code, `follow-up` for work outside it, `remark` for a note on a choice already made; `blocking` when unsure. A `blocking` question names its options in `note`, the one the PR built first (shared/resolving.md).',
     ];
     $yourself = fn (string $procedure, string $subject) => "Apply `/critique`'s `{$procedure}` procedure to {$subject} yourself: Stage 0, Stage 1 and the rubric in `~/.claude/skills/critique/references/rubrics.md`. You are the reviewer; do not dispatch one, so `--verify` and `alternatives` are not available.";
-    $checks = 'When the repo declares a `## Checks` block, run its checks first and state their result qualified by its scope (engine.md §Mechanical checks); a repo that declares none says nothing about checks.';
-    $notTheSkill = 'The leg\'s name is not a skill to invoke: do not invoke the `review-pr` skill (`/review-pr`), which posts its own review comment and changes the PR\'s draft state. This brief is the whole step (engine.md §Who takes the PR out of draft).';
+    $checks = 'When the repo declares a `## Checks` block, run its checks first and state their result qualified by its scope (shared/checks.md); a repo that declares none says nothing about checks.';
+    $notTheSkill = 'The leg\'s name is not a skill to invoke: do not invoke the `review-pr` skill (`/review-pr`), which posts its own review comment and changes the PR\'s draft state. This brief is the whole step (shared/review-pr.md).';
     $assumptions = 'Where brainstorming would ask the human, write each question and the answer you assumed into the spec\'s `## Assumptions` section, so `/critique plan` audits exactly those.';
-    $reads = 'Do not build or run the plan\'s code, in a scratch copy or anywhere else: confirm the signatures and APIs it relies on by reading, `php -l` or grep; `implement` proves the plan\'s Expected lines (engine.md §What design proves).';
+    $reads = 'Do not build or run the plan\'s code, in a scratch copy or anywhere else: confirm the signatures and APIs it relies on by reading, `php -l` or grep; `implement` proves the plan\'s Expected lines (steps/design.md).';
     $probe = 'An exception, to choose an approach: when the choice between approaches hinges on whether one of them works at all, answer that question with a throwaway probe (a few lines run on their own, never the plan\'s code, never the suite) and write the question and what the probe showed into the spec.';
-    $claim = 'An exception, to check a claim: when the spec or the plan relies on what existing code does, which reading cannot show, answer that one yes/no question with one throwaway command (a `php -r` or tinker one-liner, or one existing test by filter; never the suite, never the plan\'s code, no new file), bringing the dev stack up first when the command needs it (engine.md §Dev-stack readiness), and write `Probed: <claim>: <what it showed> (<command>)` on one line beside the task that relies on it, or beside the claim in the spec when this step writes no plan.';
+    $claim = 'An exception, to check a claim: when the spec or the plan relies on what existing code does, which reading cannot show, answer that one yes/no question with one throwaway command (a `php -r` or tinker one-liner, or one existing test by filter; never the suite, never the plan\'s code, no new file), bringing the dev stack up first when the command needs it (shared/dev-stack.md), and write `Probed: <claim>: <what it showed> (<command>)` on one line beside the task that relies on it, or beside the claim in the spec when this step writes no plan.';
     $exemplars = 'Plans and specs committed before 2026-09-14 are not exemplars for test or proof policy, and no plan\'s `Verified before writing` header is part of the format.';
 
     return [
         'design:run' => [
-            'Invoke `superpowers:brainstorming`; on the Architectural path it hands over to `superpowers:writing-plans` (engine.md §Design size).',
+            'Invoke `superpowers:brainstorming`; on the Architectural path it hands over to `superpowers:writing-plans` (steps/design.md).',
             $assumptions,
             $reads,
             $probe,
@@ -44,7 +44,7 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
             'Commit the spec, then the plan: two commits; their paths go to `record` as `--spec` and `--plan`.',
         ],
         'design:spec' => [
-            'Invoke `superpowers:brainstorming` and stop at the spec: on the Architectural path, where brainstorming hands over to `superpowers:writing-plans`, the plan is the next step\'s, `design:plan`, so do not invoke `writing-plans` and commit no plan (engine.md §Design size).',
+            'Invoke `superpowers:brainstorming` and stop at the spec: on the Architectural path, where brainstorming hands over to `superpowers:writing-plans`, the plan is the next step\'s, `design:plan`, so do not invoke `writing-plans` and commit no plan (steps/design.md).',
             $assumptions,
             $reads,
             $probe,
@@ -53,7 +53,7 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
             'Commit the spec; on the Bounded path, commit the plan as well, a second commit, at `docs/superpowers/plans/<date>-<slug>.md` beside the spec `docs/superpowers/specs/<date>-<slug>-design.md` (`pipeline_plan_path()`): a Bounded design has no plan step, and a grown design\'s plan step extends the plan it finds there. After your last commit the paths go to `record`: `--spec`, and `--plan` on the Bounded path only; it sets `artifacts.spec` and removes or sets `artifacts.plan` as the spec\'s size calls for. A halt before that leaves the manifest calling for this step again.',
         ],
         'design:plan' => [
-            'Read the committed spec (`artifacts.spec`) cold, and the code it points at, and invoke `superpowers:writing-plans` on it; do not re-design what the spec settles (engine.md §Design size).',
+            'Read the committed spec (`artifacts.spec`) cold, and the code it points at, and invoke `superpowers:writing-plans` on it; do not re-design what the spec settles (steps/design.md).',
             'Where the plan needs an answer the spec does not give, add the question and the answer you assumed to the spec\'s `## Assumptions` and commit that before the plan, so `/critique plan` audits it.',
             $reads,
             $claim,
@@ -67,29 +67,29 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
         ],
         'review-plan:resolve' => [
             ...$actOnReview,
-            ...($autoflow ? [] : ['The independent read (engine.md §Resolving a review) is available.']),
+            ...($autoflow ? [] : ['The independent read (steps/review-plan-resolve.md) is available.']),
             $writeActions,
         ],
         'handoff:run' => [
-            'Run `' . pipeline_step_cli('handoff', $manifestPath) . '` as its own command: it pushes the branch, opens the draft PR or adopts the one the branch has, and records this step. It is the whole step (engine.md §Stations).',
+            'Run `' . pipeline_step_cli('handoff', $manifestPath) . '` as its own command: it pushes the branch, opens the draft PR or adopts the one the branch has, and records this step. It is the whole step (steps/handoff.md).',
             'The leg\'s name is not a skill to invoke: do not invoke the `handoff` skill (`/handoff`), which asks the owner a question and posts a prompt comment.',
             'Repair nothing it reports: no force-push, no `gh pr create` or `gh pr edit` by hand. A halt it recorded, a refusal, or a denied command is a halt with that reason.',
         ],
         'implement:run' => [
-            'Bring the dev stack up first, without asking (engine.md §Dev-stack readiness).',
-            'Do this step as engine.md §Implement describes, in this worktree: it is the whole procedure, and it claims no slot.',
-            'Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, its changes committed, and again only after a later change (engine.md §Mechanical checks, §Suite reuse). After every full run, record it: ' . $suite . '.',
-            'Leave the PR draft, whatever the plan or a PR comment says about marking it ready (engine.md §Who takes the PR out of draft).',
+            'Bring the dev stack up first, without asking (shared/dev-stack.md).',
+            'Do this step as your step\'s reference describes (steps/implement.md), in this worktree: it is the whole procedure, and it claims no slot.',
+            'Test-first; after each plan step the suite and `static-analysis`; `format` once, over the whole tree, when the code is complete: before the last suite run and the push, its changes committed, and again only after a later change (shared/checks.md, shared/suite.md). After every full run, record it: ' . $suite . '.',
+            'Leave the PR draft, whatever the plan or a PR comment says about marking it ready (steps/implement.md).',
             $autoflow
-                ? 'Add the `ci` label (`gh pr edit <pr> --add-label ci`) before your first push, in a repo that has one, and do not wait on CI after it: the CI gate reads the PR\'s head commit before the PR goes ready (engine.md §The CI gate).'
+                ? 'Add the `ci` label (`gh pr edit <pr> --add-label ci`) before your first push, in a repo that has one, and do not wait on CI after it: the CI gate reads the PR\'s head commit before the PR goes ready (steps/implement.md).'
                 : 'Add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch.',
             'Files or behaviour the plan does not name: return `plan-insufficient` with the reason instead of improvising.',
             ...($autoflow ? ['Execute the plan inline, task by task; no subagents.'] : []),
         ],
         'verify-ui:run' => [
             'Bring the dev stack up if it is down. Invoke `browser-verification`.',
-            'Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` (a first version), and a `state` on every shot; before shots only when the spec names a before state to show, captured on the base, each immediately followed in `shots` by its after shot; `git switch <branch>` before any after shot and before returning, whatever the status, and `git rev-parse --abbrev-ref HEAD` names the branch before the page is written; a defect found is shot as `defect`, and a later pass carries the earlier defect shots forward beside its own. `repo`, `branch` and `pr` are the ones in the `run.json` beside `artifacts.proof`.',
-            'A before state the base cannot render is left out, and is an open question of kind `remark` in `openQuestions`, whose items are `{kind, question}` (engine.md §The proof store).',
+            'Write the proof page (shared/proof-payload.md): `clientSummary` and `explainer` (a first version), and a `state` on every shot; before shots only when the spec names a before state to show, captured on the base, each immediately followed in `shots` by its after shot; `git switch <branch>` before any after shot and before returning, whatever the status, and `git rev-parse --abbrev-ref HEAD` names the branch before the page is written; a defect found is shot as `defect`, and a later pass carries the earlier defect shots forward beside its own. `repo`, `branch` and `pr` are the ones in the `run.json` beside `artifacts.proof`.',
+            'A before state the base cannot render is left out, and is an open question of kind `remark` in `openQuestions`, whose items are `{kind, question}` (shared/proof-payload.md).',
             'Post the text-only record comment; the path `write` printed goes to `record` as `--proof`.',
             'Return `continued`, or `looped-back` when the check fails.',
         ],
@@ -105,21 +105,21 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
             ...$actOnReview,
             'Under the PR body\'s `## Open questions`, one line per open question led by its kind (`- **blocking:** …`), or `None.`; a question a settled `Answer to open question` decision answers is no longer open.',
             $autoflow ? 'On a loop-back, stop there: no suite.' : 'On a loop-back, stop there: no suite, no `gh pr ready`.',
-            'Run the suite unless engine.md §Suite reuse finds this tree green, and record the run: ' . $suite . '.',
-            'Reconcile the closing links (engine.md §Closing links): each related issue\'s outcome goes to `record` as an `--issue-link`.',
-            'Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` as the finished work stands, the suite line under `checks`, the final open questions, each `{kind, question}`, and the ledger; `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, and a run without `artifacts.proof` gets its page from this write, with `repo` (the GitHub name), `branch` and `pr` from the PR.',
+            'Run the suite unless this tree is already green (shared/suite.md), and record the run: ' . $suite . '.',
+            'Reconcile the closing links (steps/finish.md): each related issue\'s outcome goes to `record` as an `--issue-link`.',
+            'Write the proof page (shared/proof-payload.md): `clientSummary` and `explainer` as the finished work stands, the suite line under `checks`, the final open questions, each `{kind, question}`, and the ledger; `repo`, `branch` and `pr` from the `run.json` beside `artifacts.proof`, and a run without `artifacts.proof` gets its page from this write, with `repo` (the GitHub name), `branch` and `pr` from the PR.',
             $writeActions,
             $autoflow
-                ? 'Push your commits and leave the PR draft; the session that launched the run marks it ready after the CI gate (engine.md §The CI gate).'
-                : 'Run the CI gate (engine.md §The CI gate) and `gh pr ready` when it answers `ready`, then `proof_cli.php status <the path write printed> ready`; show any other answer to the human. Your reply names the page path `write` printed: no page opens by itself (engine.md §The proof store).',
+                ? 'Push your commits and leave the PR draft; the session that launched the run marks it ready after the CI gate (steps/finish.md).'
+                : 'Run the CI gate (steps/finish.md) and `gh pr ready` when it answers `ready`, then `proof_cli.php status <the path write printed> ready`; show any other answer to the human. Your reply names the page path `write` printed: no page opens by itself (proof-store.md).',
         ],
     ];
 }
 
 /**
  * `$step` is given in `autoflow` (the workflow script names it) and derived from the ledger in `interactive`.
- * `$git` runs git in the worktree: `review-pr`'s review step asks it for its scope (engine.md §Scoped
- * re-review), a step that writes to the branch for the base state (engine.md §Catching up with the base).
+ * `$git` runs git in the worktree: `review-pr`'s review step asks it for its scope (`../references/steps/review-pr-review.md`
+ * §Scoped re-review), a step that writes to the branch for the base state (`../references/shared/catch-up.md` §Catching up with the base).
  */
 function pipeline_brief(array $manifest, string $leg, string $manifestPath, ?string $step = null, ?callable $git = null): string
 {
@@ -141,13 +141,30 @@ function pipeline_brief_role(array $manifest, string $leg, string $step): string
     return "# Brief: `{$leg}` leg, `{$step}` step\n\n"
         . "You are the `{$leg}` leg, `{$step}` step, of a `/pipeline {$manifest['mode']}` run. "
         . "Work only in `{$manifest['worktree']}` on `{$manifest['branch']}`. "
-        . 'The engine.md sections this brief names are in `~/.claude/skills/pipeline/references/engine.md`.';
+        . 'The references this brief names are in `' . pipeline_references_dir() . "/`; read your step's, `" . pipeline_step_reference($leg, $step) . '`, first, and the `shared/` files its `Read also` line names.';
+}
+
+/** The directory a brief's references are in: beside the checks that print it, as `pipeline_cli()` runs their code. */
+function pipeline_references_dir(): string
+{
+    return dirname(__DIR__) . '/references';
+}
+
+/** A step's reference, relative to `references/`: the file its agent reads first (`../SKILL.md` §Per step). */
+function pipeline_step_reference(string $leg, string $step): string
+{
+    return 'steps/' . match (true) {
+        $leg === 'design' => 'design',
+        "{$leg}:{$step}" === 'review-pr:resolve' => 'finish',
+        $step === 'run' => $leg,
+        default => "{$leg}-{$step}",
+    } . '.md';
 }
 
 function pipeline_brief_pointers(array $manifest, string $manifestPath, string $leg, string $step): string
 {
     $ledger = pipeline_ledger($manifest);
-    $lines = ["- manifest: `{$manifestPath}`"];
+    $lines = ["- manifest: `{$manifestPath}`", "- your step's reference: `" . pipeline_references_dir() . '/' . pipeline_step_reference($leg, $step) . '`'];
 
     foreach ($manifest['artifacts'] ?? [] as $name => $value) {
         if ($value !== null && $value !== '') {
@@ -165,7 +182,7 @@ function pipeline_brief_pointers(array $manifest, string $manifestPath, string $
     return "## Pointers\n\n" . implode("\n", $lines);
 }
 
-/** 1-based pass number for the next entry of this gate; `unknown` stays unknown (`../references/manifest.md` §reconstruction). */
+/** 1-based pass number for the next entry of this gate; `unknown` stays unknown (`../references/manifest.md` §Reconstruction). */
 function pipeline_next_cycle(array $ledger, string $gate): int|string
 {
     $cycles = array_column(array_filter($ledger, fn ($entry) => ($entry['gate'] ?? null) === $gate), 'cycle');
@@ -192,7 +209,7 @@ function pipeline_brief_state(array $manifest, string $leg): string
     $lines = $decisions === [] ? ['- settled decisions: none'] : array_map(fn (string $decision) => "- settled: {$decision}", $decisions);
     $base = $manifest['base'] ?? null;
     if ($base !== null) {
-        $lines[] = "- base: `{$base}`: this branch was cut from `origin/{$base}` and its PR goes into it, not into the default branch; diff with `git diff origin/{$base}...HEAD`, and a merge into it closes no issue (engine.md §Kickoff)";
+        $lines[] = "- base: `{$base}`: this branch was cut from `origin/{$base}` and its PR goes into it, not into the default branch; diff with `git diff origin/{$base}...HEAD`, and a merge into it closes no issue (session.md)";
     }
     $sha = $manifest['last_sha'] ?? 'unknown';
     $lines[] = "- last_sha: `{$sha}`";
@@ -227,7 +244,7 @@ function pipeline_brief_overrides(array $manifest, string $manifestPath, string 
         $lines[] = pipeline_grow_form_line($step);
     }
     if ($leg === 'design' && pipeline_is_plan_return(end($ledger) ?: [])) {
-        $lines[] = 'Plan gap: extend the plan (and the spec where it must say more) to cover the entry\'s `reason`; describe what is already built as state, do not re-design it (engine.md §Design size). Leave that entry as it is, with no `actions`: what you did goes in the spec, the plan and the reason you return.';
+        $lines[] = 'Plan gap: extend the plan (and the spec where it must say more) to cover the entry\'s `reason`; describe what is already built as state, do not re-design it (steps/design.md). Leave that entry as it is, with no `actions`: what you did goes in the spec, the plan and the reason you return.';
     }
     if ($leg === 'review-pr' && pipeline_ci_rounds($manifest) > 0) {
         $lines[] = pipeline_ci_round_line($step);
@@ -252,7 +269,7 @@ function pipeline_brief_overrides(array $manifest, string $manifestPath, string 
     return "## Overrides\n\n" . implode("\n", array_map(fn (string $line) => "- {$line}", $lines));
 }
 
-/** How a step after `design` reports a plan that falls short (engine.md §Design size). A resolve step completes its open entry, so it loops back instead. */
+/** How a step after `design` reports a plan that falls short (`../references/shared/plan-falls-short.md`). A resolve step completes its open entry, so it loops back instead. */
 function pipeline_plan_gap_lines(string $step): array
 {
     if ($step === 'resolve') {
@@ -260,34 +277,34 @@ function pipeline_plan_gap_lines(string $step): array
     }
 
     return [
-        'On a Bounded spec (its header says `**Design size:** Bounded`): run the escalation check first (engine.md §Design size), and only on escalation return `plan-insufficient` with `--reason` naming why the design must grow.',
+        'On a Bounded spec (its header says `**Design size:** Bounded`): run the escalation check first (shared/plan-falls-short.md), and only on escalation return `plan-insufficient` with `--reason` naming why the design must grow.',
         'On an Architectural spec: only when the plan falls short of what this step needs (files or behaviour it does not name), return `plan-insufficient` with `--reason` naming what the plan lacks. The size alone is no gap: an Architectural plan needs no approval beyond `review-plan`\'s.',
         ...($step === 'review' ? ['When you return `plan-insufficient`, write no review file: `record` adds no review entry.'] : []),
     ];
 }
 
-/** The CI gate's fix round (engine.md §The CI gate): the recorded failure is a finding of `review-pr`. */
+/** The CI gate's fix round (`../references/shared/review-pr.md` §The rounds): the recorded failure is a finding of `review-pr`. */
 function pipeline_ci_round_line(string $step): string
 {
     return $step === 'review'
-        ? 'The settled `CI red on the PR\'s head commit` decision is a finding of this review: read the failing job\'s log (`gh run view <run> --log-failed`, the run id from its link) and state the failure and its cause (engine.md §The CI gate).'
-        : 'Fix the `CI red` finding, or show it is unrelated to this change (the same failure on the base branch, or a flake: start `gh run rerun <run> --failed` and do not wait on it), and say which in `actions`; the CI gate reads the head commit again (engine.md §The CI gate).';
+        ? 'The settled `CI red on the PR\'s head commit` decision is a finding of this review: read the failing job\'s log (`gh run view <run> --log-failed`, the run id from its link) and state the failure and its cause (shared/review-pr.md).'
+        : 'Fix the `CI red` finding, or show it is unrelated to this change (the same failure on the base branch, or a flake: start `gh run rerun <run> --failed` and do not wait on it), and say which in `actions`; the CI gate reads the head commit again (shared/review-pr.md).';
 }
 
-/** The CI gate's conflict round (engine.md §The CI gate): the review names the conflict, the resolve step's catch-up override merges the base. */
+/** The CI gate's conflict round (`../references/shared/review-pr.md` §The rounds): the review names the conflict, the resolve step's catch-up override merges the base. */
 function pipeline_conflict_round_line(string $step): string
 {
     return $step === 'review'
-        ? 'The settled `Conflict with the base` decision is a finding of this review: name the conflict and leave the merge to the resolve step, since a review step does not merge (engine.md §Catching up with the base).'
-        : 'Resolve the `Conflict with the base` finding with the merge this brief\'s catch-up override asks for, and name it in `actions`; when this brief has no such override, say so in `actions` and change nothing for it: the CI gate reads the PR\'s mergeability again (engine.md §The CI gate).';
+        ? 'The settled `Conflict with the base` decision is a finding of this review: name the conflict and leave the merge to the resolve step, since a review step does not merge (shared/review-pr.md).'
+        : 'Resolve the `Conflict with the base` finding with the merge this brief\'s catch-up override asks for, and name it in `actions`; when this brief has no such override, say so in `actions` and change nothing for it: the CI gate reads the PR\'s mergeability again (shared/review-pr.md).';
 }
 
-/** An owner's answer to a `blocking` open question (engine.md §Open questions): one that departs from what the PR built is a finding of `review-pr`. */
+/** An owner's answer to a `blocking` open question (`../references/shared/review-pr.md` §The rounds): one that departs from what the PR built is a finding of `review-pr`. */
 function pipeline_answer_round_line(string $step): string
 {
     return $step === 'review'
-        ? 'A settled `Answer to open question` decision whose answer departs from what the PR built is a finding of this review: name what it changes (engine.md §Open questions).'
-        : 'Integrate each settled `Answer to open question` decision that departs from what the PR built, and name it in `actions`; the question it answers is no longer open (engine.md §Open questions).';
+        ? 'A settled `Answer to open question` decision whose answer departs from what the PR built is a finding of this review: name what it changes (shared/review-pr.md).'
+        : 'Integrate each settled `Answer to open question` decision that departs from what the PR built, and name it in `actions`; the question it answers is no longer open (shared/review-pr.md).';
 }
 
 /** A design-size escalation that no plan approval has answered yet. */
@@ -307,7 +324,7 @@ function pipeline_design_grows(array $ledger): bool
 }
 
 /**
- * The commit the newest completed review of the PR saw (`../references/engine.md` §Scoped re-review): the
+ * The commit the newest completed review of the PR saw (`../references/steps/review-pr-review.md` §Scoped re-review): the
  * `reviewed_sha` of the newest `continued` `pr-review` entry that records one, newer than the latest
  * escalation or plan gap. A halted, looped-back or open review is never a base.
  */
@@ -330,7 +347,7 @@ function pipeline_base_ref(array $manifest, callable $git): ?string
         : (pipeline_git_lines($git, ['symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD'])[0] ?? null);
 }
 
-/** The steps that write to the branch, and so catch up with its base first (`../references/engine.md` §Catching up with the base). */
+/** The steps that write to the branch, and so catch up with its base first (`../references/shared/catch-up.md` §Catching up with the base). */
 const PIPELINE_CATCH_UP_STEPS = ['design:run', 'design:spec', 'design:plan', 'review-plan:resolve', 'implement:run', 'review-pr:resolve'];
 
 /** The run's spec and plan as git names them: relative to the worktree. */
@@ -342,7 +359,7 @@ function pipeline_design_files(array $manifest): array
 }
 
 /**
- * Whether a step must merge the base first (`../references/engine.md` §Catching up with the base), or null
+ * Whether a step must merge the base first (`../references/shared/catch-up.md` §Catching up with the base), or null
  * for no: the branch is not behind, the base moved only in files the branch's code does not touch, or any
  * git call failed (a run that cannot tell carries on). A branch that holds no code yet, nothing or only its
  * spec and plan, merges on any movement: a design reads current code. `$git` runs git in the worktree, as
@@ -376,7 +393,7 @@ function pipeline_base_state(array $manifest, callable $git): ?array
 }
 
 /**
- * What a review of the PR after a completed one reads (`../references/engine.md` §Scoped re-review), or null
+ * What a review of the PR after a completed one reads (`../references/steps/review-pr-review.md` §Scoped re-review), or null
  * for the whole PR: no base, a base HEAD does not contain, a base ref that does not resolve, or any git call
  * that fails. `$git` runs git in the worktree, as `pipeline_git_run()` does.
  *
@@ -451,7 +468,7 @@ function pipeline_merge_files(string $merge, callable $git): ?array
 }
 
 /**
- * A writing step's first override when `pipeline_base_state()` asks for a merge (`../references/engine.md`
+ * A writing step's first override when `pipeline_base_state()` asks for a merge (`../references/shared/catch-up.md`
  * §Catching up with the base). The commands are literal: the allow rules in `README.md` match this form.
  */
 function pipeline_catch_up_line(array $manifest, array $state): string
@@ -463,13 +480,13 @@ function pipeline_catch_up_line(array $manifest, array $state): string
         ? 'and this branch holds only its design'
         : 'and changed files this branch changes too (' . implode(', ', array_map(fn (string $file) => "`{$file}`", $shared)) . ')';
 
-    return "Catch up with the base first (engine.md §Catching up with the base): `{$base}` is {$ahead} {$why}. "
+    return "Catch up with the base first (shared/catch-up.md): `{$base}` is {$ahead} {$why}. "
         . "Before any other work run `{$git} merge --no-edit {$base}`, as its own command in exactly that form. "
         . "On a conflict, resolve each file keeping both sides' intent, `{$git} add <file>`, and conclude with `{$git} commit --no-edit`. "
         . "Only where both sides cannot be kept: `{$git} merge --abort` and return `halted`, quoting the conflicting hunks. "
-        . 'Never rebase, never force-push. A denied command is a halt naming it; do not reshape it. Record the merge as that section says.';
+        . 'Never rebase, never force-push. A denied command is a halt naming it; do not reshape it. Record the merge as that file says.';
 }
-/** The review-pr review step's target once a review of the PR has completed (`../references/engine.md` §Scoped re-review). */
+/** The review-pr review step's target once a review of the PR has completed (`../references/steps/review-pr-review.md` §Scoped re-review). */
 function pipeline_review_scope_line(array $scope): string
 {
     ['since' => $since, 'base' => $base, 'commits' => $commits, 'files' => $files] = $scope;
@@ -480,13 +497,13 @@ function pipeline_review_scope_line(array $scope): string
         ? "nothing was committed on this branch since `{$since}`: review only what the settled decisions above ask of the PR, and say so"
         : "the branch's own commits since ({$commits}), as patches, `git log -p --no-merges {$since}..HEAD ^{$base}`, plus `git diff HEAD` (Stage 0 runs over both); and {$whole}; what the settled decisions above ask of the PR stays in your target wherever it lies";
 
-    return "Scoped re-review (engine.md §Scoped re-review): a review of this PR completed at `{$since}`, which HEAD contains, so your target is what changed since, not the whole PR: {$target}. Read beyond the target only where a finding needs it.";
+    return "Scoped re-review (steps/review-pr-review.md): a review of this PR completed at `{$since}`, which HEAD contains, so your target is what changed since, not the whole PR: {$target}. Read beyond the target only where a finding needs it.";
 }
 
-/** What the grow form asks of each design step: `autoflow`'s spec step grows the spec, its plan step the plan (engine.md §Design size). */
+/** What the grow form asks of each design step: `autoflow`'s spec step grows the spec, its plan step the plan (`../references/steps/design.md` §The grow form). */
 function pipeline_grow_form_line(string $step): string
 {
-    $escalated = 'Grow form: the design escalated from Bounded (engine.md §Design size).';
+    $escalated = 'Grow form: the design escalated from Bounded (steps/design.md).';
 
     return $escalated . ' ' . match ($step) {
         'spec' => 'Grow the spec: its header says `**Design size:** Architectural` and a `## Grown from Bounded` section says what changed, why it grew, what already exists and what remains; do not re-design it. The plan step adds the remaining steps to the plan.',
@@ -503,7 +520,7 @@ function pipeline_plan_path(string $spec): ?string
     return $count === 1 ? $plan : null;
 }
 
-/** The steps a command of their own performs and records: it stands in `## Return` where `record --status continued` would (`../references/engine.md` §Stations). */
+/** The steps a command of their own performs and records: it stands in `## Return` where `record --status continued` would (`../references/machinery.md` §`handoff` in order). */
 const PIPELINE_STEP_COMMANDS = ['handoff:run' => 'handoff'];
 
 /** A `dispatch_cli.php` command as a step copies it: the checks directory and the manifest by their full paths (#122). */
