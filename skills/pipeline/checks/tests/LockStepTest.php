@@ -11,6 +11,28 @@ function lockstep_section(string $doc, string $heading): string
     return $end === false ? substr($markdown, $start) : substr($markdown, $start, $end - $start);
 }
 
+it('keeps shared/proof-payload.md in lock-step with the fields the store files and checks', function () {
+    $section = lockstep_section('shared/proof-payload.md', 'The payload');
+
+    foreach (['clientSummary', 'explainer', 'worktree', 'base', 'state', ...PROOF_STORE_KEYS, ...array_column(ProofShotState::cases(), 'value'), ...array_column(QuestionKind::cases(), 'value')] as $field) {
+        expect($section)->toContain("`{$field}`");
+    }
+    expect($section)->toContain('at most ' . PROOF_SUMMARY_MAX . ' characters');
+});
+
+it('keeps work-on out of the shared dev-stack rules', function () {
+    expect((string) file_get_contents(__DIR__ . '/../../references/shared/dev-stack.md'))->not->toContain('`work-on`');
+});
+
+it('opens every shared file with the steps that read it', function () {
+    $files = glob(__DIR__ . '/../../references/shared/*.md');
+
+    expect($files)->toHaveCount(9);
+    foreach ($files as $path) {
+        expect((string) file_get_contents($path))->toMatch('/\A# .+\n\nRead by: `steps\/[a-z-]+\.md`/', basename($path) . ' opens without its readers');
+    }
+});
+
 it('keeps manifest.md in lock-step with the statuses and the leg-writable keys', function () {
     $section = lockstep_section('manifest.md', 'What a leg writes');
 
