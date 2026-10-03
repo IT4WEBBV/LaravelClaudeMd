@@ -141,7 +141,7 @@ php "$CHECKS/dispatch_cli.php" record <manifest> <leg> <step> --status <status> 
 # → {"action":"recorded",…} | {"action":"refused","reason":…} (exit 1, the manifest untouched)
 php "$CHECKS/dispatch_cli.php" suite <manifest> --outcome green|red --passed <n> --failed <n>
 #   after a full suite run → {"action":"recorded","suite":{…}} | {"action":"refused",…}
-php "$CHECKS/dispatch_cli.php" handoff <manifest>
+cd "$CHECKS" && php dispatch_cli.php handoff <manifest>
 #   the whole handoff step, in both modes: push, the draft PR (opened or adopted), the Component, its record
 # → {"action":"recorded",…,"pr":…,"url":…,"created":…,"notes":[…]} | {"action":"recorded","status":"halted","reason":…,…}
 #   | {"action":"refused","reason":…} (exit 1)
