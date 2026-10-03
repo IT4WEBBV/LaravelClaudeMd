@@ -39,7 +39,7 @@ Line 39 of `CLAUDE.md` becomes exactly this (one line, as it is today; the file'
 section are single lines as well):
 
 ```markdown
-- **Name work by what it does, not by its number, and say what kind it is.** Whenever issues, PRs or runs come up for me to choose between or follow, give each a few plain words on what it is about, with its kind and number after it in parentheses: "CI gate fix (PR #149) and proof back link (issue #153) now", not "#149 + #153 now" and not "CI gate fix (#149)". Issues and PRs share one number sequence, so a bare `#153` doesn't tell me whether it is still to be built or waiting for review. The kind goes with every number, also when two are linked ("issue #153 is fixed by PR #160") and in PR and issue comments; a number in another repo carries the repo name ("Deploy PR #408"). A bare list of numbers gives me nothing to decide on. This holds for `AskUserQuestion` labels and descriptions too.
+- **Name work by what it does, not by its number, and say what kind it is.** Whenever issues, PRs or runs come up for me to choose between or follow, give each a few plain words on what it is about, with its kind and number after it in parentheses: "CI gate fix (PR #149) and proof back link (issue #153) now", not "#149 + #153 now" and not "CI gate fix (#149)". Issues and PRs share one number sequence, so a bare `#153` doesn't tell me whether it is still to be built or waiting for review. The kind goes with every number, also when two are linked ("issue #153 is fixed by PR #160") and in PR and issue comments; a number in another repo carries the repo name ("Deploy PR #408"). Syntax a tool parses stays bare: `Closes #N` and `Depends on #N`. A bare list of numbers gives me nothing to decide on. This holds for `AskUserQuestion` labels and descriptions too.
 ```
 
 What changes, against today's line:
@@ -51,6 +51,7 @@ What changes, against today's line:
 | example | "CI gate fix (#149) and proof back link (#153) now", not "#149 + #153 now" | "CI gate fix (PR #149) and proof back link (issue #153) now", not "#149 + #153 now" and not "CI gate fix (#149)" |
 | why | — | one sentence: one number sequence, so the kind is the decision-relevant part |
 | reach | `AskUserQuestion` labels and descriptions | also linked pairs, PR and issue comments, other repos (with an example each) |
+| exemption | — | one sentence: syntax a tool parses (`Closes #N`, `Depends on #N`) stays bare |
 
 The two closing sentences ("A bare list of numbers…", "This holds for `AskUserQuestion`…") stay as they are.
 
@@ -65,7 +66,8 @@ changelog entry (`CLAUDE.md` §Git Workflow asks for one only in the project's o
 - `grep -c 'issue #153 is fixed by PR #160' CLAUDE.md` → `1`
 - `grep -c 'Deploy PR #408' CLAUDE.md` → `1`
 - `grep -cE '\((#[0-9]+)\) and proof back link' CLAUDE.md` → `0` (the old example is gone)
-- `grep -c 'Depends on #N' CLAUDE.md` → `1` (the machine-read syntax on the Git Workflow bullet is untouched)
+- `grep -c 'Syntax a tool parses stays bare' CLAUDE.md` → `1`
+- ``grep -c 'own `Depends on #N` line' CLAUDE.md`` → `1` (the machine-read syntax on the Git Workflow bullet is untouched)
 - `git diff --stat origin/main...HEAD -- CLAUDE.md` → one file, one line changed.
 
 There is no UI, so no visual proof.
@@ -82,9 +84,11 @@ There is no UI, so no visual proof.
    between or follow, which is where the rule applies. Not changed.
 3. **Syntax that tools parse stays bare.** `Depends on #N` (read by `/orchestrate`), `Closes #N` / `Fixes #N`
    (GitHub's closing keywords, which do not match "Closes issue #N"), and the `(#60)` suffix on commit subjects
-   are syntax, not a reference written for the reader. Assumed exempt without saying so in the rule: the rule
-   is about naming work for the owner to read, and the `Depends on #N` bullet a few lines further down already
-   prescribes its own form. Not stated in the new line, to keep it about what to do.
+   are syntax, not a reference written for the reader, and exempt. The new line says so in one sentence
+   ("Syntax a tool parses stays bare: `Closes #N` and `Depends on #N`"): read literally, "the kind goes with
+   every number" would turn `Closes #N` into "Closes issue #N", which GitHub does not close on, so the
+   exemption has to be visible where the rule is read (`/critique plan`, plan-approval cycle 1). The `(#60)`
+   commit suffix is not listed; it is covered by the same sentence.
 4. **"Runs" have no number of their own.** The rule names issues, PRs and runs; a `/pipeline` run is named by its
    issue or its PR, so the kind is "issue" or "PR". Assumed no third kind ("run #…") is needed.
 5. **Spelling of the kind.** "PR #149" and "issue #153": `PR` in capitals as GitHub and the rest of `CLAUDE.md`
