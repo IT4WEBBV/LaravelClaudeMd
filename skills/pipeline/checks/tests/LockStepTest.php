@@ -118,10 +118,40 @@ it('keeps engine.md\'s repo config section in lock-step with the keys the parser
     }
 });
 
-it('keeps engine.md §Implement whole, down to its last paragraph', function () {
-    expect(lockstep_section('engine.md', 'Implement'))
+it('keeps steps/implement.md whole, down to its last paragraph', function () {
+    expect(lockstep_section('steps/implement.md', 'Implement'))
         ->toContain('`gh pr checks <pr> --watch`')
         ->toContain('**`/work-on <pr>` on a pipeline PR is outside the run.**');
+});
+
+it('keeps work-on out of the step files', function () {
+    foreach (['steps/implement.md', 'steps/handoff.md'] as $doc) {
+        $text = (string) file_get_contents(__DIR__ . "/../../references/{$doc}");
+        expect($text)->not->toContain('`work-on`', "{$doc} names `work-on`")->not->toContain('`work-on`\'s');
+    }
+});
+
+it('has every step file read exactly the shared files that name it', function () {
+    $references = __DIR__ . '/../../references';
+    $readBy = [];
+    foreach (glob("{$references}/shared/*.md") as $path) {
+        preg_match('/^Read by: (.+)$/m', (string) file_get_contents($path), $line);
+        preg_match_all('/`(steps\/[a-z-]+\.md)`/', $line[1] ?? '', $steps);
+        foreach ($steps[1] as $step) {
+            expect("{$references}/{$step}")->toBeFile('shared/' . basename($path) . " names {$step}");
+            $readBy[$step][] = 'shared/' . basename($path);
+        }
+    }
+    $files = glob("{$references}/steps/*.md");
+
+    expect($files)->toHaveCount(8);
+    foreach ($files as $path) {
+        $step = 'steps/' . basename($path);
+        expect((string) file_get_contents($path))->toMatch('/\A# .+\n\nRead also: /', "{$step} opens without its Read also line");
+        preg_match('/^Read also: (.+)$/m', (string) file_get_contents($path), $line);
+        preg_match_all('/`(shared\/[a-z-]+\.md)`/', $line[1], $shared);
+        expect($shared[1])->toEqualCanonicalizing($readBy[$step] ?? [], "{$step}'s Read also line");
+    }
 });
 
 it('keeps work-on out of the sections that describe a step', function () {
