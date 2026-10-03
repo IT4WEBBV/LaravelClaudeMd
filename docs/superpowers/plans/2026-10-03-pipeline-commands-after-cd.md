@@ -326,6 +326,12 @@ a run CLAUDE.md still says a stale branch is raised and waited on, but the class
 an injected git option. Swap the old `git -C *` and `php */dispatch_cli.php` rules for these on each machine
 together with pulling this change: on a machine that has only the old rules the classifier decides the `cd` form,
 and a denial halts the step with the command named.
+
+The `cd` part needs auto mode: no rule above covers it, and the classifier decides it, where the old
+`git -C *` and `php */dispatch_cli.php` rules approved the directory deterministically. A machine that runs
+unattended on allow rules alone adds a fifth rule, `Bash(cd *)`: its `*` stands after the subcommand, so it draws
+no warning, and a `cd` approves nothing by itself. That a chained command is matched part by part is what the
+Claude Code docs say; the first real run after the swap is what checks it.
 ````
 
 - [ ] **Step 2: `CLAUDE.md` §Git Workflow**
@@ -398,7 +404,8 @@ with
 ```markdown
    unattended runs need auto permission mode or allow rules for `git push`, `gh` and `docker`, and the
    allow rules for the merge of the base and for `handoff` in their `cd <dir> &&` form (`README.md`,
-   *Permissions for unattended runs*).
+   *Permissions for unattended runs*). The `cd` part is decided by the auto-mode classifier; a machine
+   without auto mode adds `Bash(cd *)` as well.
 ```
 
 - [ ] **Step 6: Check that no doc still names a ruled command in the old form**
