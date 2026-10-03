@@ -125,8 +125,9 @@ The invoking session (this one, or `orchestrate`) holds only the two edges of an
    Then wait for the workflow's completion notice. The script's first agent checks that the start was
    clean (`references/engine.md` §`autoflow`). Starting it from this skill is the owner's opt-in;
    unattended runs need auto permission mode or allow rules for `git push`, `gh` and `docker`, and the
-   allow rules for the merge of the base in its `git -C <worktree>` form (`README.md`, *Permissions for
-   unattended runs*).
+   allow rules for the merge of the base and for `handoff` in their `cd <dir> &&` form (`README.md`,
+   *Permissions for unattended runs*). The `cd` part is decided by the auto-mode classifier; a machine
+   without auto mode adds `Bash(cd *)` as well.
 4. **Finish.** `php "$CHECKS/dispatch_cli.php" finish <manifest> '<its return as JSON>'`, or
    `'{"action":"halt","reason":"<the error>"}'` when the workflow errored. `finish` refuses a `done`
    whose cursor is not on `review-pr`, or whose last snapshot is not `review-pr`'s resolve step's with

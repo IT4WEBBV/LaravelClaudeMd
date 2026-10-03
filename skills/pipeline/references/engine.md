@@ -1448,7 +1448,7 @@ step, and then prints the brief without the line. The review steps do not merge 
 resolves a conflict reviews its own work), nor does `handoff` or `verify-ui`. Both modes get the line.
 
 **The line is the step's first override** and carries the command:
-`git -C <worktree> merge --no-edit origin/<base>`, run as its own command in exactly that form, because a
+`cd <worktree> && git merge --no-edit origin/<base>`, run as its own command in exactly that form, because a
 permission rule matches a command as typed (`README.md`, *Permissions for unattended runs*). A denied
 command is a halt naming it, never a reshaped command.
 
@@ -1458,10 +1458,10 @@ command is a halt naming it, never a reshaped command.
   not name"* (§Resolving a review), and a file only the merge touched is no plan gap and no
   `plan-insufficient` for `implement`.
 - **Conflicts.** Resolve each file keeping both sides' intent, leave no conflict marker behind,
-  `git -C <worktree> add <file>`, and conclude with `git -C <worktree> commit --no-edit`
+  `cd <worktree> && git add <file>`, and conclude with `cd <worktree> && git commit --no-edit`
   (`git merge --continue` needs an editor, which a step does not have). Where keeping both sides is a
-  product decision, the two changes wanting opposite behaviour: `git -C <worktree> merge --abort` and
-  return `halted`, quoting the conflicting hunks. After `handoff` the reason goes into the PR body as
+  product decision, the two changes wanting opposite behaviour: `cd <worktree> && git merge --abort`
+  and return `halted`, quoting the conflicting hunks. After `handoff` the reason goes into the PR body as
   for any halt (§Failure policy). The owner's answer comes back as a `--decision` on the relaunch, and
   that step's brief asks for the merge again.
 - **The suite.** Nothing new: a merge changes the tree, so §Suite reuse finds no green run for it and

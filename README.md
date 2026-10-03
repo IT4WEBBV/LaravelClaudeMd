@@ -95,38 +95,47 @@ a per-machine step like the hooks:
 
 ```json
 "permissions": { "allow": [
-  "Bash(git -C * merge --no-edit origin/*)",
-  "Bash(git -C * merge --abort)",
-  "Bash(git -C * commit --no-edit)",
-  "Bash(php */dispatch_cli.php handoff *)"
+  "Bash(git merge --no-edit origin/*)",
+  "Bash(git merge --abort)",
+  "Bash(git commit --no-edit)",
+  "Bash(php dispatch_cli.php handoff *)"
 ] }
 ```
 
-The form matters: a rule matches the command as typed, so a project's `Bash(git merge:*)` does not cover
-`git -C <worktree> merge`, and a chained command is matched part by part. The brief prints these
-commands in exactly this form and tells the step to run each as its own command. A `*` in a Bash rule
+The form matters: a rule matches the command as typed, and a chained command is matched part by part. The
+brief prints each of these commands bare after a `cd`, as its own command:
+`cd <worktree> && git merge --no-edit origin/<base>` (and `… && git merge --abort`, `… && git commit --no-edit`),
+and `cd <checks> && php dispatch_cli.php handoff <manifest>`. The `cd` part is decided on its own, by the
+auto-mode classifier; the rule sees only the bare command. Every `*` in these rules stands after the
+subcommand, the form Claude Code recommends, so it does not warn about them at startup. A `*` in a Bash rule
 matches any text, spaces included, and a command that matches an allow rule is decided there, before the
-auto-mode classifier sees it (Claude Code docs, *permissions* §Wildcard patterns and *permission-modes*
-§How the classifier evaluates actions).
+classifier sees it (Claude Code docs, *permissions* §Wildcard patterns and *permission-modes* §How the
+classifier evaluates actions): a `*` before the subcommand would also approve any option inserted at that
+position.
 
-Claude Code warns at startup about an allow rule with a `*` before the subcommand, and
-`git -C * merge …` has that shape: the warning is expected, and the rules stay. What the docs leave open
-is whether a rule that draws the warning still matches; the first batch after this lands shows it, and a
-denial still halts the step with the command named. If the rules turn out inert, the form that avoids
-the warning is `cd <worktree> && git merge --no-edit origin/<base>` with
-`Bash(git merge --no-edit origin/*)`. That is a change of the brief line (`pipeline_catch_up_line()`)
-and of these rules together, not a rule to swap by hand.
-
-`git -C <worktree> add <file>` has no rule here: no `git add` rule matches the `-C` form either, and
-those adds pass because the classifier allows them, as it does in every step that stages a file.
+`cd <worktree> && git add <file>` has no rule here: those adds pass because the classifier allows them, as it
+does in every step that stages a file.
 
 The `handoff` step pushes the branch and calls gh from inside one command,
-`php <checks>/dispatch_cli.php handoff <manifest>`, as `kickoff` creates the worktree and edits the board
-from inside one `php` call. The push is a run's first outward write, so its rule is listed above with
-the merge rules: `Bash(php */dispatch_cli.php handoff *)`. The brief prints the command bare, with no
-`cd … &&` in front, which is the form the rule matches. Without the rule a denial halts the step with
-the command named; nothing is pushed by then, and a resume after the rule is added runs the command
-again.
+`cd <checks> && php dispatch_cli.php handoff <manifest>`, as `kickoff` creates the worktree and edits the board
+from inside one `php` call. The push is a run's first outward write, so its rule is listed above with the merge
+rules: `Bash(php dispatch_cli.php handoff *)`. `<checks>` is the pipeline skill's `checks` directory the run was
+launched from, and `<manifest>` is a full path, so the `cd` changes nothing `handoff` acts on. Without the rule a
+denial halts the step with the command named; nothing is pushed by then, and a resume after the rule is added
+runs the command again.
+
+The trade-off: these rules approve the bare commands in every repo and session, not only in a run's step. Outside
+a run CLAUDE.md still says a stale branch is raised and waited on, but the classifier no longer guards a stray
+`git merge --no-edit origin/…`, and `git commit --no-edit` commits what is staged; both are far less harmful than
+an injected git option. Swap the old `git -C *` and `php */dispatch_cli.php` rules for these on each machine
+together with pulling this change: on a machine that has only the old rules the classifier decides the `cd` form,
+and a denial halts the step with the command named.
+
+The `cd` part needs auto mode: no rule above covers it, and the classifier decides it, where the old
+`git -C *` and `php */dispatch_cli.php` rules approved the directory deterministically. A machine that runs
+unattended on allow rules alone adds a fifth rule, `Bash(cd *)`: its `*` stands after the subcommand, so it draws
+no warning, and a `cd` approves nothing by itself. That a chained command is matched part by part is what the
+Claude Code docs say; the first real run after the swap is what checks it.
 
 The pipeline skill's suite needs `node` on PATH: `AutoflowScriptTest` replays the autoflow Workflow
 script under it, and fails rather than skips without it, so a machine without `node` has a red suite.

@@ -71,7 +71,7 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
             $writeActions,
         ],
         'handoff:run' => [
-            'Run `' . pipeline_cli('handoff', $manifestPath) . '` as its own command: it pushes the branch, opens the draft PR or adopts the one the branch has, and records this step. It is the whole step (engine.md §Stations).',
+            'Run `' . pipeline_step_cli('handoff', $manifestPath) . '` as its own command: it pushes the branch, opens the draft PR or adopts the one the branch has, and records this step. It is the whole step (engine.md §Stations).',
             'The leg\'s name is not a skill to invoke: do not invoke the `handoff` skill (`/handoff`), which asks the owner a question and posts a prompt comment.',
             'Repair nothing it reports: no force-push, no `gh pr create` or `gh pr edit` by hand. A halt it recorded, a refusal, or a denied command is a halt with that reason.',
         ],
@@ -457,7 +457,7 @@ function pipeline_merge_files(string $merge, callable $git): ?array
 function pipeline_catch_up_line(array $manifest, array $state): string
 {
     ['base' => $base, 'behind' => $behind, 'shared' => $shared] = $state;
-    $git = 'git -C ' . rtrim((string) $manifest['worktree'], '/');
+    $git = 'cd ' . rtrim((string) $manifest['worktree'], '/') . ' && git';
     $ahead = $behind === 1 ? '1 commit ahead' : "{$behind} commits ahead";
     $why = $shared === []
         ? 'and this branch holds only its design'
@@ -512,6 +512,12 @@ function pipeline_cli(string $command, string $manifestPath): string
     return 'php ' . __DIR__ . "/dispatch_cli.php {$command} {$manifestPath}";
 }
 
+/** A step's own command (`PIPELINE_STEP_COMMANDS`) as it copies it: bare after a `cd`, the form its allow rule in `README.md` matches. */
+function pipeline_step_cli(string $command, string $manifestPath): string
+{
+    return 'cd ' . __DIR__ . " && php dispatch_cli.php {$command} {$manifestPath}";
+}
+
 /**
  * The literal command for each status the step may return: `record` from `pipeline_record_table()`, the
  * first in full and the others by what differs, after the step's own command where it has one
@@ -545,7 +551,7 @@ function pipeline_record_commands(string $leg, string $step, string $manifestPat
             . rtrim(" --status {$status} " . implode(' ', $flags));
     }
 
-    return [...($own === null ? [] : [pipeline_cli($own, $manifestPath)]), ...$lines];
+    return [...($own === null ? [] : [pipeline_step_cli($own, $manifestPath)]), ...$lines];
 }
 
 /** The return contract is the commands (`../references/manifest.md` §What a leg writes): `record` writes, the step only passes what it made. */
