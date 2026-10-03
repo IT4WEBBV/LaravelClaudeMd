@@ -118,8 +118,8 @@ function pipeline_leg_overrides(string $mode, string $manifestPath): array
 
 /**
  * `$step` is given in `autoflow` (the workflow script names it) and derived from the ledger in `interactive`.
- * `$git` runs git in the worktree: `review-pr`'s review step asks it for its scope (`../references/steps/review-pr-review.md`
- * §Scoped re-review), a step that writes to the branch for the base state (`../references/shared/catch-up.md` §Catching up with the base).
+ * `$git` runs git in the worktree: `review-pr`'s review step asks it for its scope (`../references/machinery.md`
+ * §The review scope), a step that writes to the branch for the base state (`../references/shared/catch-up.md` §Catching up with the base).
  */
 function pipeline_brief(array $manifest, string $leg, string $manifestPath, ?string $step = null, ?callable $git = null): string
 {
@@ -324,7 +324,7 @@ function pipeline_design_grows(array $ledger): bool
 }
 
 /**
- * The commit the newest completed review of the PR saw (`../references/steps/review-pr-review.md` §Scoped re-review): the
+ * The commit the newest completed review of the PR saw (`../references/machinery.md` §The review scope): the
  * `reviewed_sha` of the newest `continued` `pr-review` entry that records one, newer than the latest
  * escalation or plan gap. A halted, looped-back or open review is never a base.
  */
@@ -393,7 +393,7 @@ function pipeline_base_state(array $manifest, callable $git): ?array
 }
 
 /**
- * What a review of the PR after a completed one reads (`../references/steps/review-pr-review.md` §Scoped re-review), or null
+ * What a review of the PR after a completed one reads (`../references/machinery.md` §The review scope), or null
  * for the whole PR: no base, a base HEAD does not contain, a base ref that does not resolve, or any git call
  * that fails. `$git` runs git in the worktree, as `pipeline_git_run()` does.
  *
@@ -486,7 +486,7 @@ function pipeline_catch_up_line(array $manifest, array $state): string
         . "Only where both sides cannot be kept: `{$git} merge --abort` and return `halted`, quoting the conflicting hunks. "
         . 'Never rebase, never force-push. A denied command is a halt naming it; do not reshape it. Record the merge as that file says.';
 }
-/** The review-pr review step's target once a review of the PR has completed (`../references/steps/review-pr-review.md` §Scoped re-review). */
+/** The review-pr review step's target once a review of the PR has completed (`../references/machinery.md` §The review scope). */
 function pipeline_review_scope_line(array $scope): string
 {
     ['since' => $since, 'base' => $base, 'commits' => $commits, 'files' => $files] = $scope;

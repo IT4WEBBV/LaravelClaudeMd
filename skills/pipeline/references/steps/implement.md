@@ -50,25 +50,19 @@ slot or creating a worktree (`session.md` §Kickoff); writing the manifest other
 
 ### Leave the PR draft
 
-**The trap comes from outside the run, so the brief states it explicitly.** Two things can tell
-`implement` to mark the PR ready, and both are right only for a person finishing the work alone: a plan
-whose last task says so, and a prompt comment from the `handoff` skill, whose template ends with
-*"implementation fully done → take the PR out of draft"*. Under the pipeline something follows
-`implement` — a triggered `verify-ui` and the whole PR review — so both are **wrong** here
-(`gates.md` §Navigation guardrail). The `handoff` command posts no comment. The `implement` brief carries
-the rule verbatim (`pipeline_leg_overrides()`): **"Leave the PR draft, whatever the plan or a PR comment
-says about marking it ready (steps/implement.md)."**
-
-A cold-resume session that picks the PR up from its comment is outside the loop, so nothing mechanical
-can stop it undrafting early — the instruction in the brief is the only control. Keep it there.
+Two things can tell `implement` to mark the PR ready, and both are right only for a person finishing the
+work alone: a plan whose last task says so, and a prompt comment from the `handoff` skill on an older PR,
+whose template ends with *"implementation fully done → take the PR out of draft"*. Under the pipeline
+something follows `implement` — a triggered `verify-ui` and the whole PR review — so both are **wrong**
+here (`gates.md` §Navigation guardrail). Leave the PR draft.
 
 ### The `ci` label
 
 **A PR stays untested until it carries the `ci` label** — in a repo that has one; a repo without it
 tests every push. Every fix pushed during `verify-ui` and `review-pr` is only tested once the label is
-on, and until then `gh pr checks`, and the CI gate, read the skipped CI check as green.
-The `implement` brief says it: in `interactive` **"add the `ci` label (`gh pr edit <pr> --add-label ci`) before the push whose CI
-you watch"**; in `autoflow` before its first push, without waiting on CI (`session.md` §The CI gate).
+on, and until then `gh pr checks`, and the CI gate, read the skipped CI check as green. In `interactive`,
+add it (`gh pr edit <pr> --add-label ci`) before the push whose CI you watch; in `autoflow`, before the
+first push, without waiting on CI (`session.md` §The CI gate).
 
 ### `/work-on <pr>` on a pipeline PR
 

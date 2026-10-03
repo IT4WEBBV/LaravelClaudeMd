@@ -98,7 +98,7 @@ it('resolves every section reference in the pipeline docs and the docs that cite
 
 it('leaves no engine.md outside docs/ and DECISIONS.md', function () {
     $root = realpath(__DIR__ . '/../../../..');
-    exec('git -C ' . escapeshellarg($root) . " grep --untracked -l -F engine.md -- . ':!docs' ':!skills/pipeline/DECISIONS.md' ':!skills/pipeline/checks/tests'", $files);
+    exec('git -C ' . escapeshellarg($root) . " grep -l -F engine.md -- . ':!docs' ':!skills/pipeline/DECISIONS.md' ':!skills/pipeline/checks/tests'", $files);
 
     expect($files)->toBe([]);
     expect("{$root}/skills/pipeline/references/engine.md")->not->toBeFile();

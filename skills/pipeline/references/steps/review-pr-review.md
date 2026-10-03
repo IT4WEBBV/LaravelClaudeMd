@@ -27,36 +27,16 @@ the tokens (#88).
 `git rev-parse HEAD`. A `review-pr` review step whose entry lacks a 40-character one halts, and so does a
 resolve step that adds, changes or removes it (`pipeline_ledger_problem()`, `manifest.md` §`gate_ledger`).
 
-**The base** is `pipeline_review_base()`: the `reviewed_sha` of the newest `continued` `pr-review` entry
-that has one, newer than the latest escalation or plan gap (`pipeline_reset_at()`, the cut
-`pipeline_done_legs()` makes: code reviewed against a plan that grew is reviewed whole again). A halted,
-looped-back or open review is never a base: its findings were not dispositioned there.
-
-**The target** is `pipeline_review_scope()`, which `brief` (and `next` / `returned` in `interactive`)
-computes with git in the worktree for `review-pr`'s review step only, and writes into its brief as one
-override line:
-
-- the branch's own commits since the base, as patches: `git log -p --no-merges <sha>..HEAD ^<base>`, plus
-  `git diff HEAD`; Stage 0 runs over both. `<base>` is `origin/<manifest base>`, else `origin/HEAD`.
-  `^<base>` leaves out what a merge of main brought in and keeps a merged-in side's commits that are not
-  on main (a pull of the PR branch onto local commits), which `--first-parent` would drop;
-- read whole at HEAD, the files where a merge since the base met the branch's changes: per merge not on
-  the base, the files both sides changed since they last met (every conflict, a clean merge of a shared
-  file, a resolution that took one side), and the files the merge commit changed against every parent
-  (an edit made in the merge itself).
+**The target is the brief's scope line**, present once a review of the PR has completed and HEAD still
+contains the commit it saw; without that line the review is full. Read beyond the target only where a
+finding needs it. What `brief` computes for that line, and when it falls back to a full review, is
+`machinery.md` §The review scope.
 
 What the settled decisions ask of the PR (an owner's request, the CI round's failure) stays in the
-target wherever it lies, also outside the delta. With nothing committed since the base the target is
+target wherever it lies, also outside the delta. With nothing committed since the reviewed commit the target is
 only that: the review checks what the settled decisions ask of the PR and says the branch did not move;
 it does not widen to the whole PR.
 
-**Otherwise the review is full:** no `continued` entry with a sha, a sha HEAD does not contain
-(a rebase, a force-push), a base ref git cannot resolve (with no manifest `base` and `origin/HEAD` unset,
-every re-review on that machine stays full; `git remote set-head origin --auto` sets it), or any git call
-that fails. The scope is never narrower than git could prove textually. It cannot see a semantic
-conflict: a merge that changes only files the branch did not touch lists none, even where the branch's
-code depends on them. The full review has that blind spot too; the suite and CI cover it.
-
 **The earlier review is not carried:** the brief names its commit, never its entry
-(`machinery.md` §What a leg brief consists of). A chain of scoped reviews is as sound as the earliest full review in it; the base rule keeps
-an undispositioned review out of the chain.
+(`machinery.md` §What a leg brief consists of). A chain of scoped reviews is as sound as the earliest full review in it; the base rule
+(`machinery.md` §The review scope) keeps an undispositioned review out of the chain.

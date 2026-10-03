@@ -63,8 +63,8 @@ the committed spec cold, and the spec agent's exploration does not ride along in
 
 Both return `size`. The next design step is read from the manifest, as `review` / `resolve` is
 (`pipeline_design_step()`): `plan` when the spec is set and the plan is not, or when the newest ledger
-entry is a plan return (a `plan-approval` loop-back with no `review`); `spec` otherwise. `launch` starts
-there, and `brief` refuses the other step. On a loop-back the script reruns:
+entry is a plan return (a `plan-approval` loop-back with no `review`); `spec` otherwise. On a loop-back
+the script reruns:
 
 | what sent the run back | the script reruns |
 |---|---|

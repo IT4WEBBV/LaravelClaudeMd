@@ -111,7 +111,7 @@ return, then writes `cursor: {leg, status: pending}` — so after a `TaskStop` o
 cursor still names the step that was running — and the snapshot `<manifest stem>.before.json`, and
 prints the brief. It prints a halt instead when the return does not hold, or when the ledger does not
 support the step (`resolve` with no open review, `review` with one already open, the design step the
-manifest does not call for). The step records its results with `dispatch_cli.php record`
+manifest does not call for, `pipeline_design_step()`; `launch` starts a run at the one it does call for). The step records its results with `dispatch_cli.php record`
 (`manifest.md` §What a leg writes) — `handoff:run` excepted, whose command `dispatch_cli.php handoff`
 does the step and records `continued` or `halted` itself (`steps/handoff.md`) —, then returns the status it
 recorded as `{status, reason}`;
@@ -256,6 +256,13 @@ and the dispatch prompt is one line naming that file; in `autoflow` the step pri
 
 A brief cites files, never sections: a step reads its reference whole.
 
+**The draft rule stays in the `implement` brief.** A plan's last task or an older PR's `handoff` prompt
+comment can tell `implement` to mark the PR ready (`steps/implement.md` §Leave the PR draft), so the
+brief carries the rule verbatim (`pipeline_leg_overrides()`): *"Leave the PR draft, whatever the plan or
+a PR comment says about marking it ready (steps/implement.md)."* A cold-resume session that picks the PR
+up from its comment is outside the loop, so nothing mechanical can stop it undrafting early: the
+instruction in the brief is the only control. Keep it there.
+
 **An `autoflow` brief adds what a workflow agent needs**
 (`pipeline_leg_overrides('autoflow', <manifest path>)`): a review step applies `/critique`'s procedure
 itself (`shared/reviewing.md` §A review step); `review-plan`'s resolve step has no independent read; `implement` executes
@@ -282,6 +289,36 @@ failure, running the step again is the repair.
 **`handoff` takes the spec and the plan from the manifest.** The command reads `artifacts.spec` and
 `artifacts.plan`; it detects nothing from the last commits or the newest files, which a merge of the base
 empties or crowds.
+
+## The review scope — what `brief` computes for a re-review
+
+`review-pr`'s review step reviews what changed since the last completed review
+(`steps/review-pr-review.md` §Scoped re-review); `brief` works out what that is.
+
+**The base** is `pipeline_review_base()`: the `reviewed_sha` of the newest `continued` `pr-review` entry
+that has one, newer than the latest escalation or plan gap (`pipeline_reset_at()`, the cut
+`pipeline_done_legs()` makes: code reviewed against a plan that grew is reviewed whole again). A halted,
+looped-back or open review is never a base: its findings were not dispositioned there.
+
+**The target** is `pipeline_review_scope()`, which `brief` (and `next` / `returned` in `interactive`)
+computes with git in the worktree for `review-pr`'s review step only, and writes into its brief as one
+override line:
+
+- the branch's own commits since the base, as patches: `git log -p --no-merges <sha>..HEAD ^<base>`, plus
+  `git diff HEAD`; Stage 0 runs over both. `<base>` is `origin/<manifest base>`, else `origin/HEAD`.
+  `^<base>` leaves out what a merge of main brought in and keeps a merged-in side's commits that are not
+  on main (a pull of the PR branch onto local commits), which `--first-parent` would drop;
+- read whole at HEAD, the files where a merge since the base met the branch's changes: per merge not on
+  the base, the files both sides changed since they last met (every conflict, a clean merge of a shared
+  file, a resolution that took one side), and the files the merge commit changed against every parent
+  (an edit made in the merge itself).
+
+**Otherwise the review is full:** no `continued` entry with a sha, a sha HEAD does not contain
+(a rebase, a force-push), a base ref git cannot resolve (with no manifest `base` and `origin/HEAD` unset,
+every re-review on that machine stays full; `git remote set-head origin --auto` sets it), or any git call
+that fails. The scope is never narrower than git could prove textually. It cannot see a semantic
+conflict: a merge that changes only files the branch did not touch lists none, even where the branch's
+code depends on them. The full review has that blind spot too; the suite and CI cover it.
 
 ## The CI gate — what `ci` computes
 

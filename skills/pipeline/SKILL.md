@@ -51,7 +51,9 @@ stateDiagram-v2
     implement --> design: plan-insufficient
     verify_ui --> design: plan-insufficient
     review_pr --> design: plan-insufficient
-    done --> [*]: finish, CI gate, gh pr ready
+    done --> review_pr: CI gate fix round
+    done --> done: CI gate ask, answers recorded
+    done --> [*]: finish, CI gate ready, gh pr ready
 ```
 
 The gates are `review-plan`, `verify-ui` when the `ui` trigger fires, and `review-pr`; each loop-back is bounded

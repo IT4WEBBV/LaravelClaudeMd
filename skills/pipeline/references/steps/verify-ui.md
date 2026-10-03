@@ -29,5 +29,4 @@ are `shared/proof-payload.md` §Shots.
 **The PR still gets a comment, and it is load-bearing.** The manifest is reconstructable from
 git + gh (`manifest.md` §Reconstruction), so the only durable evidence that this non-skippable
 gate ran must live on the PR. The comment records *what* was verified — routes, states, outcome,
-shot count — and does not carry the images: GitHub has no API for an image in a PR comment, so they
-live on the proof page. The path `write` printed goes to `record` as `--proof`.
+shot count — and does not carry the images, which live on the proof page (`proof-store.md`). The path `write` printed goes to `record` as `--proof`.
