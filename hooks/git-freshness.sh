@@ -766,8 +766,8 @@ check_first_touches() {
 
 # Is branch $1 a /pipeline run's own branch? Its manifest sits in the worktree at
 # the path manifest_path() in skills/pipeline/checks/manifest.php builds, and the
-# run's own code decides whether a step merges the base (pipeline engine.md
-# §Catching up with the base): telling every step agent to raise it and wait on
+# run's own code decides whether a step merges the base (pipeline
+# references/shared/catch-up.md): telling every step agent to raise it and wait on
 # its first Read would contradict the brief it runs on.
 runs_pipeline() {
     local toplevel

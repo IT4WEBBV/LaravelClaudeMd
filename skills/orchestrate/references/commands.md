@@ -77,8 +77,8 @@ gh pr view M -R <repo> --json state --jq .state
 
 ## Launch
 
-Per issue N, from the primary checkout: pipeline `SKILL.md` §`autoflow` — how a run starts
-and ends, steps 1–3.
+Per issue N, from the primary checkout: pipeline `references/session.md` §`autoflow`, steps
+1–3.
 
 - Kickoff is `php ~/.claude/skills/pipeline/checks/dispatch_cli.php kickoff <primary checkout> N`,
   with `--base <branch>` in a batch on a base, and one `--decision "<verbatim>"` per settled
@@ -89,14 +89,14 @@ and ends, steps 1–3.
   and per PR its files:
   `gh pr view <P> -R <repo> --json files --jq '[.files[].path] | join(", ")'`.
   With at least one, kickoff gets one more `--decision`, in this form:
-  `Sibling runs in flight in this batch (orchestrate's note, not an owner decision): #<P> (issue #<M>) changes <files>; issue #<K> has no PR yet. A plan that changes these files expects a merge of the base (pipeline engine.md §Catching up with the base).`
+  `Sibling runs in flight in this batch (orchestrate's note, not an owner decision): #<P> (issue #<M>) changes <files>; issue #<K> has no PR yet. A plan that changes these files expects a merge of the base (pipeline references/shared/catch-up.md).`
   A sibling still in design shows only its spec and plan; merged siblings are not listed, since the run
   is cut from a base that holds them. The note holds nothing back and orders nothing: the run merges
   its base when its brief says so.
 - `launch` answers `done` or a halt: report it and start no workflow. A `fresh session:` halt is Step 5's,
   for every issue still to start: no further `launch` from this session.
 - Start the workflow `pipeline-autoflow` with `launch`'s JSON as `args`, in the background, **through
-  the detour** (pipeline `SKILL.md` §`autoflow` step 3): this reply ends with the detour's background
+  the detour** (pipeline `references/session.md` §`autoflow`, step 3): this reply ends with the detour's background
   wait, and the `Workflow` call is the first tool call of the reply its notice opens. Launch every run
   due now before that wait, so their `Workflow` calls share that first block. Add each task id → N to
   the dispatch record (the id `TaskStop` takes and the completion notice carries; the `wf_…` run id
@@ -106,7 +106,7 @@ and ends, steps 1–3.
   last*). An `AskUserQuestion` holds its reply until answered, so asked earlier it would hold the runs.
 
 `launch` refuses a manifest that is not `autoflow`; one that still says `auto` is refused naming
-`autoflow` (pipeline `engine.md` §The loop). A dead session's `autoflow` run: `finish` it with a halt,
+`autoflow` (pipeline `references/session.md` §Modes). A dead session's `autoflow` run: `finish` it with a halt,
 then a new `launch` and workflow, as above.
 
 Commits wanted on a ready PR, after `gh pr ready --undo <P>`:
@@ -120,7 +120,7 @@ then a new `pipeline-autoflow` workflow with that JSON, through the detour as ab
 
 ## Finish
 
-On a run's completion notice (pipeline `engine.md` §`autoflow` — a program that calls agents):
+On a run's completion notice (pipeline `references/session.md` §`autoflow`):
 
 ```bash
 php ~/.claude/skills/pipeline/checks/dispatch_cli.php finish <manifest> '<the workflow return, as JSON>'
@@ -138,10 +138,10 @@ left a return that does not hold (an open `pr-review` entry, a key only the engi
 and prints a halt instead. A denied `gh pr ready` writes no halt: the manifest already says done and
 the PR stays draft, so the denial goes in the report and the owner runs `gh pr ready` by hand. A
 workflow that errored: `finish <manifest> '{"action":"halt","reason":"<the error>"}'`. A halt
-after `handoff`: the reason into the PR body, as pipeline `engine.md` §Failure policy — what still
+after `handoff`: the reason into the PR body, as pipeline `references/session.md` §Failure policy — what still
 stops (*Bound exhaustion*) says, and the report names the proof page.
 
-**`ask`** (pipeline `engine.md` §Open questions): `finish` printed `ask` because a `blocking` open
+**`ask`** (pipeline `references/session.md` §Open questions): `finish` printed `ask` because a `blocking` open
 question is unanswered; the manifest says done and the PR stays draft. Its `questions` go into the
 batched `AskUserQuestion` (Step 5, *Ask last*), and no gate runs yet. Record each answer as the question's
 `decision` with the answer appended, and append those lines to the PR body (`gh pr view <P> -R <repo>
@@ -152,14 +152,14 @@ answer changes the code: the diff, `launch <manifest> <manifest stem>.diff --fro
 The gate answers `ask` too while one is open: the same. `followUps` (with `done` and `ask`): listed once
 in the ready report, then one batched *file an issue* / *drop* question, or filed directly.
 
-The CI gate (pipeline `engine.md` §The CI gate) runs in one background Bash and wakes you with its
+The CI gate (pipeline `references/session.md` §The CI gate) runs in one background Bash and wakes you with its
 answer; a run in its gate still counts as working. `fix`: the fix round, as §Launch's *commits wanted*
 block with `--decision "<its decision>"` in place of the owner's request and no `gh pr ready --undo`
 (the PR is still draft), then a new `pipeline-autoflow` workflow, as §Launch, in the dispatch record. `halt`:
 `finish <manifest> '<the answer>'`, and the run is halted like any other.
 
 **A relay halt.** `finish` answered `relaunch: true`: the run started framed and no step ran (pipeline
-`engine.md` §`autoflow`, the relay check). Start it again as §Launch: the diff, `launch <manifest>
+`references/machinery.md` §The relay check). Start it again as §Launch: the diff, `launch <manifest>
 <manifest stem>.diff` with no `--from` and no `--decision`, then the detour; replace its task id in the
 dispatch record and report one line, *#N restarted through the detour: the first start was framed*. No
 PR body entry, no proof page, no question. A `relay:` halt without `relaunch` is halted like any other
@@ -213,7 +213,7 @@ A batched `AskUserQuestion` still comes last (Step 5); the line is the last line
 
 ## Proof page
 
-No page opens by itself (pipeline `engine.md` §The proof store): the owner keeps the store index open, and its tab
+No page opens by itself (pipeline `references/proof-store.md` §No page opens by itself): the owner keeps the store index open, and its tab
 shows what changed. When announcing a ready PR, and only if the run made a page, name its path, the file and not the
 directory: the `proof` `finish` printed, `~/GitProjects/_proofs/<repo>/pr-<P>-<topic>/index.html`. To open one by
 hand:

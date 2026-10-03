@@ -30,6 +30,17 @@ whether a run is framed is fixed at its start. Decided: the detour (a start take
 a background wait's notice) and the relay check as the script's first agent, which halts a framed start before any
 step. Remove when upstream fixes the relay (anthropics/claude-code#95369, #96640).
 
+## #128 — `engine.md` split by reader, one reference per step
+
+`references/engine.md` was 1,748 lines serving three readers at once — the invoking session, a step agent and the
+maintainer — with rules restated across `SKILL.md`, `engine.md`, `gates.md` and `manifest.md`, history inside rule
+text, and no map. Measured first (the design spec of 2026-10-03): step agents read slices of it, 73–312 lines on
+average per step and never the whole file, up to 7k tokens a step and about 40k a run, at most 7% of a step's peak
+context, so the token saving is small. The split went ahead on maintenance grounds instead: each rule in one file,
+history here, and `SKILL.md` as the one-page overview with the state machine. Replaced: the single `engine.md` by
+`references/session.md`, `machinery.md`, `proof-store.md`, `steps/*.md` and `shared/*.md`; a brief names its step's
+file and cites files, never sections.
+
 ## #125 — `handoff` is a command
 
 Pushing a branch and opening a draft PR is mechanical, and the `handoff` skill, written for a person who closes a
@@ -169,8 +180,28 @@ deleted by decision, not oversight: two of its three documented effects — adju
 became the default everywhere, which left only "do not loop me back to `design`", and that did not justify a stored
 per-gate field of its own.
 
+## PR #20 — trigger paths anchor at a path segment
+
+With a bare `^` anchor the `ui`, `migration` and `package` triggers were structurally blind on every project that
+follows the `code/www/` convention: `ui` fired only via the unanchored `.blade.php` / `.vue` / `tailwind.config`
+patterns, so a Livewire-PHP-only change reported `ui: false` and `verify-ui` was skipped; `migration` never fired at
+all; and `package` missed a bumped `it4web/*` constraint because it compared `$f['file'] === 'composer.json'`
+exactly. Decided: anchor at `(?:^|/)`, pinned by `TriggersTest`.
+
 ## PR #19 — no diff-scoping for `static-analysis`
 
 Measured on Deploy: scoping PHPStan to two files costs 4.7 s against 11.1 s for all of `app/`, because the
 analyser's bootstrap is a fixed ~4.5 s floor. Paying that 6.4 s removes host→container path mapping, touched-file
 tracking, and any need for a pre-ready backstop, so the check runs over the whole declared scope.
+
+## PR #18 — content triggers annotate; a lost cycle count is unknown
+
+The earlier invariant said content gates are "non-skippable in both modes" and "never downgraded to report-only, in
+either mode". That text was removed by decision, not by oversight: the three annotating triggers are facts, not
+findings, answered with a mandatory annotation. The caveat it protected is kept as a rule: authorization and
+migration defects are the ones most easily missed in a quick PR skim, precisely because they look small, so the
+annotation leads the PR body.
+
+The same PR made a cycle count that cannot be read unknown rather than zero. Without it, a manifest lost mid-loop
+silently grants two fresh cycles, and one lost repeatedly grants them forever: the bound would stop bounding at
+exactly the moment it is load-bearing.

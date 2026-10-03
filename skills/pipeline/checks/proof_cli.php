@@ -46,7 +46,7 @@ function proof_cli_write(string $payloadPath): int
 
 /**
  * Open a run's page in the desktop browser, by hand: no step runs this, a run's report names its page instead
- * (`../references/engine.md` §The proof store, *No page opens by itself*).
+ * (`../references/proof-store.md` §No page opens by itself).
  *
  * Cosmetic, and weaker than every other policy in this file: failing to *capture* proof halts a
  * run and failing to *file* it logs and continues, but failing to *open* it does not even rate a
@@ -86,8 +86,8 @@ function proof_cli_open(string $path): int
 
 /**
  * `status <page> <status> [--reason <text>]`: what a session knows and no command does, right after it made it so:
- * `ready` after `gh pr ready`, `merged` or `closed` when the merge watch answers (`../references/engine.md` §The
- * proof store). Like every store path it logs and returns 0.
+ * `ready` after `gh pr ready`, `merged` or `closed` when the merge watch answers (`../references/proof-store.md`
+ * §Statuses). Like every store path it logs and returns 0.
  */
 function proof_cli_status(array $arguments): int
 {

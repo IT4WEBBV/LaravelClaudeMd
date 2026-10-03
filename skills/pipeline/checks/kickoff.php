@@ -1,7 +1,7 @@
 <?php
 
 /**
- * `dispatch_cli.php kickoff` (`../references/engine.md` §Kickoff): §The work item and §Kickoff in one
+ * `dispatch_cli.php kickoff` (`../references/session.md` §The work item and `../references/session.md` §Kickoff): both in one
  * call for the unattended mode, `autoflow`. Every value comes from the repo's config, gh or git; a
  * value kickoff would have to compute is a halt.
  */
@@ -178,7 +178,7 @@ function pipeline_kickoff_slug(string $text): string
 }
 
 /**
- * A per-run base (engine.md §Kickoff, *A run on a base*) is a branch on origin other than its default.
+ * A per-run base (`../references/session.md` §Kickoff, *A run on a base*) is a branch on origin other than its default.
  * The fetch proves it is one and leaves `origin/<base>` current for the create and the check after it.
  */
 function pipeline_kickoff_base(string $repoRoot, ?string $base): ?string
@@ -299,7 +299,7 @@ function pipeline_kickoff_on_base(string $worktree, string $base): void
     }
 }
 
-/** Everything no step will look up (engine.md §Kickoff); a key with nothing to say is absent. */
+/** Everything no step will look up (`../references/session.md` §Kickoff); a key with nothing to say is absent. */
 function pipeline_kickoff_manifest(string $branch, string $worktree, string $item, ?array $issue, array $options): array
 {
     return [
@@ -326,7 +326,7 @@ function pipeline_kickoff_board(string $config): array
 }
 
 /**
- * engine.md §The work item's two calls. Failing to record the claim is a note, never a halt.
+ * `../references/session.md` §The work item's two calls. Failing to record the claim is a note, never a halt.
  *
  * @param  array{number: int, title: string, url: string}  $issue
  * @return list<string>

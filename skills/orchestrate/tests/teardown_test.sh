@@ -334,7 +334,7 @@ lacks $COMMANDS 'sleep 60'
 has   skills/orchestrate/SKILL.md 'teardown.py'
 lacks skills/orchestrate/SKILL.md 'A check fails: ask'
 lacks skills/orchestrate/SKILL.md '`worktree.remove`'
-ENGINE=skills/pipeline/references/engine.md
+ENGINE=skills/pipeline/references/session.md
 has   $ENGINE 'python3 ~/.claude/skills/orchestrate/teardown.py <worktree> <P> --repo <repo>'
 has   $ENGINE 'timeout: 7200000'
 has   $ENGINE '| `Worktree` | `remove` | nothing:'

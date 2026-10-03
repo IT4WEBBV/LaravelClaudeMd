@@ -57,7 +57,7 @@ function pipeline_can_navigate(string $from, string $to, array $doneLegs, array 
     return true;
 }
 
-/** The newest `at` of a `design-size` escalation or a plan gap, `''` without one: gate passes before it no longer count (`../references/engine.md` §Design size, §Scoped re-review). */
+/** The newest `at` of a `design-size` escalation or a plan gap, `''` without one: gate passes before it no longer count (`../references/gates.md` §Navigation guardrail). */
 function pipeline_reset_at(array $ledger): string
 {
     $resetAt = array_column(
@@ -68,7 +68,7 @@ function pipeline_reset_at(array $ledger): string
     return $resetAt === [] ? '' : max($resetAt);
 }
 
-/** Whether the ledger records a `design-size` escalation: the run is on `full` from there on, a resume included (`../references/engine.md` §Agents per step). */
+/** Whether the ledger records a `design-size` escalation: the run is on `full` from there on, a resume included (`../references/machinery.md` §Agents per step). */
 function pipeline_escalated(array $ledger): bool
 {
     return in_array('escalated', array_column($ledger, 'outcome'), true);
@@ -79,7 +79,7 @@ function pipeline_escalated(array $ledger): bool
  * a `continued` entry — but only one newer than the latest `design-size` escalation or plan gap (a
  * `plan-approval` loop-back written by a leg after `review-plan`): a plan that grew is a different
  * plan, and the pass over the old one must not let navigation skip the re-review
- * (`../references/engine.md` §Design size).
+ * (`../references/shared/plan-falls-short.md`).
  */
 function pipeline_done_legs(array $ledger): array
 {
@@ -98,7 +98,7 @@ function pipeline_done_legs(array $ledger): array
     return array_values(array_unique($done));
 }
 
-/** A `plan-approval` loop-back written by a leg after `review-plan`: the approved plan fell short (`../references/engine.md` §Design size). */
+/** A `plan-approval` loop-back written by a leg after `review-plan`: the approved plan fell short (`../references/shared/plan-falls-short.md`). */
 function pipeline_is_plan_gap(array $entry): bool
 {
     return ($entry['gate'] ?? null) === 'plan-approval'

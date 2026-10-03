@@ -1,13 +1,13 @@
 <?php
 
-/** The keys a `## Checks` block may declare (`../references/engine.md` §The repo config). */
+/** The keys a `## Checks` block may declare (`../references/session.md` §The repo config). */
 const PIPELINE_CHECK_KEYS = ['static-analysis', 'format'];
 
 /**
  * Parse the `## Checks` block out of a repo's `.claude/work-on.config.md`; its keys are
- * `PIPELINE_CHECK_KEYS` (`../references/engine.md` §The repo config).
+ * `PIPELINE_CHECK_KEYS` (`../references/session.md` §The repo config).
  *
- * Tri-state by design (`../references/engine.md` §Mechanical checks): `absent` and
+ * Tri-state by design (`../references/shared/checks.md` §Mechanical checks): `absent` and
  * `invalid` must never collapse into one another. A typo'd heading or a mis-cased key
  * that parsed as "not adopted" would disable the checks permanently while the run
  * believed it was covered — the one outcome the design calls worse than no tooling.
@@ -83,7 +83,7 @@ function pipeline_repo_checks(string $configMarkdown): array
  *
  * `<N>` is the run's slot *suffix*, not its number: an empty string on the primary
  * stack, `-2` / `-3` … in a slot. That is how the slot machinery names containers
- * (`scripts/slot-env.sh`: `SUFFIX="-${SLOT}"`). `../references/engine.md` §The repo config
+ * (`scripts/slot-env.sh`: `SUFFIX="-${SLOT}"`). `../references/session.md` §The repo config
  * lists the keys whose commands carry it.
  *
  * Without this, a hardcoded container name execs the primary stack, analyses the

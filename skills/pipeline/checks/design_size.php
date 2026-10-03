@@ -1,7 +1,7 @@
 <?php
 
 /**
- * How much design a change gets (`../references/engine.md` §Design size). Read from the committed
+ * How much design a change gets (`../references/steps/design.md` §Design size). Read from the committed
  * spec, never stored: only the exact `**Design size:** Bounded` header line is Bounded, so every
  * spec written before the header existed — and every mangled header — keeps the Architectural chain.
  */

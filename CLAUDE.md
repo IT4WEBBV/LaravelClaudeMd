@@ -274,7 +274,7 @@ explicitly ask to be done by hand.
 
   **One exception: a `/pipeline` run's own branch.** A step of a run merges the base into the run's branch
   when its brief says so, with `cd <worktree> && git merge --no-edit origin/<base>`, and resolves the
-  conflicts itself (pipeline `engine.md` §Catching up with the base): never a rebase, never a force-push.
+  conflicts itself (pipeline `references/shared/catch-up.md` §Catching up with the base): never a rebase, never a force-push.
   There the brief answers the hook's warning. A warning in a run's step about a checkout the brief does
   not name (the checkout the step was launched in, a config repo) is not the run's to act on: the step
   leaves that checkout alone and does not halt on it. Every other checkout keeps raise-and-wait;

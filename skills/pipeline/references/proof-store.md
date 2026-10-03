@@ -4,7 +4,7 @@ GitHub has no API for an image in a PR comment, so the visual record lives here 
 text-only comment (`steps/verify-ui.md` §The record comment). Reader: the maintainer and the owner; the
 session and the steps link here. What a write carries is `shared/proof-payload.md`.
 
-## Where a page lives and who writes it
+## Where a page lives — and who writes it
 
 **Every run that reaches `handoff` has a page**, a self-contained one at
 `~/GitProjects/_proofs/<repo>/pr-<n>-<topic>/` — keyed by repo *and* run, because a PR number collides

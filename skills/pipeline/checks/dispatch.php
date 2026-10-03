@@ -1,7 +1,7 @@
 <?php
 
 /**
- * The dispatcher's decisions (`../references/engine.md` §The loop). Pure: `dispatch_cli.php` reads and
+ * The dispatcher's decisions (`../references/machinery.md` §The control rule). Pure: `dispatch_cli.php` reads and
  * writes the manifest; these functions only decide which step comes next and whether a return holds.
  */
 
@@ -28,7 +28,7 @@ const PIPELINE_GATE_OF = ['review-plan' => 'plan-approval', 'review-pr' => 'pr-r
 
 const PIPELINE_LOOP_BOUND = 2;
 
-/** The legs whose steps differ on a Bounded design: its spec step commits the plan too (`../references/engine.md` §Design size). */
+/** The legs whose steps differ on a Bounded design: its spec step commits the plan too (`../references/steps/design.md` §`autoflow`'s design). */
 const PIPELINE_BOUNDED_STEPS = ['design' => ['spec']];
 
 /** @return list<string> `autoflow` designs in a spec step and a plan step; `interactive` designs inline, in one */
@@ -127,7 +127,7 @@ function pipeline_design_step(array $manifest): string
     return empty($artifacts['spec']) || $planned ? 'spec' : 'plan';
 }
 
-/** Anything that is not `autoflow` behaves as interactive (`gates.md` §Modes): the human designs and resolves. */
+/** Anything that is not `autoflow` behaves as interactive (`../references/session.md` §Modes): the human designs and resolves. */
 function pipeline_runs_inline(string $mode, string $leg, string $step): bool
 {
     return $mode !== 'autoflow' && ($leg === 'design' || $step === 'resolve');
@@ -300,7 +300,7 @@ function pipeline_ledger_problem(array $old, array $new, LegStatus $status, stri
     };
 }
 
-/** A review step adds one open entry; on `pr-review` it records the commit it reviewed (`../references/engine.md` §Scoped re-review). */
+/** A review step adds one open entry; on `pr-review` it records the commit it reviewed (`../references/steps/review-pr-review.md` §Scoped re-review). */
 function pipeline_review_entry_problem(array $added, string $gate): ?string
 {
     $sha = $added[0]['reviewed_sha'] ?? null;
@@ -376,7 +376,7 @@ function pipeline_continue(string $leg, string $step, array $triggers): array
     return $next === null ? ['action' => 'done'] : pipeline_dispatch($next);
 }
 
-/** The bound is read from the ledger, never from memory (`../references/manifest.md` §gate_ledger). */
+/** The bound is read from the ledger, never from memory (`../references/manifest.md` §`gate_ledger`). */
 function pipeline_loop_back(array $ledger, string $leg): array
 {
     $gate = pipeline_gate_of($leg);

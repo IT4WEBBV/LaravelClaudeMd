@@ -1,8 +1,8 @@
 <?php
 
 /**
- * The test cases a branch adds or changes, for the proof page's *Tests this PR adds* (`../references/engine.md`
- * §The proof store). Pure: the diff and a reader of a file at `HEAD` come in, the cases go out. A change that only
+ * The test cases a branch adds or changes, for the proof page's *Tests this PR adds* (`../references/proof-store.md`
+ * §The page). Pure: the diff and a reader of a file at `HEAD` come in, the cases go out. A change that only
  * removes lines inside a case is not seen, nor a `describe()` prefix, nor a dataset's rows.
  */
 

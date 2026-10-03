@@ -1,7 +1,7 @@
 <?php
 
 /**
- * The durable proof store (`../references/engine.md` §The proof store): the run's rules, its directory, its file.
+ * The durable proof store (`../references/proof-store.md` §Where a page lives): the run's rules, its directory, its file.
  *
  * Everything here is a *rendering input*. The engine never reads this store to decide which
  * leg runs next, whether a gate passed, or whether to loop back — deleting the whole of
@@ -59,8 +59,8 @@ enum ProofShotState: string
 }
 
 /**
- * Where a run stands, on its page and in the store index (`../references/engine.md` §The proof store, *who writes
- * each status*). `run.json` holds it as `status: {state, reason}`, the reason only with Halted.
+ * Where a run stands, on its page and in the store index (`../references/proof-store.md`
+ * §Statuses). `run.json` holds it as `status: {state, reason}`, the reason only with Halted.
  */
 enum ProofRunStatus: string
 {
@@ -204,7 +204,7 @@ function proof_shot_state_problem(int $number, mixed $state): ?string
 
 /**
  * What is wrong with a payload's `openQuestions`: each item an object with a non-empty `question` and a `kind`
- * (`../references/engine.md` §Open questions). Judged on the payload, not the run as filed, so a run filed before
+ * (`../references/shared/resolving.md` §Open questions). Judged on the payload, not the run as filed, so a run filed before
  * kinds, with string items, is not refused on a write that leaves `openQuestions` out.
  *
  * @return list<string>
@@ -507,7 +507,7 @@ const PROOF_NO_PR_RETENTION_DAYS = 14;
 /**
  * Pure predicate — no filesystem, no `gh`, no clock.
  *
- * Two rules the store depends on (`../references/engine.md` §The proof store, *Retention*):
+ * Two rules the store depends on (`../references/proof-store.md` §Retention):
  *  - a merged or closed run is kept `PROOF_FINISHED_RETENTION_DAYS` after its last filing: a PR merged this morning
  *    is exactly the one still worth looking at this afternoon. "Finished" is the run's status, the one the index
  *    hides by default, which the prune pass has corrected from `gh` before it asks;
@@ -559,7 +559,7 @@ function proof_scan_runs(string $root): array
 
 /**
  * The argv for opening a run's page in the desktop browser, by hand (`proof_cli.php open`): no step opens one
- * (`../references/engine.md` §The proof store, *No page opens by itself*).
+ * (`../references/proof-store.md` §No page opens by itself).
  *
  * An **array**, never a shell string. The page path is derived from repo/branch/PR values that
  * reach this store from a JSON payload, so it is untrusted input: `proof_cli.php` hands this

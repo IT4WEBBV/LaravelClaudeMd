@@ -368,8 +368,8 @@ session that runs `gh pr ready`:** the invoking session once `finish` prints `do
 answer is recorded, in `autoflow`; the finish step in `interactive` (`steps/finish.md`). In `autoflow`
 the session, not a step, runs `gh pr ready`: the auto-mode classifier denies it a workflow agent, and it
 is the most consequential outward write a run makes. Nothing marks the PR ready before `review-pr`'s
-finish step has run (`gates.md` §Navigation guardrail). `implement` does not wait on CI in `autoflow`,
-and a skipped check reads green, so the `ci` label goes on before the first push (`steps/implement.md`
+finish step has run (`gates.md` §Navigation guardrail). `implement` does not wait on CI in `autoflow`:
+`review-pr:review` runs while CI runs. A skipped check reads green, so the `ci` label goes on before the first push (`steps/implement.md`
 §The `ci` label). What `ci` reads and each verdict is `machinery.md` §The CI gate.
 
 The session polls the gate in one background Bash and waits for its completion notice:

@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Filing a run (`../references/engine.md` §The proof store): the one path by which `proof_cli.php write` and
+ * Filing a run (`../references/proof-store.md` §Where a page lives): the one path by which `proof_cli.php write` and
  * `dispatch_cli.php handoff` put a run into the store. A write is merged over the run as filed, never replaces
  * it. Impure: the filesystem, `sips`, and git in the run's worktree. Never a halt: what cannot be filed comes
  * back as problems.
@@ -56,8 +56,8 @@ function proof_store_file(array $payload, string $now, callable $rules, array $d
 
 /**
  * The store index and the `status.js` beside it, rendered from one scan: every write path ends here, so the open
- * index never polls a `status.js` behind the index (`../references/engine.md` §The proof store, *The open index
- * tab*). Each file goes through `<file>.<pid>.tmp` and a rename, so neither a poll nor an empty store's reload loads
+ * index never polls a `status.js` behind the index (`../references/proof-store.md`
+ * §The open index tab). Each file goes through `<file>.<pid>.tmp` and a rename, so neither a poll nor an empty store's reload loads
  * half a file, and two store writes at once never share a temp file. Creates no directory.
  *
  * @return ?string null, or `cannot write <file>`

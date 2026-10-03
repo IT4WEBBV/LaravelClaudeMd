@@ -127,7 +127,7 @@ function pipeline_record_append(array $manifest, array $entry): array
     return [...$manifest, 'gate_ledger' => [...pipeline_ledger($manifest), $entry]];
 }
 
-/** `plan-insufficient`: an escalation on a Bounded design, a plan gap on an Architectural one (`../references/engine.md` §Design size). */
+/** `plan-insufficient`: an escalation on a Bounded design, a plan gap on an Architectural one (`../references/shared/plan-falls-short.md`). */
 function pipeline_record_gap(array $manifest, string $leg, string $reason, array $facts): array
 {
     $entry = $facts['size'] === DesignSize::Bounded
@@ -221,7 +221,7 @@ function pipeline_record_actions(string $json): array|string
     return $actions;
 }
 
-/** What is wrong with one action, as the words after `actions[n]`, or null. An `open-question` carries a `kind` (`../references/engine.md` §Open questions); no other action does. */
+/** What is wrong with one action, as the words after `actions[n]`, or null. An `open-question` carries a `kind` (`../references/shared/resolving.md` §Open questions); no other action does. */
 function pipeline_record_action_problem(mixed $action): ?string
 {
     $ticked = fn (array $names) => implode(', ', array_map(fn (int|string $name) => "`{$name}`", $names));
@@ -273,7 +273,7 @@ function pipeline_record_pr(array $manifest, array $flags): array|string
     ]];
 }
 
-/** `verify-ui`: the proof page when given, and the thin entry that carries the loop bound (`../references/manifest.md` §gate_ledger). */
+/** `verify-ui`: the proof page when given, and the thin entry that carries the loop bound (`../references/manifest.md` §`gate_ledger`). */
 function pipeline_record_verified(array $manifest, string $status, array $flags, array $facts): array
 {
     $artifacts = [...($manifest['artifacts'] ?? []), ...array_intersect_key($flags, ['proof' => true])];
@@ -304,7 +304,7 @@ function pipeline_record_replaced(array $before, array $current): array
     return array_values(array_diff(pipeline_changed_keys(pipeline_normalized($before), pipeline_normalized($current)), ['suite']));
 }
 
-/** @return list<string> the content triggers that fired, by name (`../references/gates.md` §content triggers); `ui` is a leg, not an annotation */
+/** @return list<string> the content triggers that fired, by name (`../references/gates.md` §Content triggers); `ui` is a leg, not an annotation */
 function pipeline_annotations(array $triggers): array
 {
     return array_keys(array_filter(array_intersect_key($triggers, ['package' => true, 'migration' => true, 'auth' => true])));

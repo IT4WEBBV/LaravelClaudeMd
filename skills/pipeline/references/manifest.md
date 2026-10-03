@@ -17,22 +17,32 @@ Read/written by the Phase A helpers in `../checks/manifest.php`:
 |---|---|---|
 | `branch` | **required** | run identity (also the manifest filename) |
 | `worktree` | **required** | absolute path of the run's worktree — where every leg operates |
-| `mode` | **required** | `interactive` or `autoflow`; every command refuses `auto`, the engine #87 removed, naming `autoflow` |
+| `mode` | **required** | `interactive` or `autoflow`; every command refuses `auto` (#87), naming `autoflow` |
 | `cursor` | **required** | `{leg, status, reason?, retried?}` — the current leg; `status` is `pending` (written by `next`, by `launch --from`, or by `brief` as an `autoflow` step starts), the status the leg returned, `halted` (with `reason`), or `done` (written by `returned` or `finish` on a finished run; `next` and `launch` then answer `done` and dispatch nothing); `reason` only with `halted`; `retried` only after a review step's single retry in `interactive` |
 | `pipeline_id` | optional | stable id alongside `branch` |
-| `artifacts` | optional | pointers: idea, spec path, plan path, PR number, issue number (`engine.md` §The work item), `proof` — the proof page `handoff` filed (the step that first wrote it, when `handoff` could not). In `autoflow` the design's spec step removes `plan` and the plan step sets it again, so an empty `plan` beside a `spec` means the plan step is next (`engine.md` §Design size, *`autoflow`'s design*) |
+| `artifacts` | optional | pointers: idea, spec path, plan path, PR number, issue number (`session.md` §The work item), `proof` — the proof page `handoff` filed (the step that first wrote it, when `handoff` could not). In `autoflow` the design's spec step removes `plan` and the plan step sets it again, so an empty `plan` beside a `spec` means the plan step is next (`steps/design.md` §`autoflow`'s design) |
 | `last_sha` | optional | HEAD at the last completed leg |
 | `gate_ledger` | optional | the audit trail — each gate's review, what the resolve step or the human did about it, and the content-trigger annotations (shape below) |
 | `lease` | optional | session id + timestamp (single-driver guard) |
 | `suite` | optional | the last full suite: `{tree, outcome: green\|red, passed, failed, at}` — see *Two rules* for why a recomputable field is stored |
-| `decisions` | optional | the settled decisions from the invocation, verbatim, as a list, and what `launch --decision` adds: an owner's request on a ready PR, one of the CI gate's three records, a red CI, an unreviewed merge or a conflict with the base (`engine.md` §The CI gate), or an owner's answer to a `blocking` open question, starting `Answer to open question <id>` (`engine.md` §Open questions). `orchestrate` adds its sibling note at kickoff, marked as a note and not an owner decision (`engine.md` §Catching up with the base). Every brief carries them (`engine.md` §What a leg brief consists of) |
-| `tier` | optional | the invocation's word: `"medium"` or `"light"`; absent means `full`. Both permit a Bounded design, read only while `design` has not run; in `autoflow` the tier also picks the agents (`AgentTier::fromManifest()`, `engine.md` §Agents per step). Written once by kickoff; a leg that changes it halts the run, and `launch` halts on any other value. A manifest with the legacy `light: true` and no `tier` reads as `medium`, the permit and agents `light` had before #116; nothing writes `light` any more |
-| `agents` | optional | `autoflow` only, set by hand for a one-off experiment: `{"<leg>:<step>": {"model"?, "effort"?}}`, laid over that step's entry in every tier and its loop-back entry. `launch` halts on an invalid one; a leg that changes it halts the run (`engine.md` §Agents per step) |
-| `base` | optional | the branch kickoff's `--base` cut the run from and its PR goes into (`engine.md` §Kickoff, *A run on a base*); absent means the default branch. Written once by kickoff; a leg that changes it halts the run. A reconstructed manifest recovers it from the PR's `baseRefName` once a PR exists. Before that it is recoverable only from the worktree (`git merge-base` against the candidate branches) or from whoever kicked the run off: kickoff writes no git config for it, and a manifest rebuilt without `base` makes `handoff` open the PR into the default branch |
+| `decisions` | optional | the settled decisions from the invocation, verbatim, as a list, and what `launch --decision` adds: an owner's request on a ready PR, one of the CI gate's three records, a red CI, an unreviewed merge or a conflict with the base (`session.md` §The CI gate), or an owner's answer to a `blocking` open question, starting `Answer to open question <id>` (`session.md` §Open questions). `orchestrate` adds its sibling note at kickoff, marked as a note and not an owner decision (`shared/catch-up.md` §Catching up with the base). Every brief carries them (`machinery.md` §What a leg brief consists of) |
+| `tier` | optional | the invocation's word: `"medium"` or `"light"`; absent means `full`. Both permit a Bounded design, read only while `design` has not run; in `autoflow` the tier also picks the agents (`AgentTier::fromManifest()`, `machinery.md` §Agents per step). Written once by kickoff; a leg that changes it halts the run, and `launch` halts on any other value. A manifest with the legacy `light: true` and no `tier` reads as `medium`, the permit and agents `light` had before #116; nothing writes `light` any more |
+| `agents` | optional | `autoflow` only, set by hand for a one-off experiment: `{"<leg>:<step>": {"model"?, "effort"?}}`, laid over that step's entry in every tier and its loop-back entry. `launch` halts on an invalid one; a leg that changes it halts the run (`machinery.md` §Agents per step) |
+| `base` | optional | the branch kickoff's `--base` cut the run from and its PR goes into (`session.md` §Kickoff, *A run on a base*); absent means the default branch. Written once by kickoff; a leg that changes it halts the run. A reconstructed manifest recovers it from the PR's `baseRefName` once a PR exists. Before that it is recoverable only from the worktree (`git merge-base` against the candidate branches) or from whoever kicked the run off: kickoff writes no git config for it, and a manifest rebuilt without `base` makes `handoff` open the PR into the default branch |
 
 `manifest_validate($data)` returns the list of **missing required keys** — `branch`,
 `worktree`, `mode`, `cursor`. An empty list means valid. Keep this table and that function
 in lock-step: the four required rows above are exactly the four keys the function checks.
+
+## The run's files
+
+`<manifest stem>` is the manifest path without `.json`: the diff (`.diff`), the brief (`.brief.md`), the
+dispatch snapshot (`.before.json`), a review step's review (`.review.md`) and a resolve step's actions
+(`.actions.json`) sit next to the manifest (`manifest_files()`), one set per run, so concurrent runs
+never share a diff file, and `.claude/pipeline/` keeps them out of git and out of the suite's tree key
+(`shared/suite.md` §Suite reuse). `<base>` is the manifest's `base` on a run kicked off with one
+(`session.md` §Kickoff), and the repo's default branch otherwise: every `origin/<base>` in this skill and
+in `orchestrate` means that.
 
 ## Two rules that keep the file honest
 
@@ -47,11 +57,11 @@ in lock-step: the four required rows above are exactly the four keys the functio
   Storing it is a latent drift bug.
 - **Named exception: `suite`.** A suite result is recomputable (re-run it), yet it is stored,
   because it cannot go stale silently: it is used only when `pipeline_tree_key()` of the current
-  working tree equals the recorded `tree`, and losing it costs one re-run (`engine.md` §Suite reuse).
+  working tree equals the recorded `tree`, and losing it costs one re-run (`shared/suite.md` §Suite reuse).
 
 ## `gate_ledger` — the audit trail that keeps a gate from being decoration
 
-Under `autoflow` the resolve step overrules reviewers routinely (`engine.md` §Resolving a review). That is fine; doing it
+Under `autoflow` the resolve step overrules reviewers routinely (`shared/resolving.md` §Resolving a review). That is fine; doing it
 *invisibly* is not. So each pass through a gate appends one entry, and the entry is projected onto
 the PR.
 
@@ -78,16 +88,16 @@ the PR.
 |---|---|
 | `gate` | `plan-approval` \| `pr-review` \| `verify-ui` \| `design-size` |
 | `leg` | the leg that produced the entry |
-| `cycle` | 1-based — which pass through this gate produced the entry; `"unknown"` after a reconstruction, which permits no further loop-back (§reconstruction) |
+| `cycle` | 1-based — which pass through this gate produced the entry; `"unknown"` after a reconstruction, which permits no further loop-back (§Reconstruction) |
 | `at` | timestamp; the audit trail's only ordering |
 | `review` | the reviewer's text, verbatim — the one named exception to *Pointers, never content* above |
 | `annotations` | the content triggers that fired (`package`, `migration`, `auth`) — facts, not findings |
 | `actions[].claim` | the point from the review the resolve step or human acted on |
 | `actions[].disposition` | `integrated` (edited and committed) \| `recorded` (logged, no edit) \| `open-question` (carried verbatim into the PR body with its kind) |
-| `actions[].kind` | **only on an `open-question`, which must carry it:** `blocking` (a fork: the answer changes this PR's code) \| `follow-up` (work outside this PR) \| `remark` (a note on a choice already made); `blocking` when unsure. `record` refuses an open question without one and a `kind` on any other action; an open question written before kinds reads as `blocking` (`engine.md` §Open questions) |
+| `actions[].kind` | **only on an `open-question`, which must carry it:** `blocking` (a fork: the answer changes this PR's code) \| `follow-up` (work outside this PR) \| `remark` (a note on a choice already made); `blocking` when unsure. `record` refuses an open question without one and a `kind` on any other action; a stored open question without a kind reads as `blocking` (`shared/resolving.md` §Open questions) |
 | `actions[].note` | what was done, or why it was not |
-| `issue_links` | **`pr-review` entries only** — the closing-link reconciliation, one entry per related issue: `{"issue": 1926, "outcome": "closes" \| "stays-open" \| "dropped-but-closes"}` (`engine.md` §Closing links). Absent on a run with no linked issue |
-| `reviewed_sha` | **`pr-review` entries only** — the commit the review step reviewed, `git rev-parse HEAD`, 40 hex characters. Required on the entry a `review-pr` review step adds; never changed after (a resolve step that touches it halts). A later review of the PR is scoped to what changed since the newest `continued` one (`engine.md` §Scoped re-review) |
+| `issue_links` | **`pr-review` entries only** — the closing-link reconciliation, one entry per related issue: `{"issue": 1926, "outcome": "closes" \| "stays-open" \| "dropped-but-closes"}` (`steps/finish.md` §Closing links). Absent on a run with no linked issue |
+| `reviewed_sha` | **`pr-review` entries only** — the commit the review step reviewed, `git rev-parse HEAD`, 40 hex characters. Required on the entry a `review-pr` review step adds; never changed after (a resolve step that touches it halts). A later review of the PR is scoped to what changed since the newest `continued` one (`steps/review-pr-review.md` §Scoped re-review) |
 | `outcome` | `continued` \| `looped-back` \| `halted` \| `escalated` (only on `design-size`). **Absent on an open entry**: a review step writes the review without an outcome, and only the resolve step sets it |
 
 **A `verify-ui` entry is the thin shape**: `gate`, `cycle`, `at`, `outcome`, and nothing else —
@@ -97,26 +107,23 @@ load-bearing: it carries the `implement`↔`verify-ui` loop bound, and it is how
 `verify-ui` can never be recorded as run, so every later forward jump is refused.
 
 **A `design-size` entry** records a Bounded design growing to Architectural
-(`engine.md` §Design size): `gate`, `leg`, `at`, `reason` (the string `DesignSize->escalation()`
+(`steps/design.md` §Design size): `gate`, `leg`, `at`, `reason` (the string `DesignSize->escalation()`
 returned, or the judgement in a sentence) and `outcome: escalated`. It is not a loop-back and never
 counts toward a gate's cycle bound. It resets which gates count as run: `pipeline_done_legs()`
 ignores every gate pass older than it.
 
 **A plan gap** is a `plan-approval` entry written by a leg after `review-plan` on an Architectural
-design (`engine.md` §Design size): `gate`, `leg` (the leg that found the gap), `cycle`, `at`, `reason`
+design (`shared/plan-falls-short.md` §On an Architectural spec): `gate`, `leg` (the leg that found the gap), `cycle`, `at`, `reason`
 (what the plan lacks) and `outcome: looped-back`, **and nothing else**: no `review` and no `actions`,
 because nothing reviews it and no step completes it. The `design` step that answers it leaves it
 unchanged; what design did goes in the spec, the plan and the reason it returns, and a step that
 changes the entry halts the run (*What a leg writes*). Unlike an escalation it **is** a loop-back and
 counts toward `review-plan`'s bound; like one, it resets `pipeline_done_legs()`.
 
-**The loop bound is read from here, never from memory.** A review may drive a loop-back twice
-before the third must halt (`engine.md` §failure policy). Count **this gate's entries whose
-`outcome` is `looped-back`** — not its entries in total: a gate's history also holds halts and
-human-ordered re-reviews, and counting those turns a single real loop-back into the forbidden
-third cycle, halting for no reason. That count is the one place the ledger is *read* rather
-than appended to, and it does not violate the recomputable-fields rule above: it is a fact about
-history, not a cached derivation of current state.
+**The loop bound is read from here, never from memory.** Each loop-back is an entry with
+`outcome: looped-back`; the bound reads them (`gates.md` §Loop-backs). That count is the one place the
+ledger is *read* rather than appended to, and it does not violate the recomputable-fields rule above:
+it is a fact about history, not a cached derivation of current state.
 
 An `interactive` entry is the same shape with the human in the resolve step's place: `review` and
 `annotations` still recorded, `actions` holding what the human decided, and their decision as the
@@ -132,7 +139,7 @@ passes, with `last_sha`, `cycle`, `at`, `reviewed_sha`, `annotations` and `outco
 `record` runs the check below over that result and writes only when it holds; a refusal exits 1 with the
 manifest untouched and names what is wrong. A review goes in as a file (`<manifest stem>.review.md`), a
 resolve step's actions as `<manifest stem>.actions.json`. `suite` is the one key a step writes earlier,
-with `dispatch_cli.php suite` (`engine.md` §Suite reuse). The brief's `## Return` prints the step's
+with `dispatch_cli.php suite` (`shared/suite.md` §Suite reuse). The brief's `## Return` prints the step's
 commands, and `pipeline_record_table()` holds what each step passes. `handoff`'s write is made by its
 command, `dispatch_cli.php handoff` (`../checks/handoff.php`), through `record`'s own code: the same
 candidate, the same check, the same read-back.
@@ -146,7 +153,7 @@ its `gate`, `leg`, `cycle`, `at`, `review`, `annotations` and `reviewed_sha` as 
 when the status does not agree with the ledger. In `autoflow` the next `brief` (or, after the last
 step, `finish`) makes the same comparison against that step's snapshot, and also halts when the status,
 `ui` or `size` the step returned to the script disagrees with the manifest, its diff or the spec
-(`engine.md` §`autoflow`, *The check at the next boundary*). `run_audit.php` still reports after the
+(`machinery.md` §The check at the next boundary). `run_audit.php` still reports after the
 run whether the ledger agrees with what the steps reported.
 
 | `cursor.status` | Meaning |
@@ -154,7 +161,7 @@ run whether the ledger agrees with what the steps reported.
 | `continued` | the step did its work; a review step has appended one open entry |
 | `looped-back` | a resolve step or `verify-ui` sends the work back (`gates.md` §Loop-backs); its entry says so |
 | `halted` | a hard failure; `cursor.reason` says what |
-| `plan-insufficient` | the plan does not cover what the change needs. Bounded: a `design-size` entry with `outcome: escalated` is appended and the design grows. Architectural: a `plan-approval` entry with `outcome: looped-back` is appended and the run loops back to `design` within `review-plan`'s bound (`engine.md` §Design size). Never from a resolve step, which returns `looped-back` instead; a review step that returns it appends no review entry |
+| `plan-insufficient` | the plan does not cover what the change needs. Bounded: a `design-size` entry with `outcome: escalated` is appended and the design grows. Architectural: a `plan-approval` entry with `outcome: looped-back` is appended and the run loops back to `design` within `review-plan`'s bound (`shared/plan-falls-short.md`). Never from a resolve step, which returns `looped-back` instead; a review step that returns it appends no review entry |
 
 Keep this section in lock-step with `LegStatus` and `pipeline_leg_writable_keys()`; `LockStepTest`
 fails when they drift.
@@ -186,7 +193,7 @@ Rebuild the cursor by probing **durable state**, then feed the probes to
 | `pr` | `gh pr list --head <branch>` → PR number, else null |
 | `implemented` | PR marked ready / implementation commits present |
 | `uiNeeded` | `pipeline_triggers(<diff>)['ui']` over `git diff origin/<base>...HEAD` |
-| `verifyUi` | a `browser-verification` **record comment** is attached to the PR (text-only — the images live in the proof store, `engine.md` §The proof store) |
+| `verifyUi` | a `browser-verification` **record comment** is attached to the PR (text-only — the images live in the proof store, `proof-store.md` §Where a page lives) |
 | `prReviewed` | the `gate_ledger` holds a `pr-review` entry with `outcome: continued` |
 
 The resume order `manifest_infer_cursor` walks (mirrors `pipeline_legs()` plus `'done'`):
@@ -209,7 +216,7 @@ optimisation over this probing, never a prerequisite for it.
 
 **The issue pointer is recovered separately, and it does not move the cursor.** It is not a probe
 above and `manifest_infer_cursor` never sees it — the resume leg does not depend on it. Recover it
-the way `engine.md` §The work item resolves it in the first place: the PR's
+the way `session.md` §The work item resolves it in the first place: the PR's
 `closingIssuesReferences`, else the issue number in the branch name via the repo's `branch.issue`
 pattern. Recovering it matters for one leg only: `review-pr` cannot reconcile closing links for an
 issue it cannot name, and a reconstructed run that quietly finds none would report "no linked
@@ -220,11 +227,11 @@ none — and `review-pr` then reports the reconciliation as not performed rather
 no durable source — git and gh record *that* a review happened, not how many times the run
 looped back — and the plan↔review loop runs entirely **before** `handoff`, so there is not even a
 PR to have projected it onto. A reconstructed run therefore treats the count as **unknown**, not
-zero, and an unknown count permits **no** further loop-back: the next one halts (`engine.md`
-§failure policy). Record `"cycle": "unknown"` on the entry so the ledger says why. This is the sole exception to *a missing manifest is never fatal* —
+zero, and an unknown count permits **no** further loop-back: the next one halts (`gates.md`
+§Loop-backs). Record `"cycle": "unknown"` on the entry so the ledger says why. This is the sole exception to *a missing manifest is never fatal* —
 and it is the same instinct as the invariant check above: state that cannot be trusted is not
 guessed at, it is handed back.
 
-Because the whole run stays in **one worktree** (see `engine.md` §worktree), the manifest and
+Because the whole run stays in **one worktree** (see `session.md` §Kickoff), the manifest and
 its `lease` stay valid for the entire chain — there is no second worktree on the same branch
 for the lease to be blind to.

@@ -71,7 +71,7 @@ function pipeline_ledger(array $manifest): array
 }
 
 /**
- * The files of one run, beside its manifest (`../references/engine.md` §The loop): the brief, the dispatch
+ * The files of one run, beside its manifest (`../references/manifest.md` §The run's files): the brief, the dispatch
  * snapshot, the step's diff, a review step's review and a resolve step's actions.
  *
  * @return array{brief: string, before: string, diff: string, review: string, actions: string}
