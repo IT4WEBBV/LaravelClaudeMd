@@ -555,7 +555,7 @@ Several legs need the worktree's stack: `implement` runs the suite after each st
 `verify-ui` drives a real browser. **The `implement` step brings the stack up itself, first thing,
 without asking** (its brief says so; `verify-ui` does the same if it is down) (`restart.sh`;
 non-destructive) and leaves it running afterwards. Starting the stack is a routine owned action,
-never a "shall I start docker?" prompt. This is the house preference [[docker-stack-no-hesitation]]. If the stack
+never a "shall I start docker?" prompt. If the stack
 genuinely cannot start, that is a **hard failure** (below), not a reason to hesitate.
 
 *Worktree now, stack later:* creating the worktree is cheap (git); the stack starts lazily, only
