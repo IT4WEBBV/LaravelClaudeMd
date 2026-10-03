@@ -244,7 +244,7 @@ explicitly ask to be done by hand.
 - **Never commit directly to main**. Always create a feature branch and open a pull request when the work is done.
 - **Watch the PR you open.** Right after `gh pr create`, arm one background Bash (`run_in_background: true`,
   `timeout: 7200000`):
-  `until s=$(gh pr view <P> -R <repo> --json state --jq .state 2>/dev/null) && [ "$s" != OPEN ]; do sleep 60; done; echo "PR #<P> $s"`.
+  `until s=$(gh pr view <P> -R <repo> --json state --jq .state 2>/dev/null) && [ "$s" != OPEN ]; do sleep 300; done; echo "PR #<P> $s"`.
   It ends without that line at its time limit: arm it again. When it prints the state, run the teardown from the
   primary checkout, leaving the worktree first if you entered it (`ExitWorktree`, `keep`):
   `cd <primary checkout> && python3 ~/.claude/skills/orchestrate/teardown.py <checkout> <P> --repo <repo>`;
