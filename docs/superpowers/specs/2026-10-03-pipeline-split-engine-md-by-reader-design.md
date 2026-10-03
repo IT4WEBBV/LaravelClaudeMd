@@ -268,7 +268,7 @@ stay, worded as behaviour: a manifest with `light: true` and no `tier` reads as 
 
 - `pipeline_brief_role()`: the paragraph names the references directory instead of `engine.md`:
   *"The references this brief names are in `~/.claude/skills/pipeline/references/`; read your step's,
-  `steps/<file>.md`, first."*
+  `steps/<file>.md`, first, and the `shared/` files its `Read also` line names."*
 - A pointer line in `## Pointers`: `- your step's reference: \`<absolute path>\``, from a new
   `pipeline_step_reference(string $leg, string $step): string` that maps every `<leg>:<step>` of both
   modes (`design:run`, `design:spec` and `design:plan` → `steps/design.md`; `review-pr:resolve` →

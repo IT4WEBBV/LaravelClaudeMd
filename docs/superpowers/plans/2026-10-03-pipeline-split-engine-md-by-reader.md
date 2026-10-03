@@ -47,7 +47,8 @@ this plan assumed (citation format, the references directory, `DECISIONS.md` and
   addresses only its step's agent (and, in `interactive`, the session acting as `design` or a resolve step), plus
   at most one line on where its work goes next. A shared file's second line is `Read by: ` and the step files that
   read it; a step file's second line is `Read also: ` and the shared files it reads, each in backticks. Both are
-  checked against each other (Task 3).
+  checked against each other (Task 3). Each is one line, however long: never wrap it, since the tests read it with
+  `preg_match('/^Read also: (.+)$/m')` and a wrapped line fails with a message that does not say why.
 - **`DECISIONS.md` entries:** `## #<n> — <title>`, newest issue first; an entry for history with no issue is keyed
   `## PR #<n> — <title>` or `## <YYYY-MM-DD> — <title>`, and sits after the issue entries, newest first. Each says
   what was decided, the measurement when there is one, and what it replaced. Find the issue, PR or date of an unlabeled
@@ -59,7 +60,8 @@ this plan assumed (citation format, the references directory, `DECISIONS.md` and
 ## Review Focus
 
 1. **A rule that landed in two files, or in none.** The mapping table below is the checklist: every `E` range has
-   one destination. Task 7's Step 1 diffs the old file against the new ones by sentence before `engine.md` goes.
+   one destination. Task 7's Step 1 diffs the old file against the new ones by sentence, with a script, before
+   `engine.md` goes; every sentence it lists is a permitted change or a listed drop, and its count is in the PR body.
 2. **A wrapped section reference** (`§Who takes the PR out of` / `draft` across a line break): `DocLinksTest`
    collapses whitespace before it compares, so it must pass on a wrapped reference and fail on a wrong one. Pinned by
    its own fixture test in Task 7.
@@ -225,10 +227,15 @@ Every `E` range has one home. "→ D" means `DECISIONS.md`; "pointer" means the 
 
 - [ ] **Step 1:** Write the body to `$TMPDIR/m128.md`: the spec's `## Measurement (issue step 1)` section, from its
   *Method* paragraph through *What the numbers decide*, verbatim, under a first line
-  `Measurement for step 1 (from the design spec docs/superpowers/specs/2026-10-03-pipeline-split-engine-md-by-reader-design.md):`.
+  `Measurement for step 1 (from the design spec docs/superpowers/specs/2026-10-03-pipeline-split-engine-md-by-reader-design.md):`
+  and, before the measurement, one paragraph that leads with the outcome: "By the issue's own test the token saving
+  is small (up to 7k tokens of `engine.md` a step, at most 7% of its peak context), so on tokens alone steps 2 and 3
+  are not worth their cost. The split goes ahead on the maintenance grounds of the two scope comments (one rule in
+  one place, history out of rule text, a map); stopping it here costs one sentence."
   Impersonal: no greeting, no second person, no question.
 - [ ] **Step 2:** `gh issue comment 128 --body-file "$TMPDIR/m128.md"`.
-- [ ] **Step 3:** `gh issue view 128 --json comments --jq '.comments[-1].body' | head -3` prints that first line.
+- [ ] **Step 3:** `gh issue view 128 --json comments --jq '.comments[-1].body' | head -3` prints that first line and
+  the start of the outcome paragraph.
 
 ### Task 2: The shared rule files and `DECISIONS.md`
 
@@ -508,7 +515,9 @@ it('keeps work-on out of the session\'s CI gate and out of SKILL.md', function (
     it a workflow agent; the verdicts → `` `machinery.md` §The CI gate ``. §Open questions: the kinds table's *When it
     reaches the owner* column (meanings → `` `shared/resolving.md` §Open questions ``), E1603–1636. §The report:
     E211–233's commands and what each prints (S161–163's follow-ups and the merge watch belong to §`autoflow` step
-    6: one place), and S50–52 (the run status line). §Failure policy: E1640–1733; E1686–1712 keeps the before- and
+    6: one place), and S50–52 (the run status line), its "the repo's README §Status line" written
+    `` `README.md` §Status line `` (a non-pipeline doc, which `DocLinksTest` skips; a bare `§` would be read as a
+    heading of `session.md`). §Failure policy: E1640–1733; E1686–1712 keeps the before- and
     after-`handoff` duties and the entry note, the bound itself → `` `gates.md` §Loop-backs ``; E1735–1738 dropped.
     §Navigation: E1740–1748.
   - `machinery.md` opens: "How the code enforces a run, for whoever changes it. Rule text the steps and the session
@@ -597,7 +606,7 @@ it('names its step\'s reference, a file that exists, in every brief of both mode
 
             expect("{$references}/{$file}")->toBeFile();
             expect(pipeline_brief_role($manifest, $leg, $step))
-                ->toContain("The references this brief names are in `{$references}/`; read your step's, `{$file}`, first.")
+                ->toContain("The references this brief names are in `{$references}/`; read your step's, `{$file}`, first, and the `shared/` files its `Read also` line names.")
                 ->not->toContain('engine.md');
             expect(pipeline_brief_pointers($manifest, '/tmp/m.json', $leg, $step))
                 ->toContain("- your step's reference: `{$references}/{$file}`");
@@ -652,7 +661,7 @@ function pipeline_step_reference(string $leg, string $step): string
 ```
 
   - `pipeline_brief_role()`'s last sentence becomes
-    `'The references this brief names are in `' . pipeline_references_dir() . "/`; read your step's, `" . pipeline_step_reference($leg, $step) . '`, first.'`;
+    `'The references this brief names are in `' . pipeline_references_dir() . "/`; read your step's, `" . pipeline_step_reference($leg, $step) . '`, first, and the `shared/` files its `Read also` line names.'`;
   - `pipeline_brief_pointers()`: after the manifest line, `$lines[] = "- your step's reference: `" . pipeline_references_dir() . '/' . pipeline_step_reference($leg, $step) . '`';`;
   - every citation, by this table (the rest of each line unchanged):
 
@@ -795,8 +804,15 @@ stateDiagram-v2
   `hooks/git-freshness.sh`, `skills/orchestrate/SKILL.md`, `skills/orchestrate/references/commands.md`,
   `skills/browser-verification/SKILL.md`, `skills/slots/SKILL.md`, `skills/orchestrate/tests/teardown_test.sh`
 
-- [ ] **Step 1: Check the move is complete.** For each row of the mapping table, open the destination and confirm the
-  `E` range's rules are there (or are a pointer, or are in `DECISIONS.md`). A rule found nowhere goes to its home now.
+- [ ] **Step 1: Check the move is complete, by script.** Write a throwaway script outside the repo (`$TMPDIR`, not
+  committed, like the spec's measurement script) that splits `git show 93b6663:skills/pipeline/references/engine.md`
+  into sentences (whitespace collapsed, Markdown table rows as one sentence each, headings and blank lines skipped)
+  and prints each sentence not found verbatim, whitespace collapsed, in the union of `skills/pipeline/SKILL.md`,
+  `skills/pipeline/DECISIONS.md` and `skills/pipeline/references/**/*.md`. Every sentence it lists must be one of the
+  four permitted changes (pointer rewrite, restated rule, history moved to `DECISIONS.md` in other words, a rationale
+  cut to one line) or a drop the mapping table names; a rule found nowhere goes to its home now, and the script runs
+  again until each remaining line has its reason. Keep the final count of listed sentences and their split by reason
+  for the PR body (Task 8 Step 6).
 
 - [ ] **Step 2: The failing test.** Create `skills/pipeline/checks/tests/DocLinksTest.php`:
 
@@ -854,8 +870,8 @@ function doc_links_problems(string $file, string $text): array
         }
     }
     if (str_contains($file, '/skills/pipeline/') && str_ends_with($file, '.md')) {
-        $bare = (string) preg_replace('/`?(?:[\w~.-]+\/)*[\w.-]+\.md`?\s+§[^,):;]+/u', '', $text);
-        preg_match_all('/(?:^|[^\w`.\-\s])\s*§([^,):;]+)/mu', $bare, $names);
+        $bare = (string) preg_replace(['/`?(?:[\w~.-]+\/)*[\w.-]+\.md`?\s+§[^,):;]+/u', '/`§`/u'], '', $text);
+        preg_match_all('/§([^,):;]+)/u', $bare, $names);
         foreach ($names[1] as $name) {
             if (! doc_links_names_heading($name, doc_links_headings($file))) {
                 $problems[] = '§' . trim(strtok($name, "\n"));
@@ -887,6 +903,8 @@ it('resolves a wrapped reference and refuses a wrong one', function () {
 
     expect(doc_links_problems($file, "see (`gates.md` §Navigation\nguardrail) and `shared/suite.md` §Suite reuse"))->toBe([]);
     expect(doc_links_problems($file, '(`gates.md` §Nowhere) and (§Elsewhere)'))->toBe(['gates.md §Nowhere', '§Elsewhere']);
+    expect(doc_links_problems($file, 'as §Nowhere, says'))->toBe(['§Nowhere']);
+    expect(doc_links_problems($file, 'the `§` sign and `README.md` §Status line'))->toBe([]);
     expect(doc_links_problems('/x/skills/orchestrate/SKILL.md', '`SKILL.md` §Anything'))->toBe([]);
     expect(doc_links_problems('/x/skills/orchestrate/SKILL.md', 'pipeline `references/session.md` §Nowhere'))->toBe(['references/session.md §Nowhere']);
 });
@@ -909,7 +927,10 @@ it('leaves no engine.md outside docs/ and DECISIONS.md', function () {
 - [ ] **Step 3:** Run `--filter DocLinksTest`. Expected: FAIL — the fixture test passes; the scan lists the
   `engine.md` references (the 60-odd doc comments, `gates.md`, `manifest.md`, orchestrate, README, CLAUDE.md, …) and
   today's broken ones (`manifest.md` §reconstruction, §failure policy, §worktree; `record.php` §content triggers;
-  `dispatch.php` §gate_ledger, `gates.md` §Modes); the last test lists the files naming `engine.md`.
+  `dispatch.php` §gate_ledger, `gates.md` §Modes); the last test lists the files naming `engine.md`. The bare scan
+  matches every `§` left once the file-qualified references are stripped, a word-preceded one (`as §The CI gate
+  says`) included: that form is the one most likely to dangle after a paragraph moves, so a bare `§` whose heading
+  now sits in another file gets that file's name.
 
 - [ ] **Step 4: `gates.md`** (spec *`gates.md` and `manifest.md`*):
   - §Modes (G11–38) is removed; the intro's "mode-driven station gates" sentence points at `` `session.md` §Modes ``;
@@ -1034,3 +1055,11 @@ it('keeps history out of the rule text: SKILL.md and every reference', function 
   "no longer", "the earlier", "as it did before", "once existed"): reword as behaviour, history to `DECISIONS.md`.
 - [ ] **Step 4:** Run the full suite. Expected: PASS.
 - [ ] **Step 5:** Commit `DocLinksTest.php`, `DECISIONS.md` and the references changed: `test(pipeline): history stays out of rule text (#128)`.
+- [ ] **Step 6: The PR body.** Append a `## Notes for review` section to the PR body the way a halt reason is added
+  (`gh pr view <pr> --json body --jq .body` into a file, append, `gh pr edit <pr> --body-file`; never blanking it),
+  impersonal, three items: first, the issue's token test failed (up to 7k tokens of `engine.md` a step, at most 7% of
+  peak context) and the split rests on the maintenance grounds of the scope comments, so stopping it costs one
+  sentence; second, Task 7 Step 1's sentence-diff count and its split by reason; third, what the history guard pins
+  (four phrasings: `Why (#`, a line starting `Why:`, `before #<n>`, `when this lands`) and what Step 3's read covered
+  beyond it (parenthetical history, case narratives, measurements, "used to / previously / no longer / once
+  existed").
