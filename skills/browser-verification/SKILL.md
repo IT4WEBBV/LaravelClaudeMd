@@ -148,11 +148,40 @@ rm -rf ~/Library/Caches/ms-playwright/mcp-chrome-*
 
 ## When a click does nothing
 
-On TALL-stack apps a `browser_click` on a TallDataTable row action (`x-on:click="$wire.call(...)"`)
-or on a Flux modal button (`wire:click`) can report success while the handler never fires: no
-console error, the element visible and on top. The cause is still open (#165). Don't conclude the
-feature is broken. First click an **untouched** action on the same row: if that fails too, it is the
-harness, not your change. Then drive the component directly:
+**What is known.** `browser_click` on a TallDataTable row action
+(`<button x-on:click="$wire.call(...)">`) fires its handler, and so does a plain Playwright
+`page.click` (probed 2026-10-03 on TallDataTable 4.4, Livewire 4.2, Playwright MCP 0.0.83, #165).
+Before TallDataTable 4.2 row actions are `<div>`s, not buttons, and ViewieMedia's fork renders
+`<span>`s; that markup is not covered. The dead clicks first reported were on ViewieMedia and on a
+Flux modal `wire:click` button; neither is reproduced. A click that seems to do nothing is a
+question to answer, not a harness fact to work around.
+
+**Did the click reach the server?** The snapshot `browser_click` returns can be taken before a
+Livewire round trip lands, so it is not the verdict. Before clicking, run `browser_network_requests`
+with `filter: "livewire"`, `static: false` and note the last number: the list holds every request
+since the page loaded, earlier Livewire POSTs included. After the click, run it again: only a POST
+numbered higher is the click's. `browser_network_request` with that `index` and
+`part: "request-body"` showing the expected method (`"method":"showModal"`) means the handler fired:
+`browser_wait_for` the text the result shows (the modal's heading, the new row) and snapshot again.
+
+**No request: look at the target.** Run `browser_evaluate` with the clicked element's ref as
+`target`:
+
+```javascript
+(element) => {
+  element.scrollIntoView({ block: 'center' });
+  const rect = element.getBoundingClientRect();
+  const onTop = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  return { clicked: element.outerHTML.slice(0, 300), onTop: onTop?.outerHTML.slice(0, 300) };
+}
+```
+
+Is the handler on the element that was clicked or on a wrapper, is it a `<span>` or `<div>` rather
+than a `<button>`, does something else sit on top (a backdrop, a `pointer-events` wrapper)? Then
+click an **untouched** action on the same row: if that one is dead too, it is the page or the
+harness, not your change.
+
+**Only then drive the component.** When no Livewire request went out after the click:
 
 ```javascript
 const root = [...document.querySelectorAll('[wire\\:id]')]
@@ -164,8 +193,8 @@ await component.call('duplicate', '106');                 // what the modal's bu
 
 This runs the real component method and database, only the click is skipped. Prove the result
 with a before/after database count, not by reading the rendered table, and say in the proof that
-the click was bypassed. Custom selects that ignore scripted clicks get their value through
-`$wire.set(...)` the same way.
+the click was bypassed and that no Livewire request went out after it. Custom selects that ignore
+scripted clicks get their value through `$wire.set(...)` the same way.
 
 ## Red Flags — STOP
 
@@ -179,6 +208,7 @@ the click was bypassed. Custom selects that ignore scripted clicks get their val
 - "The user can check it if they want"
 - Pasting screenshot in terminal instead of visual companion because "the companion isn't running"
 - Treating the visual companion as optional "presentation infrastructure"
+- Bypassing a click with `Livewire.find` before checking whether a Livewire request went out
 
 ## Rationalization Prevention
 
