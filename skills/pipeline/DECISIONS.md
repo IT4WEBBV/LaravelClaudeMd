@@ -58,6 +58,12 @@ halt in the next. Decided: code decides whether a writing step merges (`pipeline
 with a plain `git merge`, and the finish step's merge gets its own review round at the CI gate. Replaced: halting on
 "behind".
 
+## #116 — three agent tiers picked by an explicit word
+
+The manifest's `tier` (`medium` or `light`) replaced the single `light: true` flag. A manifest with the legacy
+`light: true` and no `tier` reads as `medium`, which is the permit and the agents `light` gave before the tiers
+existed; nothing writes `light`.
+
 ## #113 — `review-plan:review`'s plan gap reaches `design`
 
 `design:plan` after a `review-plan` loop-back got no plan-gap line. Decided: `review-plan:review`'s own

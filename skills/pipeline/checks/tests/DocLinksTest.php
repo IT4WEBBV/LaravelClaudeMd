@@ -103,3 +103,15 @@ it('leaves no engine.md outside docs/ and DECISIONS.md', function () {
     expect($files)->toBe([]);
     expect("{$root}/skills/pipeline/references/engine.md")->not->toBeFile();
 });
+
+it('keeps history out of the rule text: SKILL.md and every reference', function () {
+    $skill = realpath(__DIR__ . '/../..');
+    foreach (["{$skill}/SKILL.md", ...glob("{$skill}/references/{,steps/,shared/}*.md", GLOB_BRACE)] as $path) {
+        $text = (string) file_get_contents($path);
+        $name = substr($path, strlen("{$skill}/"));
+
+        expect($text)->not->toContain('Why (#', $name)->not->toContain('when this lands', $name);
+        expect(preg_match('/^Why:/m', $text))->toBe(0, "{$name} has a line starting Why:");
+        expect(preg_match('/\bbefore #\d/i', $text))->toBe(0, "{$name} says before #<n>");
+    }
+});
