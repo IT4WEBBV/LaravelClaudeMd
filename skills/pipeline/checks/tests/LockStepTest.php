@@ -85,8 +85,8 @@ it('keeps every model and effort out of the autoflow script, which takes them fr
     }
 });
 
-it('keeps engine.md\'s agents table in lock-step with pipeline_agent_table()', function () {
-    $section = lockstep_section('engine.md', 'Agents per step');
+it('keeps machinery.md\'s agents table in lock-step with pipeline_agent_table()', function () {
+    $section = lockstep_section('machinery.md', 'Agents per step');
     $table = pipeline_agent_table([]);
     $cell = fn (array $entry) => "{$entry['model']} {$entry['effort']}";
     $same = fn (array $entry) => implode(' | ', array_fill(0, count(AgentTier::cases()), $cell($entry)));
@@ -107,8 +107,8 @@ it('keeps engine.md\'s agents table in lock-step with pipeline_agent_table()', f
     }
 });
 
-it('keeps engine.md\'s repo config section in lock-step with the keys the parsers read', function () {
-    $section = lockstep_section('engine.md', 'The repo config');
+it('keeps session.md\'s repo config section in lock-step with the keys the parsers read', function () {
+    $section = lockstep_section('session.md', 'The repo config');
 
     foreach ([...PIPELINE_CHECK_KEYS, ...PIPELINE_BOARD_KEYS, ...PIPELINE_BOARD_OPTIONAL_KEYS] as $key) {
         expect($section)->toContain("`{$key}`");
@@ -154,25 +154,21 @@ it('has every step file read exactly the shared files that name it', function ()
     }
 });
 
-it('keeps work-on out of the sections that describe a step', function () {
-    foreach (['Stations', 'Implement', 'Dev-stack readiness', 'Who takes the PR out of draft', 'The CI gate'] as $heading) {
-        expect(lockstep_section('engine.md', $heading))->not->toContain('`work-on`', "engine.md §{$heading} names `work-on`");
+it('keeps work-on out of the session\'s CI gate and out of SKILL.md', function () {
+    expect(lockstep_section('session.md', 'The CI gate'))->not->toContain('`work-on`');
+    foreach (glob(__DIR__ . '/../../references/{,steps/,shared/}*.md', GLOB_BRACE) as $path) {
+        expect((string) file_get_contents($path))->not->toContain('`work-on`\'s', basename($path));
     }
-    expect((string) file_get_contents(__DIR__ . '/../../references/engine.md'))->not->toContain('`work-on`\'s');
     expect((string) file_get_contents(__DIR__ . '/../../SKILL.md'))->not->toContain('`work-on`');
 });
 
-it('keeps engine.md §The proof store in lock-step with the fields the store files and checks', function () {
-    $section = lockstep_section('engine.md', 'The proof store');
+it('keeps proof-store.md in lock-step with the statuses, the seen key and who files a page', function () {
+    $statuses = lockstep_section('proof-store.md', 'Statuses');
 
-    foreach (['clientSummary', 'explainer', 'worktree', 'base', 'state', ...PROOF_STORE_KEYS, ...array_column(ProofShotState::cases(), 'value'), ...array_column(QuestionKind::cases(), 'value')] as $field) {
-        expect($section)->toContain("`{$field}`");
-    }
-    expect($section)->toContain('at most ' . PROOF_SUMMARY_MAX . ' characters');
-    expect($section)->toContain('`handoff` files');
     foreach (ProofRunStatus::cases() as $status) {
-        expect($section)->toContain("`{$status->value}`");
+        expect($statuses)->toContain("`{$status->value}`");
     }
-    expect($section)->toContain('proof_cli.php status <page>');
-    expect($section)->toContain('`seen:<repo>/<run>`');
+    expect($statuses)->toContain('proof_cli.php status <page>');
+    expect(lockstep_section('proof-store.md', 'The index'))->toContain('`seen:<repo>/<run>`');
+    expect(lockstep_section('proof-store.md', 'Where a page lives'))->toContain('`handoff` files');
 });
