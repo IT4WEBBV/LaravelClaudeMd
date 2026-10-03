@@ -1410,7 +1410,7 @@ it('prints the catch-up line first in the brief of a writing step behind its bas
 
         return $dir;
     };
-    $line = fn (string $dir) => "## Overrides\n\n- Catch up with the base first (engine.md §Catching up with the base): `origin/main` is 1 commit ahead and changed files this branch changes too (`shared.php`). Before any other work run `git -C {$dir} merge --no-edit origin/main`, as its own command in exactly that form.";
+    $line = fn (string $dir) => "## Overrides\n\n- Catch up with the base first (engine.md §Catching up with the base): `origin/main` is 1 commit ahead and changed files this branch changes too (`shared.php`). Before any other work run `cd {$dir} && git merge --no-edit origin/main`, as its own command in exactly that form.";
 
     $dir = $behind();
     $flow = dispatch_fixture(['mode' => 'autoflow', 'worktree' => $dir, 'cursor' => ['leg' => 'implement', 'status' => 'pending']]);

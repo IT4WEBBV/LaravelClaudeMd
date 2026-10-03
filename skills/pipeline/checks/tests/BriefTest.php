@@ -470,7 +470,7 @@ function brief_git_behind(array $files = ['a.php', 'b.php'], string $behind = '2
 it('puts the catch-up line first on every step that writes to the branch, with the merge command in its literal form', function (string $mode, string $leg, string $step) {
     $brief = pipeline_brief(brief_manifest($leg, ['mode' => $mode]), $leg, '/tmp/m.json', $step, brief_git_behind());
 
-    expect($brief)->toContain("## Overrides\n\n- Catch up with the base first (engine.md §Catching up with the base): `origin/main` is 27 commits ahead and changed files this branch changes too (`a.php`, `b.php`). Before any other work run `git -C /tmp/wt merge --no-edit origin/main`, as its own command in exactly that form. On a conflict, resolve each file keeping both sides' intent, `git -C /tmp/wt add <file>`, and conclude with `git -C /tmp/wt commit --no-edit`. Only where both sides cannot be kept: `git -C /tmp/wt merge --abort` and return `halted`, quoting the conflicting hunks. Never rebase, never force-push. A denied command is a halt naming it; do not reshape it. Record the merge as that section says.\n- ");
+    expect($brief)->toContain("## Overrides\n\n- Catch up with the base first (engine.md §Catching up with the base): `origin/main` is 27 commits ahead and changed files this branch changes too (`a.php`, `b.php`). Before any other work run `cd /tmp/wt && git merge --no-edit origin/main`, as its own command in exactly that form. On a conflict, resolve each file keeping both sides' intent, `cd /tmp/wt && git add <file>`, and conclude with `cd /tmp/wt && git commit --no-edit`. Only where both sides cannot be kept: `cd /tmp/wt && git merge --abort` and return `halted`, quoting the conflicting hunks. Never rebase, never force-push. A denied command is a halt naming it; do not reshape it. Record the merge as that section says.\n- ");
 })->with([
     'design run' => ['interactive', 'design', 'run'],
     'design spec' => ['autoflow', 'design', 'spec'],
@@ -493,21 +493,40 @@ it('words the design-only case and a single commit', function () {
     $manifest = ['worktree' => '/tmp/wt/'];
 
     expect(pipeline_catch_up_line($manifest, ['base' => 'origin/feature/integration', 'behind' => 1, 'shared' => []]))
-        ->toStartWith('Catch up with the base first (engine.md §Catching up with the base): `origin/feature/integration` is 1 commit ahead and this branch holds only its design. Before any other work run `git -C /tmp/wt merge --no-edit origin/feature/integration`, as its own command in exactly that form.');
+        ->toStartWith('Catch up with the base first (engine.md §Catching up with the base): `origin/feature/integration` is 1 commit ahead and this branch holds only its design. Before any other work run `cd /tmp/wt && git merge --no-edit origin/feature/integration`, as its own command in exactly that form.');
     expect(pipeline_brief(brief_manifest('design', ['mode' => 'autoflow']), 'design', '/tmp/m.json', 'spec', brief_git_behind(['docs/spec.md'])))
         ->toContain('is 27 commits ahead and this branch holds only its design.');
 });
 
 it('has handoff run its command and not the skill, in both modes', function (string $mode) {
-    $command = 'php ' . realpath(__DIR__ . '/..') . '/dispatch_cli.php handoff /tmp/m.json';
+    $command = 'cd ' . realpath(__DIR__ . '/..') . ' && php dispatch_cli.php handoff /tmp/m.json';
 
     expect(pipeline_brief(brief_manifest('handoff', ['mode' => $mode]), 'handoff', '/tmp/m.json', 'run'))
         ->toContain("- Run `{$command}` as its own command: it pushes the branch, opens the draft PR or adopts the one the branch has, and records this step. It is the whole step (engine.md §Stations).")
+        ->toContain("the dispatcher's snapshot).\n\n- `{$command}` (records `continued`, or `halted` with its reason)\n")
         ->toContain('- The leg\'s name is not a skill to invoke: do not invoke the `handoff` skill (`/handoff`), which asks the owner a question and posts a prompt comment.')
         ->toContain('- Repair nothing it reports: no force-push, no `gh pr create` or `gh pr edit` by hand. A halt it recorded, a refusal, or a denied command is a halt with that reason.')
         ->not->toContain('handoff pr')
         ->not->toContain('--pr <number>');
 })->with(['autoflow', 'interactive']);
+
+it('prints no ruled command in the form whose allow rule needs a wildcard before the subcommand', function () {
+    $briefs = array_map(
+        fn (array $step) => pipeline_brief(brief_manifest($step[1], ['mode' => $step[0]]), $step[1], '/tmp/m.json', $step[2], brief_git_behind()),
+        brief_steps(),
+    );
+
+    foreach ($briefs as $brief) {
+        expect($brief)
+            ->not->toContain('git -C /tmp/wt merge')
+            ->not->toContain('git -C /tmp/wt add')
+            ->not->toContain('git -C /tmp/wt commit')
+            ->not->toContain('/dispatch_cli.php handoff');
+    }
+    expect(implode("\n", $briefs))
+        ->toContain('`cd /tmp/wt && git merge --no-edit origin/main`')
+        ->toContain('`cd ' . realpath(__DIR__ . '/..') . ' && php dispatch_cli.php handoff /tmp/m.json`');
+});
 
 /** @return list<array{0: string, 1: string, 2: string}> every step of both modes as `[mode, leg, step]` */
 function brief_steps(): array
@@ -536,7 +555,7 @@ it('ends every brief of both modes on the literal record command, one line per s
         expect($return)
             ->toContain($own === null
                 ? "- `{$command} {$leg} {$step} --status continued"
-                : '- `php ' . realpath(__DIR__ . '/..') . "/dispatch_cli.php {$own} {$path}` (records `continued`, or `halted` with its reason)")
+                : '- `cd ' . realpath(__DIR__ . '/..') . " && php dispatch_cli.php {$own} {$path}` (records `continued`, or `halted` with its reason)")
             ->toContain('- `… --status halted --reason "<why>"`')
             ->toContain('`feature-x.before.json` beside it is the dispatcher\'s snapshot')
             ->toContain('never find it by a glob')
@@ -550,11 +569,12 @@ it('ends every brief of both modes on the literal record command, one line per s
 
 it('prints the return of a handoff step as its command, then record for the statuses it does not write', function () {
     $cli = 'php ' . realpath(__DIR__ . '/..') . '/dispatch_cli.php';
+    $step = 'cd ' . realpath(__DIR__ . '/..') . ' && php dispatch_cli.php';
 
     expect(pipeline_brief_return('handoff', 'run', 'autoflow', '/tmp/m.json'))->toBe(
         "## Return\n\n"
         . "Your last act is the `handoff` command, or one `record` command for a status it does not write; only a read-only command your instructions name (`size`, `ui`) comes after it. They are the only way you write the manifest: do not edit the file, and never find it by a glob (`m.before.json` beside it is the dispatcher's snapshot).\n\n"
-        . "- `{$cli} handoff /tmp/m.json` (records `continued`, or `halted` with its reason)\n"
+        . "- `{$step} handoff /tmp/m.json` (records `continued`, or `halted` with its reason)\n"
         . "- `{$cli} record /tmp/m.json handoff run --status plan-insufficient --reason \"<what the plan lacks>\"`\n"
         . "- `… --status halted --reason \"<why>\"`\n\n"
         . 'Write a `--reason` without double quotes. '
@@ -606,7 +626,7 @@ it('says what each step passes to record, and describes no JSON', function () {
         ->toContain("- Run the suite unless engine.md §Suite reuse finds this tree green, and record the run: `{$suite}`.")
         ->toContain('- Reconcile the closing links (engine.md §Closing links): each related issue\'s outcome goes to `record` as an `--issue-link`.');
     expect($brief('autoflow', 'handoff', 'run'))
-        ->toContain('- Run `php ' . realpath(__DIR__ . '/..') . "/dispatch_cli.php handoff {$path}` as its own command:");
+        ->toContain('- Run `cd ' . realpath(__DIR__ . '/..') . " && php dispatch_cli.php handoff {$path}` as its own command:");
     expect($brief('autoflow', 'verify-ui', 'run'))
         ->toContain('- Write the proof page (engine.md §The proof store): `clientSummary` and `explainer` (a first version), and a `state` on every shot; before shots only when the spec names a before state to show, captured on the base, each immediately followed in `shots` by its after shot; `git switch <branch>` before any after shot and before returning, whatever the status, and `git rev-parse --abbrev-ref HEAD` names the branch before the page is written; a defect found is shot as `defect`, and a later pass carries the earlier defect shots forward beside its own. `repo`, `branch` and `pr` are the ones in the `run.json` beside `artifacts.proof`.')
         ->toContain('- Post the text-only record comment; the path `write` printed goes to `record` as `--proof`.')
